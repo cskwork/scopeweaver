@@ -117,8 +117,8 @@ docker compose up -d --build  # scopeweaver 이미지를 로컬에서 빌드 + p
 # → http://localhost:8787
 ```
 
-> 아직 공개된 `scopeweaver` 이미지가 없습니다. 기본 compose 파일은 이 소스에서 **이미지를 로컬로
-> 빌드**합니다. 나중에 공개 이미지가 생기면 compose에서 해당 이미지를 명시적으로 지정해야 합니다.
+> 기본 compose 파일은 이 소스에서 **이미지를 로컬로 빌드**합니다.
+> `ghcr.io/cskwork/scopeweaver`의 공개 릴리스 이미지를 사용하려면 compose에서 버전을 명시적으로 지정하세요.
 
 이미지에는 자주 쓰는 도구(ripgrep/curl/vim/npm/nmap…)가 들어 있으며, `./skills`와 `./data`는
 bind mount로 유지됩니다.
@@ -130,10 +130,12 @@ JSON-RPC 요청을 받습니다. 설정 시 URL은 `/sse`로, 헤더는 `Authori
 
 ### 방법 3: 사전 빌드 바이너리 내려받기 (Releases)
 
-> 이 저장소에는 아직 바이너리 릴리스가 공개되지 않았습니다. 그때까지는 방법 1, 2, 4를 사용하세요.
-> 릴리스가 생기면 각 플랫폼의 아카이브는 `scopeweaver-<version>-<os>-<arch>.zip`이며, 풀면
+> [Releases](https://github.com/cskwork/scopeweaver/releases)에서 플랫폼 아카이브를 내려받으세요.
+> 각 플랫폼의 아카이브는 `scopeweaver-<version>-<os>-<arch>.zip`이며, 풀면
 > `scopeweaver` + `start.sh`(Windows는 `start.bat`) + `skills/` + `config.example.json`이
 > 나옵니다.
+
+아카이브에는 `adapters/agent/`도 포함됩니다. [에이전트 설정 안내](docs/ko/agent-adapter.md)를 참고하세요.
 
 ```bash
 cp config.example.json config.json   # 데이터베이스 연결 정보 입력
@@ -248,7 +250,7 @@ docker image prune -f          # 오래된 이미지 정리 (선택)
 
 ### 방법 4: 사전 빌드 바이너리 (Releases)
 
-릴리스가 생기면 새 `scopeweaver-<version>-<os>-<arch>.zip`을 내려받아 옛 프로세스를 멈추고,
+새 `scopeweaver-<version>-<os>-<arch>.zip`을 내려받아 옛 프로세스를 멈추고,
 `scopeweaver`와 `skills/`를 덮어쓴 뒤(`config.json`과 `data/`는 유지) 재시작합니다.
 
 ```bash
@@ -562,9 +564,9 @@ ScopeWeaver는 [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)의 업스�
   `scopeweaver-<version>-<os>-<arch>.zip`, 저장소는 `https://github.com/cskwork/scopeweaver`,
   컨테이너 이미지는 이 저장소의 GHCR을 대상으로 합니다. 업스트림의 Docker Hub
   이미지(`autumn27/artex`)는 쓰지 않습니다.
-- **아직 공개된 산출물 없음**: 작성 시점에 이 저장소에는 바이너리 릴리스나 컨테이너 이미지가 공개돼
-  있지 않습니다. 문서도 이를 반영합니다 — Docker Compose는 소스에서 이미지를 로컬로 빌드하고,
-  관리자가 버전 태그를 푸시하면 릴리스 워크플로가 실행됩니다.
+- **ScopeWeaver 릴리스 이력**: 독립 릴리스는 `v0.1.0`부터 시작하며
+  [log/](log/changelog-v0.1.0.md)에 변경 사항을 기록합니다. 버전 태그는 플랫폼 아카이브와 컨테이너 빌드를 실행합니다.
+  Docker Compose는 공개 이미지를 명시적으로 지정하지 않으면 로컬에서 빌드합니다.
 
 [CHANGELOG.ko.md](CHANGELOG.ko.md)의 변경 이력 번역은 **업스트림 ARTEX** 프로젝트의 역사를 충실히
 서술하며, 그 변경들을 ScopeWeaver의 것으로 돌리지 않습니다.
