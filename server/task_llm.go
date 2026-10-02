@@ -118,7 +118,7 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 		return taskLLMSelection{}, err
 	}
 	if pt == nil {
-		return taskLLMSelection{}, fmt.Errorf("task %s not found", r.taskID)
+		return taskLLMSelection{}, locale.Errorf("task %s not found", r.taskID)
 	}
 	r.s.syncTaskLLMState(pt)
 	t, _ := r.s.m.Task(r.taskID)
@@ -129,19 +129,19 @@ func (r *taskLLMRuntime) current() (taskLLMSelection, error) {
 	}
 	if len(pt.LLMProfileIDs) > 0 {
 		if pt.ActiveLLMProfileID == nil {
-			return sel, &taskLLMError{taskID: r.taskID, chainExhausted: true, cause: errors.New("all selected profiles are quota exhausted")}
+			return sel, &taskLLMError{taskID: r.taskID, chainExhausted: true, cause: locale.NewError("all selected profiles are quota exhausted")}
 		}
 		sel.profileID = *pt.ActiveLLMProfileID
 		prov, cfg, ok := r.s.providerForProfile(sel.profileID)
 		if !ok {
-			return sel, fmt.Errorf("LLM profile #%d is missing or invalid", sel.profileID)
+			return sel, locale.Errorf("LLM profile #%d is missing or invalid", sel.profileID)
 		}
 		sel.provider, sel.retry = prov, cfg.Retry
 		return sel, nil
 	}
 	prov, cfg, ok := r.s.globalProvider()
 	if !ok {
-		return sel, fmt.Errorf("task %s has no available fallback LLM provider", r.taskID)
+		return sel, locale.Errorf("task %s has no available fallback LLM provider", r.taskID)
 	}
 	sel.provider, sel.retry = prov, cfg.Retry
 	return sel, nil
@@ -192,7 +192,7 @@ func (r *taskLLMRuntime) maxTokens() int {
 func parseTaskID(id string) (int64, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || n <= 0 {
-		return 0, fmt.Errorf("invalid task id %q", id)
+		return 0, locale.Errorf("invalid task id %q", id)
 	}
 	return n, nil
 }
@@ -273,7 +273,7 @@ func completeTaskLLM(ctx context.Context, taskID string, req llm.CompletionReque
 		}
 		transition, markErr := hooks.exhaust(selection, callErr)
 		if markErr != nil {
-			return llm.Message{}, "", llm.Usage{}, fmt.Errorf("mark profile quota exhausted after %v: %w", callErr, markErr)
+			return llm.Message{}, "", llm.Usage{}, locale.Errorf("mark profile quota exhausted after %v: %w", callErr, markErr)
 		}
 		if transition.Advanced && !transition.Stale && hooks.transition != nil {
 			hooks.transition(selection, transition, callErr)
@@ -360,7 +360,7 @@ func streamTaskLLM(ctx context.Context, taskID string, req llm.CompletionRequest
 			}
 			transition, markErr := hooks.exhaust(selection, streamErr)
 			if markErr != nil {
-				cause := fmt.Errorf("mark profile quota exhausted after %v: %w", streamErr, markErr)
+				cause := locale.Errorf("mark profile quota exhausted after %v: %w", streamErr, markErr)
 				if committed {
 					// Output may already have driven tool execution. Report the persistence
 					// failure, but classify it as router-handled so the worker does not
@@ -620,46 +620,47 @@ func (s *Server) emitTaskLLMTransition(t *Task, transition db.TaskLLMTransition,
 	if t == nil {
 		return
 	}
-	previous := s.llmAuditProfile(transition.PreviousProfileID)
+	lang := s.taskOutputLanguage(t.ID)
+	previous := s.llmAuditProfile(transition.PreviousProfileID, lang)
 	var next *llmAuditProfile
 	if transition.NextProfileID != nil {
-		next = s.llmAuditProfile(*transition.NextProfileID)
+		next = s.llmAuditProfile(*transition.NextProfileID, lang)
 	}
 	mode := "automatic"
 	kind := "llm_switch"
-	summary := fmt.Sprintf(locale.Text(locale.ServerDefault(), "%s has insufficient quota"), llmAuditProfileLabel(previous))
+	summary := fmt.Sprintf(locale.Text(lang, "%s has insufficient quota"), llmAuditProfileLabel(previous, lang))
 	if transition.NextProfileID != nil {
-		summary += fmt.Sprintf(locale.Text(locale.ServerDefault(), "; subsequent calls will switch to %s"), llmAuditProfileLabel(next))
+		summary += fmt.Sprintf(locale.Text(lang, "; subsequent calls will switch to %s"), llmAuditProfileLabel(next, lang))
 	} else {
 		mode = "exhausted"
 		kind = "llm_failover"
-		summary += locale.Text(locale.ServerDefault(), "; profile chain exhausted")
+		summary += locale.Text(lang, "; profile chain exhausted")
 	}
 	metadata, _ := json.Marshal(llmActivityMetadata{LLMTransition: llmTransitionAudit{
-		Mode: mode, Reason: cause.Error(), Previous: previous, Next: next,
+		Mode: mode, Reason: locale.ErrorMessage(lang, cause), Previous: previous, Next: next,
 	}})
-	s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: kind, IsError: transition.ChainExhausted, Summary: summary, Detail: cause.Error(), Metadata: metadata})
+	s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: kind, IsError: transition.ChainExhausted, Summary: summary, Detail: locale.ErrorMessage(lang, cause), Metadata: metadata})
 	log.Printf("[llm-failover] task %s: %s", t.ID, summary)
 }
 
-func (s *Server) llmAuditProfile(id int64) *llmAuditProfile {
+func (s *Server) llmAuditProfile(id int64, langs ...locale.Lang) *llmAuditProfile {
 	if id <= 0 || s.m == nil || s.m.pg == nil {
 		return nil
 	}
 	p, err := s.m.pg.ProfileByID(id)
 	if err != nil || p == nil {
-		return &llmAuditProfile{ID: id, Name: fmt.Sprintf(locale.Text(locale.ServerDefault(), "Profile #%d"), id)}
+		return &llmAuditProfile{ID: id, Name: fmt.Sprintf(locale.Text(locale.First(langs), "Profile #%d"), id)}
 	}
 	return &llmAuditProfile{ID: p.ID, Name: p.Name, Format: p.Format, Model: p.Model}
 }
 
-func llmAuditProfileLabel(profile *llmAuditProfile) string {
+func llmAuditProfileLabel(profile *llmAuditProfile, langs ...locale.Lang) string {
 	if profile == nil {
-		return locale.Text(locale.ServerDefault(), "Default profile")
+		return locale.Text(locale.First(langs), "Default profile")
 	}
 	name := profile.Name
 	if name == "" {
-		name = fmt.Sprintf(locale.Text(locale.ServerDefault(), "Profile #%d"), profile.ID)
+		name = fmt.Sprintf(locale.Text(locale.First(langs), "Profile #%d"), profile.ID)
 	}
 	detail := []string{}
 	if profile.Format != "" {
@@ -682,17 +683,18 @@ func sameOptionalID(a, b *int64) bool {
 }
 
 func (s *Server) emitManualTaskLLMSwitch(t *Task, previousID, nextID *int64) db.Activity {
+	lang := s.taskOutputLanguage(t.ID)
 	previous := (*llmAuditProfile)(nil)
 	next := (*llmAuditProfile)(nil)
 	if previousID != nil {
-		previous = s.llmAuditProfile(*previousID)
+		previous = s.llmAuditProfile(*previousID, lang)
 	}
 	if nextID != nil {
-		next = s.llmAuditProfile(*nextID)
+		next = s.llmAuditProfile(*nextID, lang)
 	}
-	summary := fmt.Sprintf(locale.Text(locale.ServerDefault(), "User switched task LLM from %s to %s"), llmAuditProfileLabel(previous), llmAuditProfileLabel(next))
+	summary := fmt.Sprintf(locale.Text(lang, "User switched task LLM from %s to %s"), llmAuditProfileLabel(previous, lang), llmAuditProfileLabel(next, lang))
 	metadata, _ := json.Marshal(llmActivityMetadata{LLMTransition: llmTransitionAudit{
-		Mode: "manual", Reason: locale.Text(locale.ServerDefault(), "User manually switched the task LLM"), Previous: previous, Next: next,
+		Mode: "manual", Reason: locale.Text(lang, "User manually switched the task LLM"), Previous: previous, Next: next,
 	}})
 	return s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "llm_switch", Summary: summary, Detail: summary, Metadata: metadata})
 }

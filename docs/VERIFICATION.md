@@ -1,23 +1,46 @@
-# Verification status
+# Verification and known limitations
 
-This is the first ScopeWeaver localization checkpoint, dated 2026-10-02, based on ARTEX commit `160fe13`. Final server comment/message coverage and the full regression audit are still in progress. This checkpoint is source code, not a binary release or published container image.
+[한국어](ko/VERIFICATION.md)
 
-Verified locally so far:
+Validation recorded on **2026-10-03** for the English/Korean ScopeWeaver edition, based on upstream ARTEX commit `160fe13`. Tests use disposable PostgreSQL databases and local fixtures. This is source delivery; no binary release or container image has been published.
 
-- The frontend's 18 tests pass; English/Korean catalogs, language persistence, editable demo data, API transport, and legacy mention compatibility are covered.
-- Production and demo static exports build successfully, and a binary with the production frontend embedded builds successfully.
-- Desktop checks covered 24 routes in each language. The included demo has an inherited Notifications-page error; the real backend view is being checked separately.
-- Mobile checks covered the dashboard, tasks, findings, and settings in both languages with no page-level horizontal overflow. Language changes preserve an unsent draft.
-- Focused database, notification, report, archive, task, and server localization tests pass. Approval classification recognizes legacy Chinese, English, and Korean model markers without changing the stored decision type.
-- Markdown/CSV exports, request-language negotiation, saved server language, and invalid-language rejection passed HTTP checks.
-- The original AGPL-3.0 license is unchanged. Distribution scripts target this standalone repository, and docs distinguish planned releases from available source builds.
+| Check | Result |
+| --- | --- |
+| Frontend regression and localization tests | 21 passed; TypeScript check passed |
+| Production static export and embedded Go binary | Built successfully |
+| Go regression suites, 18 packages | 986 tests/subtests passed; 1 inherited test failed; 1 external-provider test skipped |
+| Complete server suite | 285 tests/subtests passed; only the opt-in live-provider test skipped |
+| Backend translation catalog | 1,865 production keys passed English/Korean completeness and printf argument checks |
+| Authored Chinese text audit | No untranslated authored source/docs or Go comments; deliberate compatibility/data exceptions retained |
+| Desktop browser coverage | 24 routes in each language; no missing labels or page-level horizontal overflow |
+| Mobile browser coverage | Dashboard, tasks, findings and settings in both languages; no page-level horizontal overflow at 390px |
+| Real application screens | Login and notification forms checked in both languages; setup validation and initialization verified |
+| Language switching | Navigation/status labels update; selection and unsent drafts are preserved |
+| HTTP localization | Markdown/CSV export, language negotiation, saved preference and invalid-language rejection checked |
+| GLM-5.3 provider contract | 21 focused tests/subtests passed with local HTTP/SSE fixtures; both endpoint paths, reasoning and tool-call replay covered |
+| GLM template browser flow | Both templates checked in both languages; entered name/key/proxy preserved; no save, activation or provider request |
+| Packaging and launch scripts | Shell syntax, bilingual packaging fixtures and 10 supervisor cases passed |
+| Provenance and dependencies | Original license unchanged; dependency versions and Go module unchanged; documentation links and diff checks passed |
 
-Known upstream limitations found during comparison with the untouched source:
+Counts include Go parent tests and their subtests. Package runs use separate databases initialized with the same supplementary metering tables as normal server startup. The original tests and checks remain enabled.
 
-- `TestGraphOverviewExpandsAssociatedCompanyScope` fails with a missing task-scope fixture.
-- `TestTaskMetadataPatchReturnsRenameAndPin` can race with asynchronous temporary-directory cleanup.
-- The standalone `llmrec` suite needs the metering tables created by normal application startup; an empty database without that initialization fails. The unchanged upstream and translated suites both pass with the normal initialization.
-- The demo Notifications page lacks its metadata mock. This does not establish whether the real Notifications page works.
-- The unchanged npm dependency set reports 14 audit findings: 1 critical, 9 high, and 4 moderate. Dependency upgrades are outside this translation change.
+## Inherited issues
 
-No external targets were scanned and no paid LLM calls were made. Docker image execution and Windows batch execution have not been verified. The validation documents under `sidequestion/` describe historical upstream work, not these checks.
+`TestGraphOverviewExpandsAssociatedCompanyScope` still fails with `task scope missing: <nil>`. The same failure was reproduced in untouched upstream source. It is not excluded or marked successful, so the complete backend CI remains red until that separate issue is fixed.
+
+`TestTaskMetadataPatchReturnsRenameAndPin` previously produced an intermittent temporary-directory cleanup failure in upstream verification. It passed in the final ScopeWeaver server run; no unrelated lifecycle change was made to hide it.
+
+The upstream mock preview has no notification metadata mock, so its Notifications page errors. The **real backend Notifications page and add-channel form pass** in both languages. No notification was sent during verification.
+
+The unchanged npm dependency set reports **14 audit findings: 1 critical, 9 high and 4 moderate**. Dependency upgrades remain separate work.
+
+## Scope and limits
+
+- The optional `TestLiveContextReview` requires private external-provider configuration and was not run. No paid model calls, external target scans, or real notification deliveries were performed.
+- GLM tests prove the local request/response contract, not account access or provider availability. Coding Plan is restricted to officially supported tools, and ScopeWeaver is not listed; see [provider setup](llm-providers.md).
+- Docker image execution and Windows batch execution were not verified. Packaging fixtures do not claim a real Windows runtime test.
+- Setup reached the authenticated route, but one browser wait for the window load event timed out; initialization and the new password were then confirmed through the real API.
+- User-entered text, stored evidence, edited prompts, wire identifiers, legacy parsing markers, Unicode fixtures, and original upstream screenshots retain their original content. The English/Korean app does not translate arbitrary user data or third-party tool output.
+- Historical validation documents under `sidequestion/` describe upstream work, not new ScopeWeaver runs.
+
+Current remote checks are available in [GitHub Actions](https://github.com/cskwork/scopeweaver/actions/workflows/ci.yml).

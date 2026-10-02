@@ -15,7 +15,7 @@ English · [한국어](README.ko.md)
 
 Modification date: **2026-10-02**. See [provenance and changes](docs/PROVENANCE.md); this is not a release tag.
 
-[Verification status and known limitations](docs/VERIFICATION.md) — the first localization checkpoint is available while the final server translation audit continues.
+[Verification status and known limitations](docs/VERIFICATION.md).
 
 > The code and architecture originate in ARTEX. This standalone derivative changes the product
 > name, English/Korean interface and messages, documentation, and distribution targets. See [Provenance and changes](#provenance-and-changes)
@@ -78,6 +78,13 @@ which saves you from collecting the same data twice:
 ---
 
 ## Installation
+
+### GLM and other model providers
+
+The **LLM → New** form includes GLM-5.3 configuration templates for Z.ai's General API and a
+separately labeled Coding Plan reference. Add your own API key; template selection does not save,
+activate, or contact a provider. Coding Plan use is restricted to officially supported tools, and
+ScopeWeaver is not listed. See [provider setup and support limits](docs/llm-providers.md).
 
 > Requires a **PostgreSQL** database. Exploration needs an **LLM** configured
 > (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, or set it in the UI).

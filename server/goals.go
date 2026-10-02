@@ -20,10 +20,10 @@ type goalSpec struct {
 
 // launchTask runs the shared post-creation sequence for a task created via ANY
 // path (HTTP createTask or orchestration spawn_task), avoiding duplicate setup:
-// 1. Seed root assets and feed the event-driven loop.
-// 2. Optionally seed intents so workers can start before the first planner round.
-// 3. Decompose goals asynchronously, emitting round zero, LLM steps, and individual goals for the UI.
-//    Start engine.Run only after goal nodes exist, preventing the planner from racing goal creation.
+//  1. Seed root assets and feed the event-driven loop.
+//  2. Optionally seed intents so workers can start before the first planner round.
+//  3. Decompose goals asynchronously, emitting round zero, LLM steps, and individual goals for the UI.
+//     Start engine.Run only after goal nodes exist, preventing the planner from racing goal creation.
 //
 // The goroutine returns immediately to both callers: fast task creation, background decomposition.
 func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
@@ -41,12 +41,13 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 }
 
 func (s *Server) startTaskEngine(t *Task) {
-	ctx := s.engine.execContextFor(locale.WithLang(s.ctx, taskLanguage(s.m.pg, t.ID)), t.ID)
+	ctx := s.engine.execContextFor(s.ctx, t.ID)
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
 		return
 	}
+	ctx = locale.WithLang(ctx, taskLanguage(s.m.pg, t.ID))
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-		Summary: locale.Text(locale.ServerDefault(), "Round 0: goal decomposition")})
+		Summary: locale.Text(locale.FromContext(ctx), "Round 0: goal decomposition")})
 	goals := s.createGoals(ctx, t, func(r db.Activity) {
 		s.engine.emitActivity(t, r)
 	})
@@ -110,7 +111,7 @@ func (s *Server) admitPausedTask(t *Task) (queued bool, err error) {
 
 func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued bool, err error) {
 	if t == nil {
-		return false, fmt.Errorf("task not found")
+		return false, locale.Errorf("task not found")
 	}
 	if mode != "bootstrap" {
 		mode = "resume"
@@ -122,10 +123,10 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	// cannot revive that stale handle after StopTask clears its Engine maps.
 	current, exists := s.m.Task(t.ID)
 	if !exists || current != t || s.engine.IsDeleting(t.ID) {
-		return false, fmt.Errorf("task is being deleted")
+		return false, locale.Errorf("task is being deleted")
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		return false, fmt.Errorf("task is being deleted")
+		return false, locale.Errorf("task is being deleted")
 	}
 	defer s.engine.decInflight(t.ID)
 	lifecycle := t.lifecycleSnapshot()
@@ -178,8 +179,8 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	// this ordering, its already-running worker loops can claim the newly-opened
 	// intent in the gap between status=running and queued=true.
 	if shouldQueue || wasTerminal || wasPaused || wasQueued {
-		s.engine.Pause(t.ID, agent.Causef("queued_for_admission", locale.Text(locale.ServerDefault(), "Task awaiting execution admission"),
-			"%s", locale.Text(locale.ServerDefault(), "The task is awaiting queue/admission state commit. This run stopped; intents will be claimed again only after an execution slot is granted.")))
+		s.engine.Pause(t.ID, agent.Causef("queued_for_admission", locale.Text(s.taskOutputLanguage(t.ID), "Task awaiting execution admission"),
+			"%s", locale.Text(s.taskOutputLanguage(t.ID), "The task is awaiting queue/admission state commit. This run stopped; intents will be claimed again only after an execution slot is granted.")))
 	}
 
 	status := lifecycle.Status
@@ -200,12 +201,12 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	}
 	if shouldQueue {
 		if !wasQueued {
-			summary := fmt.Sprintf(locale.Text(locale.ServerDefault(), "Queued: concurrency limit %d reached; starts automatically when a slot is free"), limit)
+			summary := fmt.Sprintf(locale.Text(s.taskOutputLanguage(t.ID), "Queued: concurrency limit %d reached; starts automatically when a slot is free"), limit)
 			switch {
 			case !ready:
-				summary = locale.Text(locale.ServerDefault(), "Queued: no usable LLM profile; starts automatically when configuration recovers")
+				summary = locale.Text(s.taskOutputLanguage(t.ID), "Queued: no usable LLM profile; starts automatically when configuration recovers")
 			case readyBacklog:
-				summary = locale.Text(locale.ServerDefault(), "Queued: earlier tasks are waiting; starts automatically in FIFO order")
+				summary = locale.Text(s.taskOutputLanguage(t.ID), "Queued: earlier tasks are waiting; starts automatically in FIFO order")
 			}
 			s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text", Summary: summary})
 		}
@@ -267,15 +268,15 @@ func (s *Server) reconcileConcurrency() {
 				continue
 			}
 			mode := s.resumeAdmissionMode(task)
-			s.engine.Pause(task.ID, agent.Causef("llm_unavailable_queued", locale.Text(locale.ServerDefault(), "LLM unavailable; task queued"),
-				"%s", locale.Text(locale.ServerDefault(), "No usable Planner/Worker LLM could be resolved. The execution slot was released; task resumes in queue order when configuration recovers.")))
+			s.engine.Pause(task.ID, agent.Causef("llm_unavailable_queued", locale.Text(s.taskOutputLanguage(task.ID), "LLM unavailable; task queued"),
+				"%s", locale.Text(s.taskOutputLanguage(task.ID), "No usable Planner/Worker LLM could be resolved. The execution slot was released; task resumes in queue order when configuration recovers.")))
 			if err := s.m.EnqueueTask(task.ID, mode); err != nil {
 				s.engine.Resume(task)
-				log.Printf(locale.Text(locale.ServerDefault(), "[concurrency] task %s could not queue after LLM became unavailable: %v"), task.ID, err)
+				log.Printf(locale.Text(s.taskOutputLanguage(task.ID), "[concurrency] task %s could not queue after LLM became unavailable: %v"), task.ID, err)
 				continue
 			}
 			s.engine.emitActivity(task, db.Activity{Worker: "system", Kind: "text",
-				Summary: locale.Text(locale.ServerDefault(), "Queued: no usable LLM profile; starts automatically when configuration recovers")})
+				Summary: locale.Text(s.taskOutputLanguage(task.ID), "Queued: no usable LLM profile; starts automatically when configuration recovers")})
 		}
 	}
 

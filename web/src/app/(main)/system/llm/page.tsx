@@ -28,6 +28,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { applyLLMProfilePreset, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
 import { api } from "@/lib/api";
 import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -305,6 +306,7 @@ function ProfileSheet({
   const { t: swt, locale: swLocale } = useI18n();
 
   const isNew = !profile;
+  const [preset, setPreset] = React.useState<LLMProfilePresetId | "">("");
   const [name, setName] = React.useState("");
   const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
   const [model, setModel] = React.useState("");
@@ -334,6 +336,7 @@ function ProfileSheet({
   // Closing and reopening starts fresh without stale values from another profile.
   React.useEffect(() => {
     if (!open) return;
+    setPreset("");
     setName(profile?.name ?? "");
     setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
     setModel(profile?.model ?? "");
@@ -356,6 +359,22 @@ function ProfileSheet({
     setModels([]);
     setModelsOpen(false);
   }, [open, profile]);
+
+  function applyPreset(id: string) {
+    if (!isNew) return;
+    const next = applyLLMProfilePreset({ name, api_key: apiKey, proxy, session_header_key: sessionHeaderKey }, id);
+    setPreset(id as LLMProfilePresetId);
+    setFormat(next.format);
+    setModel(next.model);
+    setBaseUrl(next.base_url);
+    setThinkingType(next.thinking_type);
+    setEffort(next.reasoning_effort);
+    setCw(String(next.context_window_k));
+    setMaxTokens(String(next.max_tokens));
+    setMaxTokensField(fromStore(next.max_tokens_field));
+    setModels([]);
+    setModelsOpen(false);
+  }
 
   const profileId = profile ? Number(profile.id) : undefined;
 
@@ -474,6 +493,33 @@ function ProfileSheet({
         </SheetHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+          {isNew && (
+            <div className="grid gap-2 rounded-md border bg-muted/20 p-3">
+              <Label htmlFor="p-preset">{swt("providers.template")}</Label>
+              <Select value={preset} onValueChange={applyPreset}>
+                <SelectTrigger id="p-preset" className="w-full min-w-0">
+                  <SelectValue placeholder={swt("providers.chooseTemplate")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="zai-general">{swt("providers.general")}</SelectItem>
+                  <SelectItem value="zai-coding-reference">{swt("providers.coding")}</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">{swt("providers.introduction")}</p>
+              {preset && (
+                <>
+                  <p className={preset === "zai-coding-reference" ? "text-xs text-amber-700 dark:text-amber-400" : "text-xs text-muted-foreground"}>
+                    {swt(preset === "zai-coding-reference" ? "providers.codingHelp" : "providers.generalHelp")}
+                  </p>
+                  <p className="text-xs text-muted-foreground">{swt("providers.modelHelp")}</p>
+                  <div className="flex flex-wrap gap-3 text-xs">
+                    <a className="underline underline-offset-4" href="https://docs.z.ai/guides/llm/glm-5.3" target="_blank" rel="noreferrer">{swt("providers.officialModel")}</a>
+                    <a className="underline underline-offset-4" href="https://docs.z.ai/devpack/usage-policy" target="_blank" rel="noreferrer">{swt("providers.officialPolicy")}</a>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid gap-2">
               <Label htmlFor="p-name">{swt("interface.m0868")}</Label>

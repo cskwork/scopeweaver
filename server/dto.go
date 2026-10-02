@@ -559,6 +559,7 @@ type AgentDTO struct {
 func agentDTO(a *db.Agent, langs ...locale.Lang) AgentDTO {
 	copy := *a
 	db.LocalizeBuiltinAgentMetadata(&copy, locale.First(langs))
+	localizeSeededAgentMetadata(&copy, locale.First(langs))
 	a = &copy
 	return AgentDTO{
 		ID:                 i64s(a.ID),

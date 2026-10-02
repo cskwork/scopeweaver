@@ -2,7 +2,6 @@ package server
 
 import (
 	"crypto/rand"
-	"fmt"
 	"github.com/Autumn-27/artex/locale"
 	"log"
 	"math/big"
@@ -50,12 +49,12 @@ func loadOrCreateJWTKey(keyDir, dataDir string) ([]byte, error) {
 	for i := range buf {
 		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(keyChars))))
 		if err != nil {
-			return nil, fmt.Errorf("generate jwt key: %w", err)
+			return nil, locale.Errorf("generate jwt key: %w", err)
 		}
 		buf[i] = keyChars[n.Int64()]
 	}
 	if err := os.WriteFile(path, buf, 0600); err != nil {
-		return nil, fmt.Errorf("write jwt key: %w", err)
+		return nil, locale.Errorf("write jwt key: %w", err)
 	}
 	log.Printf(locale.Text(locale.ServerDefault(), "[auth] New JWT key written to %s"), path)
 	return buf, nil
@@ -74,7 +73,7 @@ func signJWT(key []byte) (string, error) {
 func verifyJWT(tokenStr string, key []byte) bool {
 	t, err := jwt.Parse(tokenStr, func(t *jwt.Token) (any, error) {
 		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, fmt.Errorf("unexpected signing method")
+			return nil, locale.Errorf("unexpected signing method")
 		}
 		return key, nil
 	})

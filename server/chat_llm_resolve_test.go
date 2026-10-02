@@ -31,7 +31,7 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 	}
 
 	if reason := s.chatUnavailableReason(); !strings.Contains(reason, "No LLM is configured") {
-		t.Fatalf("no-profile reason=%q, want 尚未配置", reason)
+		t.Fatalf("no-profile reason=%q, want No LLM is configured", reason)
 	}
 
 	id, err := m.pg.SaveProfile(&db.LLMProfile{Name: "p1", Format: "anthropic", Model: "claude-x", APIKey: "sk-test"})
@@ -45,7 +45,7 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 
 	// Profile exists but is not activated.
 	if reason := s.chatUnavailableReason(); !strings.Contains(reason, "No active LLM profile") {
-		t.Fatalf("inactive reason=%q, want 没有已激活", reason)
+		t.Fatalf("inactive reason=%q, want No active LLM profile", reason)
 	}
 
 	// Once activated, the reason no longer claims a missing/inactive config.
@@ -60,7 +60,7 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 // TestResolveChatAgentHonoursConversationProfile is the regression guard for the
 // reported bug: a conversation that picked a valid profile must resolve a chat
 // agent even when NO global profile is active, so the send precheck stops
-// rejecting it with "LLM 未配置".
+// rejecting it with an unconfigured-LLM error.
 func TestResolveChatAgentHonoursConversationProfile(t *testing.T) {
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {

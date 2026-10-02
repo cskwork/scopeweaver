@@ -61,6 +61,9 @@ func backgroundLanguage(parent, request context.Context) context.Context {
 // taskLanguage persists a new task's output preference in the existing settings
 // table. Older tasks without a preference use the configured server default.
 func taskLanguage(pg *db.DB, id string) locale.Lang {
+	if pg == nil {
+		return locale.ServerDefault()
+	}
 	raw, ok, err := pg.GetSetting("task_language." + id)
 	if err == nil && ok {
 		if lang, valid := locale.Normalize(raw); valid {
@@ -86,4 +89,12 @@ func (s *Server) childTaskLanguage(ctx context.Context, parentID string) locale.
 		return taskLanguage(s.m.pg, parentID)
 	}
 	return locale.ServerDefault()
+}
+
+// taskOutputLanguage resolves persisted output preference for generated task messages.
+func (s *Server) taskOutputLanguage(id string) locale.Lang {
+	if s.m == nil {
+		return locale.FromContext(s.ctx)
+	}
+	return taskLanguage(s.m.pg, id)
 }

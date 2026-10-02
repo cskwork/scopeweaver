@@ -96,7 +96,7 @@ func (s *Server) applyTaskControl(t *Task, action string) (taskControlResult, er
 
 func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause error) (taskControlResult, error) {
 	if t == nil {
-		return taskControlResult{}, fmt.Errorf("task not found")
+		return taskControlResult{}, locale.Errorf("task not found")
 	}
 	out := taskControlResult{ID: t.ID}
 	switch action {
@@ -144,7 +144,7 @@ func (s *Server) applyTaskControlWithCause(t *Task, action string, pauseCause er
 		out.Queued = queued
 		out.Status = map[bool]string{true: "queued", false: "running"}[queued]
 	default:
-		return out, fmt.Errorf("action must be pause|resume")
+		return out, locale.Errorf("action must be pause|resume")
 	}
 	log.Printf("[task] #%s %s", t.ID, map[string]string{"pause": locale.Text(locale.ServerDefault(), "Paused"), "resume": locale.Text(locale.ServerDefault(), "Resumed")}[action])
 	return out, nil
@@ -174,10 +174,10 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 		if inherited, sourceErr := t.Store.GetNodeWithSources(iid); sourceErr == nil && inherited != nil && inherited.Inherited {
 			return out, locale.Errorf("Inherited intents are read-only and cannot be controlled")
 		}
-		return out, fmt.Errorf("intent not found")
+		return out, locale.Errorf("intent not found")
 	}
 	if node.Kind != db.KindIntent {
-		return out, fmt.Errorf("node is not an intent")
+		return out, locale.Errorf("node is not an intent")
 	}
 	switch action {
 	case "pause":
@@ -239,7 +239,7 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 			out.State = db.StateIntentDeleted
 		}
 	default:
-		return out, fmt.Errorf("action must be pause|resume|cancel")
+		return out, locale.Errorf("action must be pause|resume|cancel")
 	}
 	return out, nil
 }

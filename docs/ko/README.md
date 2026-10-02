@@ -1,5 +1,8 @@
 # 문서
 
+- [검증 상태와 알려진 한계](VERIFICATION.md)
+- [LLM 제공자 템플릿](llm-providers.md)
+
 [English](../README.md)
 
 - [설치와 운영](../../README.ko.md)

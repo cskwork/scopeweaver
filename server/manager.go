@@ -366,11 +366,11 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 	}
 	if err := loadLanguage(pg); err != nil {
 		pg.Close()
-		return nil, fmt.Errorf("load language setting: %w", err)
+		return nil, locale.Errorf("load language setting: %w", err)
 	}
 	if err := pg.RecoverFindingRetests(); err != nil {
 		pg.Close()
-		return nil, fmt.Errorf("recover finding retests: %w", err)
+		return nil, locale.Errorf("recover finding retests: %w", err)
 	}
 	if err := pg.EnsureLLMRecordsTable(); err != nil {
 		log.Printf("[llmrec] create table: %v", err)
@@ -399,7 +399,7 @@ func NewManager(dir, proxyAddr string) (*Manager, error) {
 			if err != nil {
 				_ = tr.Close()
 				_ = pg.Close()
-				return nil, fmt.Errorf("recover traffic delete staging: %w", err)
+				return nil, locale.Errorf("recover traffic delete staging: %w", err)
 			}
 		}
 		if tr != nil {
@@ -1163,7 +1163,7 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 	}
 	if queued {
 		if mode != "bootstrap" && mode != "resume" {
-			return fmt.Errorf("invalid queue mode %q", mode)
+			return locale.Errorf("invalid queue mode %q", mode)
 		}
 	} else {
 		mode = ""
@@ -1201,7 +1201,7 @@ func (m *Manager) ApplyTaskAdmission(id, expectedStatus, status string, queued b
 	RETURNING queued_at, queue_mode, completed_at, first_run_at, deadline_at`, n, status, queued, mode, preservePosition, expectedStatus).
 		Scan(&queuedAt, &committedMode, &completedAt, &firstRunAt, &deadlineAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("task %s lifecycle changed before admission (expected status %q)", id, expectedStatus)
+		return locale.Errorf("task %s lifecycle changed before admission (expected status %q)", id, expectedStatus)
 	}
 	if err != nil {
 		return err
@@ -1254,7 +1254,7 @@ func (m *Manager) ApplyTaskPause(id string) error {
 		  AND status NOT IN ('done','failed','timeout')
 		RETURNING COALESCE(queue_mode,'')`, n).Scan(&mode)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("task %s is unavailable for pause", id)
+		return locale.Errorf("task %s is unavailable for pause", id)
 	}
 	if err != nil {
 		return err
@@ -1281,7 +1281,7 @@ func (m *Manager) EnqueueTask(id, mode string) error {
 		return err
 	}
 	if mode != "bootstrap" && mode != "resume" {
-		return fmt.Errorf("invalid queue mode %q", mode)
+		return locale.Errorf("invalid queue mode %q", mode)
 	}
 	var queuedAt time.Time
 	var committedMode string
@@ -1295,7 +1295,7 @@ func (m *Manager) EnqueueTask(id, mode string) error {
 		WHERE id=$1 AND deleted_at IS NULL
 		RETURNING queued_at, queue_mode`, n, mode).Scan(&queuedAt, &committedMode)
 	if errors.Is(err, sql.ErrNoRows) {
-		return fmt.Errorf("task %s is unavailable for enqueue", id)
+		return locale.Errorf("task %s is unavailable for enqueue", id)
 	}
 	if err != nil {
 		return err
@@ -1505,12 +1505,12 @@ func (m *Manager) DeleteTask(id string, opts DeleteTaskOptions) (DeleteTaskResul
 	var finalizeErrs []error
 	if trafficStage != nil {
 		if err := trafficStage.Commit(); err != nil {
-			finalizeErrs = append(finalizeErrs, fmt.Errorf("finalize traffic deletion: %w", err))
+			finalizeErrs = append(finalizeErrs, locale.Errorf("finalize traffic deletion: %w", err))
 		}
 	}
 	if fileStage != nil {
 		if err := fileStage.commit(); err != nil {
-			finalizeErrs = append(finalizeErrs, fmt.Errorf("finalize task file deletion: %w", err))
+			finalizeErrs = append(finalizeErrs, locale.Errorf("finalize task file deletion: %w", err))
 		}
 	}
 	m.forgetTask(id, n)
@@ -1536,12 +1536,12 @@ func rollbackTaskDelete(cause error, trafficStage *traffic.HostDeleteStage, file
 	// first one fails, and errors.Join preserves the original PostgreSQL error.
 	if trafficStage != nil {
 		if err := trafficStage.Rollback(); err != nil {
-			errs = append(errs, fmt.Errorf("restore traffic after task delete failure: %w", err))
+			errs = append(errs, locale.Errorf("restore traffic after task delete failure: %w", err))
 		}
 	}
 	if fileStage != nil {
 		if err := fileStage.rollback(); err != nil {
-			errs = append(errs, fmt.Errorf("restore task files after task delete failure: %w", err))
+			errs = append(errs, locale.Errorf("restore task files after task delete failure: %w", err))
 		}
 	}
 	return errors.Join(errs...)
@@ -1628,9 +1628,9 @@ func stageTaskFiles(dataDir, taskID string, explorationID int64) (*taskFileDelet
 	for _, source := range targets {
 		staged := filepath.Join(stage.stageDir, fmt.Sprintf("%d-%s", len(stage.moves), filepath.Base(source)))
 		if err := os.Rename(source, staged); err != nil {
-			cause := fmt.Errorf("stage task file %s: %w", source, err)
+			cause := locale.Errorf("stage task file %s: %w", source, err)
 			if restoreErr := stage.rollback(); restoreErr != nil {
-				return nil, errors.Join(cause, fmt.Errorf("restore partially staged task files: %w", restoreErr))
+				return nil, errors.Join(cause, locale.Errorf("restore partially staged task files: %w", restoreErr))
 			}
 			return nil, cause
 		}
@@ -1657,23 +1657,23 @@ func (s *taskFileDeleteStage) rollback() error {
 	for i := len(s.moves) - 1; i >= 0; i-- {
 		move := s.moves[i]
 		if _, err := os.Lstat(move.source); err == nil {
-			errs = append(errs, fmt.Errorf("restore destination already exists: %s", move.source))
+			errs = append(errs, locale.Errorf("restore destination already exists: %s", move.source))
 			continue
 		} else if !os.IsNotExist(err) {
-			errs = append(errs, fmt.Errorf("inspect restore destination %s: %w", move.source, err))
+			errs = append(errs, locale.Errorf("inspect restore destination %s: %w", move.source, err))
 			continue
 		}
 		if err := os.MkdirAll(filepath.Dir(move.source), 0o755); err != nil {
-			errs = append(errs, fmt.Errorf("create restore parent for %s: %w", move.source, err))
+			errs = append(errs, locale.Errorf("create restore parent for %s: %w", move.source, err))
 			continue
 		}
 		if err := os.Rename(move.staged, move.source); err != nil {
-			errs = append(errs, fmt.Errorf("restore %s: %w", move.source, err))
+			errs = append(errs, locale.Errorf("restore %s: %w", move.source, err))
 		}
 	}
 	if len(errs) == 0 && s.stageDir != "" {
 		if err := os.RemoveAll(s.stageDir); err != nil {
-			errs = append(errs, fmt.Errorf("remove task file stage: %w", err))
+			errs = append(errs, locale.Errorf("remove task file stage: %w", err))
 		}
 	}
 	s.done = true

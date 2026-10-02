@@ -13,8 +13,8 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 )
 
-// 平台操作工具(给内置 Auto agent 用):建/改 skill、自定义工具、MCP。都是 host 工具,
-// seed 进 tools 表、默认绑定 auto,经 hostTools 注入。复用现有 db/文件系统逻辑。
+// Platform host tools for the built-in Auto agent: create/edit skills, custom tools, and MCP servers.
+// Seeded into tools, bound to auto by default, and injected through hostTools; reuse existing DB/filesystem logic.
 
 func (s *Server) platformTools(langs ...locale.Lang) []actool.CoreTool {
 	return []actool.CoreTool{
@@ -39,7 +39,7 @@ var platformToolKeys = []string{
 // ---- assets ----
 
 // toolDeleteAssetsByHost hard-deletes every asset tied to one host (exact match).
-// Platform-level (not a per-task tool): operates on the global, cross-task asset库.
+// Platform-level tool operating on the global asset store across tasks.
 func (s *Server) toolDeleteAssetsByHost(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("delete_assets_by_host",
 		locale.Text(locale.First(langs), "Delete assets by exact host: its root/subdomain plus services and endpoints.\n")+
@@ -49,7 +49,7 @@ func (s *Server) toolDeleteAssetsByHost(langs ...locale.Lang) actool.CoreTool {
 		objSchema(map[string]any{
 			"host": strParam(locale.Text(locale.First(langs), "Exact host to delete: domain, subdomain, or IP such as example.com, a.example.com, or 1.2.3.4")),
 		}, "host"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			as := s.assetStore()
 			if as == nil {
 				return actool.Errorf(locale.Text(locale.First(langs), "Asset store is not initialized")), nil
@@ -63,7 +63,7 @@ func (s *Server) toolDeleteAssetsByHost(langs ...locale.Lang) actool.CoreTool {
 			}
 			counts, err := as.DeleteByHost(a.Host)
 			if err != nil {
-				return actool.Errorf(locale.Text(locale.First(langs), "Deletion failed: ") + err.Error()), nil
+				return actool.Errorf(locale.Text(locale.First(langs), "Deletion failed: ") + locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			var total int64
 			for _, n := range counts {
@@ -87,7 +87,7 @@ func (s *Server) toolCreateSkill(langs ...locale.Lang) actool.CoreTool {
 			"description":  strParam(locale.Text(locale.First(langs), "Required skill description: what it does and when to use it")),
 			"instructions": strParam(locale.Text(locale.First(langs), "Optional Markdown instructions")),
 		}, "name", "description"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct{ Name, Description, Instructions string }
 			_ = json.Unmarshal(in, &a)
 			if !validSkillName(a.Name) {
@@ -101,7 +101,7 @@ func (s *Server) toolCreateSkill(langs ...locale.Lang) actool.CoreTool {
 				return actool.Errorf(locale.Text(locale.First(langs), "Skill already exists: ") + a.Name), nil
 			}
 			if err := os.MkdirAll(path, 0o755); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			var b strings.Builder
 			b.WriteString("---\n")
@@ -115,7 +115,7 @@ func (s *Server) toolCreateSkill(langs ...locale.Lang) actool.CoreTool {
 			}
 			if err := os.WriteFile(filepath.Join(path, "SKILL.md"), []byte(b.String()), 0o644); err != nil {
 				_ = os.RemoveAll(path)
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text("skill created: " + a.Name), nil
 		})
@@ -129,7 +129,7 @@ func (s *Server) toolUpdateSkillFile(langs ...locale.Lang) actool.CoreTool {
 			"file":    strParam(locale.Text(locale.First(langs), "Optional relative path, default SKILL.md; for example scripts/run.py")),
 			"content": strParam(locale.Text(locale.First(langs), "Complete file content")),
 		}, "name", "content"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct{ Name, File, Content string }
 			_ = json.Unmarshal(in, &a)
 			if !validSkillName(a.Name) {
@@ -149,10 +149,10 @@ func (s *Server) toolUpdateSkillFile(langs ...locale.Lang) actool.CoreTool {
 			}
 			full := filepath.Join(skillPath, clean)
 			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			if err := os.WriteFile(full, []byte(a.Content), 0o644); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text("skill file written: " + a.Name + "/" + clean), nil
 		})
@@ -198,7 +198,7 @@ func toDBTool(a customToolToolInput) *db.Tool {
 func (s *Server) toolCreateCustomTool(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("create_custom_tool", locale.Text(locale.First(langs), "After installing a tool absent from the platform, register it here so agents can use it. Create a custom shell/command/script/http tool. A shell declaration needs only key/description/agents, no exec/schema."),
 		customToolSchema(locale.Text(locale.First(langs), "Tool key: lowercase letter first, then letters/digits/underscores"), langs...),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a customToolToolInput
 			_ = json.Unmarshal(in, &a)
 			a.Key = strings.TrimSpace(a.Key)
@@ -215,7 +215,7 @@ func (s *Server) toolCreateCustomTool(langs ...locale.Lang) actool.CoreTool {
 				return actool.Errorf(locale.Text(locale.First(langs), "Key already exists: ") + a.Key), nil
 			}
 			if err := s.m.pg.CreateCustomTool(toDBTool(a)); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text("custom tool created: " + a.Key), nil
 		})
@@ -224,7 +224,7 @@ func (s *Server) toolCreateCustomTool(langs ...locale.Lang) actool.CoreTool {
 func (s *Server) toolUpdateCustomTool(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("update_custom_tool", locale.Text(locale.First(langs), "Modify an existing custom tool by key."),
 		customToolSchema(locale.Text(locale.First(langs), "Custom tool key to modify"), langs...),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a customToolToolInput
 			_ = json.Unmarshal(in, &a)
 			existing, _ := s.m.pg.GetTool(a.Key)
@@ -238,7 +238,7 @@ func (s *Server) toolUpdateCustomTool(langs ...locale.Lang) actool.CoreTool {
 				return actool.Errorf(locale.Text(locale.First(langs), "HTTP tools require a nonempty parameter JSON Schema")), nil
 			}
 			if err := s.m.pg.UpdateCustomTool(toDBTool(a)); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text("custom tool updated: " + a.Key), nil
 		})
@@ -295,7 +295,7 @@ func (a mcpToolInput) toDB() *db.MCPServer {
 func (s *Server) toolCreateMCP(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("create_mcp", locale.Text(locale.First(langs), "Create a stdio/http/sse MCP server. Grant tool visibility to agents after creation."),
 		mcpSchema(false, langs...),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a mcpToolInput
 			_ = json.Unmarshal(in, &a)
 			a.ID = 0
@@ -304,7 +304,7 @@ func (s *Server) toolCreateMCP(langs ...locale.Lang) actool.CoreTool {
 			}
 			id, err := s.m.pg.SaveMCP(a.toDB())
 			if err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text(fmt.Sprintf("mcp created: id=%d name=%s", id, a.Name)), nil
 		})
@@ -313,14 +313,14 @@ func (s *Server) toolCreateMCP(langs ...locale.Lang) actool.CoreTool {
 func (s *Server) toolUpdateMCP(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("update_mcp", locale.Text(locale.First(langs), "Modify an existing MCP server by ID."),
 		mcpSchema(true, langs...),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a mcpToolInput
 			_ = json.Unmarshal(in, &a)
 			if a.ID == 0 {
 				return actool.Errorf(locale.Text(locale.First(langs), "id is required")), nil
 			}
 			if _, err := s.m.pg.SaveMCP(a.toDB()); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return actool.Text(fmt.Sprintf("mcp updated: id=%d", a.ID)), nil
 		})

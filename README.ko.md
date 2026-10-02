@@ -35,7 +35,7 @@ LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 +
 
 ## 스크린샷
 
-[검증 상태와 알려진 한계](docs/ko/VERIFICATION.md) — 첫 현지화 체크포인트이며 서버 번역의 최종 점검은 진행 중입니다.
+[검증 상태와 알려진 한계](docs/ko/VERIFICATION.md).
 
 아래 화면은 포함된 가상 데모 데이터를 사용하는 ScopeWeaver 한국어 인터페이스입니다.
 실제 대상을 스캔한 결과가 아닙니다. [영어 화면](README.md#screenshots)과
@@ -73,6 +73,13 @@ LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 +
 ---
 
 ## 설치
+
+### GLM 등 모델 제공자 설정
+
+**LLM → 새로 만들기**에 GLM-5.3용 Z.ai 일반 API 템플릿과 별도로 표시한 Coding Plan 참고 설정이
+있습니다. API 키는 직접 입력하며, 템플릿을 선택하는 것만으로 저장·활성화하거나 제공자에 연결하지
+않습니다. Coding Plan은 공식 지원 도구에서만 사용할 수 있으며 ScopeWeaver는 목록에 없습니다.
+[제공자 설정과 지원 범위](docs/ko/llm-providers.md)를 확인하세요.
 
 > **PostgreSQL** 데이터베이스가 필요합니다. 탐색에는 **LLM** 설정이 필요합니다
 > (`ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY`, UI에서 설정해도 됩니다).

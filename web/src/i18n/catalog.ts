@@ -3,6 +3,7 @@
 // as Record<keyof typeof en, string>, so a missing or extra Korean entry is a
 // compile error; i18n.test.mjs additionally checks placeholder/tag parity.
 
+import * as providers from "./messages/providers.ts";
 import * as app from "./messages/app.ts";
 import * as interfaceMessages from "./messages/interface.ts";
 import * as english from "./messages/english.ts";
@@ -10,6 +11,7 @@ import * as settings from "./messages/settings.ts";
 import * as common from "./messages/common.ts";
 
 const namespaces = {
+  providers,
   settings,
   english,
   interface: interfaceMessages,

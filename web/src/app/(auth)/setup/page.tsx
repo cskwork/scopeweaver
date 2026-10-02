@@ -73,7 +73,7 @@ export default function SetupPage() {
             alt="ScopeWeaver"
             width={160}
             height={160}
-            className="relative brightness-0 invert"
+            className="relative"
           />
         </div>
       </div>
