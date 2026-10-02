@@ -2,6 +2,7 @@
 
 - [검증 상태와 알려진 한계](VERIFICATION.md)
 - [LLM 제공자 템플릿](llm-providers.md)
+- [Claude Code·Codex·Pi 어댑터](agent-adapter.md)
 
 [English](../README.md)
 

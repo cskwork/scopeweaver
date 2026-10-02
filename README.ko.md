@@ -270,6 +270,13 @@ CGO_ENABLED=0 go build -tags embedui -o scopeweaver ./cmd/artex
 
 ## 설정
 
+### 코딩 에이전트 연동
+
+Claude Code, Codex와 Pi는 [에이전트 어댑터](docs/ko/agent-adapter.md)를 통해 작업을 생성하고
+진행 상태·커버리지·발견 사항을 읽을 수 있습니다. Claude Code와 Codex는 로컬 stdio MCP를,
+Pi는 전용 확장을 사용합니다. 기본값은 읽기 전용이며, 작업 생성과 일시정지·재개는 설정에서
+명시적으로 활성화합니다. 기존 인증 API를 사용하고 ScopeWeaver 내부 에이전트와 모델 설정을 유지합니다.
+
 **데이터베이스** (`config.json`, 또는 환경 변수 `ARTEX_PG_DSN`으로 덮어쓰기):
 
 ```json

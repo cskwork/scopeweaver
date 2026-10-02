@@ -6,6 +6,7 @@
 - [Provenance and modifications](PROVENANCE.md)
 - [Verification and known limitations](VERIFICATION.md)
 - [LLM provider templates](llm-providers.md)
+- [Claude Code, Codex and Pi adapter](../adapters/agent/README.md)
 - [Traffic evidence](traffic-evidence.md)
 - [Side questions](../sidequestion/README.md)
 - [Side-question context budgets](../sidequestion/CONTEXT_BUDGET.md)
