@@ -195,6 +195,12 @@ package_binary() {
   cp config.example.json "$package_root/"
   cp README.md README.ko.md LICENSE CHANGELOG.md "$package_root/"
   if [ -d docs ]; then cp -R docs "$package_root/"; fi
+  # Ship the adapter sources without local dependencies, credentials or runtime state.
+  mkdir -p "$package_root/adapters/agent"
+  cp adapters/agent/package.json adapters/agent/package-lock.json adapters/agent/README.md adapters/agent/pi-extension.js "$package_root/adapters/agent/"
+  cp -R adapters/agent/src adapters/agent/test "$package_root/adapters/agent/"
+  mkdir -p "$package_root/log"
+  cp log/changelog-*.md "$package_root/log/"
   (cd "$ARTEX_PACKAGE_DIR" && zip -q -r -9 "$(basename "$archive")" "$(basename "$package_root")")
   rm -rf "$package_root"
   ok "$(msg "Release archive: $archive" "릴리스 압축 파일: $archive")"

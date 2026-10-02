@@ -121,8 +121,8 @@ docker compose up -d --build  # builds the scopeweaver image locally + postgres
 # → http://localhost:8787
 ```
 
-> No prebuilt `scopeweaver` image is published yet. The default compose file **builds the image
-> locally** from this source. A future published image requires an explicit compose image override.
+> The default compose file **builds the image locally** from this source. To use a published
+> release image from `ghcr.io/cskwork/scopeweaver`, explicitly select its version in compose.
 
 The image bundles common tools (ripgrep/curl/vim/npm/nmap…); `./skills` and `./data` are
 bind-mounted so they persist.
@@ -134,10 +134,12 @@ servers usually open the event stream with `GET /sse` and then receive JSON-RPC 
 
 ### Option 3: download a prebuilt binary (Releases)
 
-> No binary releases are published for this repository yet. Until they are, use Option 1, 2, or 4.
-> When releases exist, the archive for each platform will be
+> Download a platform archive from [Releases](https://github.com/cskwork/scopeweaver/releases).
+> The archive for each platform is
 > `scopeweaver-<version>-<os>-<arch>.zip`, unpacking to `scopeweaver` + `start.sh`
 > (`start.bat` on Windows) + `skills/` + `config.example.json`:
+
+The archive also includes `adapters/agent/`; see the [agent setup instructions](adapters/agent/README.md).
 
 ```bash
 cp config.example.json config.json   # fill in the database connection
@@ -251,7 +253,7 @@ docker image prune -f          # clean up old images (optional)
 
 ### Option 4: prebuilt binary (Releases)
 
-When releases exist, download the new `scopeweaver-<version>-<os>-<arch>.zip`, stop the old process,
+Download the new `scopeweaver-<version>-<os>-<arch>.zip`, stop the old process,
 overwrite `scopeweaver` and `skills/` (keep your `config.json` and `data/`), and restart:
 
 ```bash
@@ -571,9 +573,9 @@ ScopeWeaver is derived from [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX
   `scopeweaver-<version>-<os>-<arch>.zip`, the repository is
   `https://github.com/cskwork/scopeweaver`, and container images target this repo's GHCR. Upstream's
   Docker Hub image (`autumn27/artex`) is not used.
-- **No published artifacts yet**: no binary releases or container images are published for this
-  repository at the time of writing. The documentation reflects that: Docker Compose builds the
-  image locally from source, and the release workflow runs when the maintainer pushes a version tag.
+- **ScopeWeaver release history**: standalone releases start at `v0.1.0`, with notes under
+  [log/](log/changelog-v0.1.0.md). Version tags trigger platform archives and container builds.
+  Docker Compose continues to build locally unless a published image is explicitly selected.
 
 The changelog translation in [CHANGELOG.md](CHANGELOG.md) describes the history of the **upstream
 ARTEX** project faithfully; it does not attribute those changes to ScopeWeaver.
