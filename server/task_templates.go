@@ -3,7 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"io"
 	"net/http"
 	"strings"
@@ -34,19 +34,19 @@ func decodeTaskTemplateRequest(w http.ResponseWriter, r *http.Request, req *task
 	if err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, "Request body is too large")
 		} else {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, err)
 		}
 		return nil, false
 	}
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return nil, false
 	}
 	if err := json.Unmarshal(body, req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return nil, false
 	}
 	present := make(map[string]struct{}, len(raw))
@@ -75,7 +75,7 @@ func validateTaskTemplateRequest(req taskTemplateRequest) error {
 			value = strings.Join(strings.Fields(value), " ")
 		}
 		if utf8.RuneCountInString(value) > check.limit {
-			return fmt.Errorf("%s 最多 %d 个字符", check.name, check.limit)
+			return locale.Errorf("%s must be at most %d characters", check.name, check.limit)
 		}
 	}
 	return nil
@@ -84,13 +84,13 @@ func validateTaskTemplateRequest(req taskTemplateRequest) error {
 func writeTaskTemplateErr(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, db.ErrTaskTemplateInvalid):
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 	case errors.Is(err, db.ErrTaskTemplateNameConflict):
-		writeErr(w, http.StatusConflict, "模板名称已存在")
+		writeErr(w, http.StatusConflict, "Template name already exists")
 	case errors.Is(err, db.ErrTaskTemplateNotFound):
 		writeErr(w, http.StatusNotFound, "task template not found")
 	default:
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 	}
 }
 
@@ -101,7 +101,7 @@ func (s *Server) pgListTaskTemplates(w http.ResponseWriter, _ *http.Request) {
 	}
 	templates, err := pg.ListTaskTemplates()
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"templates": templates})
@@ -117,12 +117,12 @@ func (s *Server) pgCreateTaskTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateTaskTemplateRequest(req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	rules, err := buildTaskInterceptRules(req.InterceptRules)
 	if err != nil {
-		writeErr(w, http.StatusBadRequest, "拦截/允许规则无效："+err.Error())
+		writeError(w, http.StatusBadRequest, locale.Errorf("Invalid block/allow rules: %w", err))
 		return
 	}
 	template, err := pg.CreateTaskTemplate(db.TaskTemplateInput{
@@ -155,13 +155,13 @@ func (s *Server) pgUpdateTaskTemplate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validateTaskTemplateRequest(req); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	_, catPresent := present["category_id"]
 	_, rulesPresent := present["intercept_rules"]
 	if req.Name == nil && req.Description == nil && req.Goal == nil && !catPresent && !rulesPresent {
-		writeErr(w, http.StatusBadRequest, "至少需要提供 name、description、goal、category_id 或 intercept_rules")
+		writeErr(w, http.StatusBadRequest, "Provide at least name, description, goal, category_id, or intercept_rules")
 		return
 	}
 	patch := db.TaskTemplatePatch{Name: req.Name, Description: req.Description, Goal: req.Goal}
@@ -172,7 +172,7 @@ func (s *Server) pgUpdateTaskTemplate(w http.ResponseWriter, r *http.Request) {
 	if rulesPresent {
 		rules, err := buildTaskInterceptRules(req.InterceptRules)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "拦截/允许规则无效："+err.Error())
+			writeError(w, http.StatusBadRequest, locale.Errorf("Invalid block/allow rules: %w", err))
 			return
 		}
 		patch.SetInterceptRules = true
@@ -198,7 +198,7 @@ func (s *Server) pgDeleteTaskTemplate(w http.ResponseWriter, r *http.Request) {
 	}
 	deleted, err := pg.DeleteTaskTemplate(id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if !deleted {

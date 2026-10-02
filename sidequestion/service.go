@@ -3,6 +3,7 @@ package sidequestion
 import (
 	"context"
 	"errors"
+	"github.com/Autumn-27/artex/locale"
 	"strings"
 
 	"github.com/Autumn-27/norma/llm"
@@ -20,6 +21,7 @@ type Answer struct {
 }
 
 func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionRequest, streaming bool, update func(Answer)) (out Answer, err error) {
+	req.System = append(append([]string(nil), req.System...), locale.Text(locale.FromContext(ctx), "Answer this side question in English. Preserve raw evidence, user content, code, tool arguments, and identifiers exactly."))
 	if streaming {
 		complete := false
 		for ev, streamErr := range s.Provider.Stream(ctx, req) {
@@ -46,7 +48,7 @@ func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionReque
 			}
 		}
 		if err == nil && !complete {
-			err = errors.New("模型响应中断，请重新提问")
+			err = errors.New(locale.Text(locale.FromContext(ctx), "Model response was interrupted; please ask again"))
 		}
 	} else {
 		var msg llm.Message
@@ -58,9 +60,9 @@ func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionReque
 	}
 	if err == nil && strings.TrimSpace(out.Text) == "" {
 		if out.ToolUse {
-			out.Text = "当前旁路提问不能执行工具操作，请在主会话中发出操作请求。"
+			out.Text = locale.Text(locale.FromContext(ctx), "Side questions cannot execute tools; submit operational requests in the main conversation.")
 		} else {
-			err = errors.New("模型没有返回回答")
+			err = errors.New(locale.Text(locale.FromContext(ctx), "The model returned no answer"))
 		}
 	}
 	return out, err

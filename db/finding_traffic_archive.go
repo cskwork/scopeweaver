@@ -3,8 +3,7 @@ package db
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
-	"fmt"
+	"github.com/Autumn-27/artex/locale"
 )
 
 func ArchiveEvidenceSnapshots(snapshot *TaskArchiveSnapshot) ([]TrafficEvidenceSnapshot, error) {
@@ -27,7 +26,7 @@ func restoreFindingTrafficTx(tx *sql.Tx, snapshot *TaskArchiveSnapshot) error {
 	allowed := map[string]bool{}
 	for _, v := range snapshots {
 		if allowed[v.ID] {
-			return errors.New("duplicate archived evidence snapshot")
+			return locale.NewError("duplicate archived evidence snapshot")
 		}
 		allowed[v.ID] = true
 		if err = InsertEvidenceSnapshotTx(tx, v); err != nil {
@@ -44,19 +43,19 @@ func restoreFindingTrafficTx(tx *sql.Tx, snapshot *TaskArchiveSnapshot) error {
 	for _, row := range rows {
 		fid, ok := jsonInt64(row["finding_id"])
 		if !ok {
-			return errors.New("invalid archived evidence finding id")
+			return locale.NewError("invalid archived evidence finding id")
 		}
 		sid, _ := row["snapshot_id"].(string)
 		role, _ := row["role"].(string)
 		if !allowed[sid] || !ValidTrafficRole(role) {
-			return errors.New("invalid archived evidence binding")
+			return locale.NewError("invalid archived evidence binding")
 		}
 		var owned bool
 		if err = tx.QueryRow(`SELECT EXISTS(SELECT 1 FROM findings WHERE id=$1 AND task_id=$2)`, fid, snapshot.TaskID).Scan(&owned); err != nil {
 			return err
 		}
 		if !owned {
-			return fmt.Errorf("evidence references finding outside archived task: %d", fid)
+			return locale.Errorf("evidence references finding outside archived task: %d", fid)
 		}
 	}
 	if len(rows) > 0 {

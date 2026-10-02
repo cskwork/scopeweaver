@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"log"
 	"runtime/debug"
 
@@ -35,7 +36,7 @@ var ToolAugment func(ctx context.Context, agentKey string) (extra []actool.CoreT
 
 // AugmentTools returns base plus the agent's visible skill/MCP tools, the
 // DeferredInfo, and a cleanup func the caller must defer (closes MCP clients).
-// Built-in base tools are kept as-is — never filtered (内置工具留代码层，不做可见性过滤).
+// Built-in base tools remain in code and are not filtered for visibility.
 func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) ([]actool.CoreTool, DeferredInfo, func()) {
 	var (
 		def     DeferredInfo
@@ -60,7 +61,8 @@ func AugmentTools(ctx context.Context, agentKey string, base []actool.CoreTool) 
 	if ToolResolve != nil {
 		out = ToolResolve(ctx, agentKey, out)
 	}
-	out, def.FindingGuidance = findingWorkflowTools(agentKey, out)
+	out = localizeBuiltinTools(out, locale.FromContext(ctx))
+	out, def.FindingGuidance = findingWorkflowTools(agentKey, out, locale.FromContext(ctx))
 	for i, t := range out {
 		out[i] = guardPanic(t)
 	}
@@ -80,7 +82,7 @@ func (g *guardedTool) Call(ctx context.Context, in json.RawMessage, tc *actool.T
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("[tools] %s panic: %v\n%s", g.Name(), r, debug.Stack())
-			res, err = actool.Errorf(fmt.Sprintf("工具 %s 内部错误：%v（本次调用已失败，可换个参数或改用别的工具）", g.Name(), r)), nil
+			res, err = actool.Errorf(fmt.Sprintf(locale.Text(locale.FromContext(ctx), "Tool %s internal error: %v (this call failed; try different arguments or another tool)"), g.Name(), r)), nil
 		}
 	}()
 	return g.CoreTool.Call(ctx, in, tc)

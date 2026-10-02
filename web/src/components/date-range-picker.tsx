@@ -1,4 +1,5 @@
 "use client";
+import { useI18n } from "@/i18n";
 
 import * as React from "react";
 
@@ -15,6 +16,9 @@ interface DateRangePickerProps {
 }
 
 export function DateRangePicker({ value, onChange }: DateRangePickerProps) {
+  "use no memo";
+  const { locale: swLocale } = useI18n();
+
   const [open, setOpen] = React.useState(false);
   const [internalDateRange, setInternalDateRange] = React.useState<DateRange | undefined>(() => {
     const to = new Date();

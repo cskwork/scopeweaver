@@ -68,10 +68,10 @@ func (s *Server) searchChatMentions(w http.ResponseWriter, r *http.Request) {
 	page, err := pg.SearchChatMentionsPage(r.Context(), kind, query, r.URL.Query().Get("cursor"))
 	if err != nil {
 		if errors.Is(err, db.ErrInvalidChatMentionCursor) {
-			writeErr(w, 400, err.Error())
+			writeError(w, 400, err)
 			return
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, page)
@@ -88,7 +88,7 @@ func (s *Server) prepareChatMentionMessage(w http.ResponseWriter, message string
 		if errors.As(err, &inputErr) {
 			status = http.StatusBadRequest
 		}
-		writeErr(w, status, err.Error())
+		writeError(w, status, err)
 		return "", false
 	}
 	return msg, true

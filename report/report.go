@@ -10,10 +10,12 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
 // Input bundles what the report needs.
 type Input struct {
+	Language    locale.Lang
 	Title       string
 	Goal        string
 	GeneratedAt time.Time
@@ -47,15 +49,16 @@ var sevRank = map[string]int{"critical": 0, "high": 1, "medium": 2, "low": 3, ""
 
 // Markdown renders the report.
 func Markdown(in Input) string {
+	lang := locale.Resolve(in.Language)
 	var b strings.Builder
-	fmt.Fprintf(&b, "# 渗透测试报告 — %s\n\n", nz(in.Title, "未命名任务"))
-	fmt.Fprintf(&b, "- **任务目标**：%s\n", nz(in.Goal, "（未指定）"))
-	fmt.Fprintf(&b, "- **生成时间**：%s\n\n", in.GeneratedAt.Format("2006-01-02 15:04:05"))
+	fmt.Fprintf(&b, locale.Text(lang, "# Penetration test report — %s\n\n"), nz(in.Title, locale.Text(lang, "Untitled task")))
+	fmt.Fprintf(&b, locale.Text(lang, "- **Task objective**: %s\n"), nz(in.Goal, locale.Text(lang, "(not specified)")))
+	fmt.Fprintf(&b, locale.Text(lang, "- **Generated at**: %s\n\n"), in.GeneratedAt.Format("2006-01-02 15:04:05"))
 
 	// summary
-	fmt.Fprintf(&b, "## 摘要\n\n")
-	fmt.Fprintf(&b, "- 确认发现：**%d** 个\n", len(in.Findings))
-	fmt.Fprintf(&b, "- 资产：")
+	b.WriteString(locale.Text(lang, "## Summary\n\n"))
+	fmt.Fprintf(&b, locale.Text(lang, "- Confirmed findings: **%d**\n"), len(in.Findings))
+	b.WriteString(locale.Text(lang, "- Assets: "))
 	var types []string
 	for t := range in.AssetCounts {
 		types = append(types, t)
@@ -70,9 +73,9 @@ func Markdown(in Input) string {
 	b.WriteString("\n\n")
 
 	// findings
-	fmt.Fprintf(&b, "## 发现\n\n")
+	b.WriteString(locale.Text(lang, "## Findings\n\n"))
 	if len(in.Findings) == 0 {
-		b.WriteString("_本次未确认漏洞。_\n\n")
+		b.WriteString(locale.Text(lang, "_No vulnerabilities were confirmed._\n\n"))
 	} else {
 		fs := make([]findingView, 0, len(in.Findings))
 		for _, n := range in.Findings {
@@ -80,10 +83,10 @@ func Markdown(in Input) string {
 		}
 		sort.SliceStable(fs, func(i, j int) bool { return sevRank[fs[i].Severity] < sevRank[fs[j].Severity] })
 		for i, f := range fs {
-			fmt.Fprintf(&b, "### %d. [%s] %s\n\n", i+1, strings.ToUpper(nz(f.Severity, "info")), nz(f.Name, nz(f.VulnClass, "未分类")))
+			fmt.Fprintf(&b, "### %d. [%s] %s\n\n", i+1, severityLabel(lang, nz(f.Severity, "info")), nz(f.Name, nz(f.VulnClass, locale.Text(lang, "Unclassified"))))
 			fmt.Fprintf(&b, "%s\n\n", nz(f.Summary, ""))
 			if f.PoC != "" {
-				fmt.Fprintf(&b, "**PoC / 证据：**\n\n```\n%s\n```\n\n", f.PoC)
+				fmt.Fprintf(&b, locale.Text(lang, "**PoC / evidence:**\n\n```\n%s\n```\n\n"), f.PoC)
 			}
 		}
 	}
@@ -96,4 +99,22 @@ func nz(s, d string) string {
 		return d
 	}
 	return s
+}
+
+// severityLabel and statusLabel are display-only; export machine fields remain unchanged.
+func severityLabel(lang locale.Lang, value string) string {
+	if lang == locale.Ko {
+		if label, ok := map[string]string{"critical": "치명적", "high": "높음", "medium": "보통", "low": "낮음", "info": "정보"}[value]; ok {
+			return label
+		}
+	}
+	return strings.ToUpper(value)
+}
+func statusLabel(lang locale.Lang, value string) string {
+	if lang == locale.Ko {
+		if label, ok := map[string]string{"pending": "대기", "confirmed": "확인됨", "fixed": "수정됨", "false_positive": "오탐", "accepted_risk": "위험 수용", "open": "미해결", "resolved": "해결됨"}[value]; ok {
+			return label
+		}
+	}
+	return value
 }

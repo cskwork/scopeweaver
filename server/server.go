@@ -24,6 +24,7 @@ import (
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
@@ -131,6 +132,7 @@ type provEntry struct {
 // taskID + mergeable let the drainer coalesce several event triggers (finding/goal)
 // from the SAME task into one conversation before it starts (interval fires don't merge).
 type triggeredRun struct {
+	language  locale.Lang
 	agentKey  string
 	title     string
 	message   string // 事件正文(触发语 + 工具/入参/返回等);不含任务描述/目标头
@@ -219,9 +221,9 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		}
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // 可见 skills/MCP + 流量/编排 host 工具装配进 agent 工具集
 		domainReg := buildDomainReg(m.Assets())
-		wireTools(m.pg, domainReg) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
-		seedPrompts(m.pg)          // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
-		s.seedOrchestrationTools() // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
+		wireTools(m.pg, domainReg, s.knownToolLanguages()) // 内置工具表：按 agent 过滤 + 覆盖描述/schema + 注入默认值
+		seedPrompts(m.pg)                                  // 内置 agent 默认提示词正文播种进 agent_prompts(仅空时)
+		s.seedOrchestrationTools()                         // P2 跨任务编排工具 seed 进 tools 表(可按 agent 绑定)
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
@@ -270,7 +272,7 @@ func (s *Server) restoreTaskRuntimes() {
 		// clear stale 'running' intents from a prior crash/restart (no live worker
 		// owns them) so they re-claim instead of spinning forever in the UI.
 		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
-			log.Printf("[engine] task %s 重置 %d 个残留 running 意图为 open", t.ID, n)
+			log.Printf(locale.Text(locale.ServerDefault(), "[engine] task %s reset %d leftover running intents to open"), t.ID, n)
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
@@ -544,16 +546,16 @@ func (s *Server) resolveChatAgent(c *db.Conversation) *agent.ChatAgent {
 // chatUnavailableReason explains why no ChatAgent could be resolved, so the user
 // knows whether to add a config, activate one, or pick one for this conversation
 // — rather than a flat "not configured" that hides which of those it is.
-func (s *Server) chatUnavailableReason() string {
+func (s *Server) chatUnavailableReason(langs ...locale.Lang) string {
 	if s.m.pg != nil {
 		if profiles, err := s.m.pg.ListProfiles(); err == nil && len(profiles) == 0 {
-			return "尚未配置 LLM：请到 系统 → LLM 配置 添加一个配置"
+			return locale.Text(locale.First(langs), "No LLM is configured. Add a profile under System → LLM Profiles.")
 		}
 		if active, err := s.m.pg.ActiveProfile(); err == nil && active == nil {
-			return "没有已激活的 LLM 配置：请到 系统 → LLM 配置 激活一个，或在本对话为该会话指定一个配置"
+			return locale.Text(locale.First(langs), "No active LLM profile. Activate one under System → LLM Profiles, or select a profile for this conversation.")
 		}
 	}
-	return "LLM 未就绪，无法对话：请检查 系统 → LLM 配置是否有可用且已激活的配置"
+	return locale.Text(locale.First(langs), "LLM is not ready for chat. Check for an available active profile under System → LLM Profiles.")
 }
 
 // providerForProfile returns a cached provider+cfg for a profile id, so every agent
@@ -934,7 +936,7 @@ func (s *Server) Handler() http.Handler {
 	// /api/* goes through CORS + JWT; everything else is served by the embedded
 	// frontend (public — auth is enforced client-side and on the API). With the
 	// no-embed build the webui handler just 404s (run `next dev` separately).
-	api := cors(s.requireAuth(mux))
+	api := withLocale(cors(s.requireAuth(mux)))
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
@@ -1094,7 +1096,7 @@ func (s *Server) setActive(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if !s.m.SetActive(req.ID) {
@@ -1120,7 +1122,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 		Action string `json:"action"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.Action != "pause" && req.Action != "resume" {
@@ -1129,7 +1131,7 @@ func (s *Server) control(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := s.applyTaskControl(t, req.Action)
 	if err != nil {
-		writeErr(w, 409, err.Error())
+		writeError(w, 409, err)
 		return
 	}
 	writeJSON(w, 200, result)
@@ -1145,7 +1147,7 @@ func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法控制意图")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; intents cannot be controlled"))
 		return
 	}
 	defer s.engine.decInflight(t.ID)
@@ -1161,7 +1163,7 @@ func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
 		Mode   string `json:"mode"`   // cancel 专用:soft(默认,假删除)| hard(真删除,级联移除独占子孙)
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, "bad json: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json: ")+err.Error())
 		return
 	}
 	if req.Action != "pause" && req.Action != "resume" && req.Action != "cancel" {
@@ -1171,7 +1173,7 @@ func (s *Server) controlIntent(w http.ResponseWriter, r *http.Request) {
 
 	result, err := s.applyIntentControl(r.Context(), t, iid, req.Action, req.Reason, req.Mode)
 	if err != nil {
-		writeErr(w, 409, err.Error())
+		writeError(w, 409, err)
 		return
 	}
 	writeJSON(w, 200, result)
@@ -1202,22 +1204,22 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法重跑意图")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; intents cannot be rerun"))
 		return
 	}
 	defer s.engine.decInflight(t.ID)
 	before, err := t.Store.GetNode(iid)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	reopened, err := t.Store.ReopenIntent(iid)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if !reopened {
-		writeErr(w, 409, "该意图不是可重跑状态(仅 blocked/exhausted/stopped 可重跑)")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "This intent cannot be rerun; only blocked/exhausted/stopped intents are eligible"))
 		return
 	}
 	queued, err := s.admitTask(t, "resume")
@@ -1225,10 +1227,10 @@ func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {
 		if rollbackErr := restoreRerunIntent(t, before); rollbackErr != nil {
 			err = fmt.Errorf("%w; restore intent %d after admission failure: %v", err, iid, rollbackErr)
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
-	log.Printf("[task] #%s 意图 #%d 已重开(重跑)", t.ID, iid)
+	log.Printf(locale.Text(responseLanguage(w), "[task] #%s reopened intent #%d for rerun"), t.ID, iid)
 	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": iid, "queued": queued})
 }
 
@@ -1241,13 +1243,13 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法重跑意图")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; intents cannot be rerun"))
 		return
 	}
 	defer s.engine.decInflight(t.ID)
 	intents, err := t.Store.ListByKind(db.KindIntent, 1000000)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	before := make([]*db.Node, 0)
@@ -1259,7 +1261,7 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := t.Store.ReopenBlockedIntents()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	queued := false
@@ -1275,10 +1277,10 @@ func (s *Server) rerunBlocked(w http.ResponseWriter, r *http.Request) {
 			if len(rollbackErrors) > 0 {
 				err = fmt.Errorf("%w; restore blocked intents after admission failure: %s", err, strings.Join(rollbackErrors, "; "))
 			}
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
-		log.Printf("[task] #%s 批量重开 %d 条 blocked 意图", t.ID, n)
+		log.Printf(locale.Text(responseLanguage(w), "[task] #%s reopened %d blocked intents"), t.ID, n)
 	}
 	writeJSON(w, 200, map[string]any{"id": t.ID, "reopened": n, "queued": queued})
 }
@@ -1317,7 +1319,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		ReasoningEffort string  `json:"reasoning_effort"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
@@ -1341,11 +1343,11 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	// Validate provider construction before persisting it as the active profile.
 	if _, err := cfg.NewProvider(); err != nil {
-		writeErr(w, 400, "provider init failed: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "provider init failed: ")+err.Error())
 		return
 	}
 	if err := s.saveLLMConfig(cfg); err != nil {
-		writeErr(w, 500, "persist provider failed: "+err.Error())
+		writeErr(w, 500, locale.Text(responseLanguage(w), "persist provider failed: ")+err.Error())
 		return
 	}
 	s.invalidateProfileAgents()
@@ -1354,7 +1356,7 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.applyLLM(cfg); err != nil {
-		writeErr(w, 400, "provider init failed: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "provider init failed: ")+err.Error())
 		return
 	}
 	log.Printf("[engine] LLM configured via UI: %s / %s", cfg.Provider(), cfg.Model)
@@ -1376,7 +1378,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		SessionHeaderKey string `json:"session_header_key"` // 非空=测试时也带该自定义会话头，值为一次性随机 session id
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
@@ -1412,7 +1414,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		s.cfgMu.Unlock()
 	}
 	if cfg.APIKey == "" {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "未提供 API Key"})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), "API key was not provided")})
 		return
 	}
 	// 重试参数【不】带进连接测试:测试有 30s 硬超时,把配置的重试次数/长间隔叠上去
@@ -1461,24 +1463,24 @@ type createTaskReq struct {
 func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req createTaskReq
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, "bad json: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json: ")+err.Error())
 		return
 	}
 	if strings.TrimSpace(req.Description) == "" {
-		req.Description = "未命名任务"
+		req.Description = locale.Text(responseLanguage(w), "Untitled task")
 	}
 	if len(req.LLMProfileIDs) == 0 && req.LLMProfileID != nil {
 		req.LLMProfileIDs = []int64{*req.LLMProfileID}
 	}
 	if err := s.validateTaskProfileIDs(req.LLMProfileIDs); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.TimeoutSeconds < 0 {
 		req.TimeoutSeconds = 0
 	}
 	if len(req.SourceTaskIDs) > db.MaxTaskSourceCount {
-		writeErr(w, 400, fmt.Sprintf("关联任务最多选择 %d 个", db.MaxTaskSourceCount))
+		writeErr(w, 400, fmt.Sprintf(locale.Text(responseLanguage(w), "At most %d source tasks may be selected"), db.MaxTaskSourceCount))
 		return
 	}
 	sourceIDs := make([]int64, 0, len(req.SourceTaskIDs))
@@ -1486,11 +1488,11 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	for _, raw := range req.SourceTaskIDs {
 		id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 		if err != nil || id <= 0 || seenSources[id] {
-			writeErr(w, 400, "关联任务 id 无效或重复")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "Source task ID is invalid or duplicated"))
 			return
 		}
 		if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
-			writeErr(w, 400, fmt.Sprintf("关联任务 #%d 不存在", id))
+			writeErr(w, 400, fmt.Sprintf(locale.Text(responseLanguage(w), "Source task #%d does not exist"), id))
 			return
 		}
 		seenSources[id] = true
@@ -1498,17 +1500,18 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	}
 	companyIDs, err := db.NormalizeTaskCompanyIDs(req.CompanyIDs)
 	if err != nil {
-		writeErr(w, 400, fmt.Sprintf("关联企业无效：最多选择 %d 个有效企业", db.MaxTaskCompanyCount))
+		writeErr(w, 400, fmt.Sprintf(locale.Text(responseLanguage(w), "Invalid linked companies: select at most %d valid companies"), db.MaxTaskCompanyCount))
 		return
 	}
 	req.CompanyIDs = companyIDs
 	interceptRules, err := buildTaskInterceptRules(req.InterceptRules)
 	if err != nil {
-		writeErr(w, 400, "任务级拦截规则无效："+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "Invalid task interception rules: ")+err.Error())
 		return
 	}
 	t, err := s.m.CreateTaskWithOptions(req.Description, req.Goal, db.TaskCreateOptions{
-		Name: strings.TrimSpace(req.Name), CategoryID: req.CategoryID,
+		Language: locale.FromRequest(r),
+		Name:     strings.TrimSpace(req.Name), CategoryID: req.CategoryID,
 		SourceTaskIDs: sourceIDs, CompanyIDs: req.CompanyIDs, LLMProfileIDs: req.LLMProfileIDs,
 		TimeoutSeconds: req.TimeoutSeconds, PlanHeartbeatSeconds: req.PlanHeartbeatSeconds,
 		CoverageEnabled: req.CoverageEnabled,
@@ -1516,17 +1519,17 @@ func (s *Server) createTask(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrTaskCategoryInvalid) || errors.Is(err, db.ErrTaskCategoryNotFound) {
-			writeErr(w, 400, "任务分类不存在或无效")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "Task category does not exist or is invalid"))
 			return
 		}
 		if errors.Is(err, db.ErrTaskCompanyIDsInvalid) || errors.Is(err, db.ErrTaskCompanyNotFound) {
-			writeErr(w, 400, "关联企业不存在或无效")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "Linked company does not exist or is invalid"))
 			return
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
-	log.Printf("[task] 新建任务 #%s «%s» 目标: %s", t.ID, req.Description, req.Goal)
+	log.Printf(locale.Text(responseLanguage(w), "[task] Created task #%s «%s», objective: %s"), t.ID, req.Description, req.Goal)
 	// 共享的建后流程(seed + 种子意图 + 后台目标分解 + engine.Run),与 spawn_task 复用同一段。
 	// launchTask 内部异步,不阻塞 UI —— 目标分解在后台可见地进行。
 	s.launchTask(t, req.Description+" "+req.Goal, req.SeedFirstIntent != nil && *req.SeedFirstIntent)
@@ -1537,11 +1540,11 @@ func (s *Server) validateTaskProfileIDs(ids []int64) error {
 	seen := map[int64]bool{}
 	for _, id := range ids {
 		if id <= 0 || seen[id] {
-			return fmt.Errorf("LLM 配置 id 无效或重复")
+			return locale.Errorf("LLM profile ID is invalid or duplicated")
 		}
 		seen[id] = true
 		if _, ok := s.loadProfileConfig(id); !ok {
-			return fmt.Errorf("LLM 配置 #%d 不存在或未设置 API Key", id)
+			return locale.Errorf("LLM profile #%d does not exist or has no API key", id)
 		}
 	}
 	return nil
@@ -1561,11 +1564,11 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 		ActiveLLMProfileID *int64  `json:"active_llm_profile_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, "bad json: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json: ")+err.Error())
 		return
 	}
 	if err := s.validateTaskProfileIDs(req.LLMProfileIDs); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	active := int64(0)
@@ -1574,7 +1577,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	}
 	reopened, err := s.m.ReplaceTaskLLMProfiles(t.ID, req.LLMProfileIDs, active)
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	// Profile edits affect only subsequent LLM calls. Existing in-flight calls
@@ -1666,12 +1669,12 @@ func (s *Server) llmHost() string {
 func (s *Server) seed(t *Task, text string) {
 	scheme, host, port, ok := parseTarget(text)
 	if !ok {
-		log.Printf("[seed] task %s: 未能从 %q 解析出目标 host/IP，不创建站点（请手动配置 scope）", t.ID, text)
+		log.Printf(locale.Text(locale.ServerDefault(), "[seed] task %s: no target host/IP could be parsed from %q; no site created (configure scope manually)"), t.ID, text)
 		return
 	}
 	// P0-1 guard: never treat the configured LLM gateway as a target.
 	if gw := s.llmHost(); gw != "" && host == gw {
-		log.Printf("[seed] task %s: 目标 %q 是 LLM 网关，拒绝作为渗透目标", t.ID, host)
+		log.Printf(locale.Text(locale.ServerDefault(), "[seed] task %s: target %q is an LLM gateway and cannot be used as a testing target"), t.ID, host)
 		return
 	}
 
@@ -1690,7 +1693,7 @@ func (s *Server) seed(t *Task, text string) {
 			rootID, _ = as.UpsertRootDomain(db.UpsertRootDomainReq{Domain: host, TaskID: taskID})
 		}
 		if rootID > 0 {
-			_ = as.SetTaskAssetSource(taskID, rootID, "task", "由任务描述或目标初始化", nil)
+			_ = as.SetTaskAssetSource(taskID, rootID, "task", locale.Text(locale.ServerDefault(), "Initialized from the task description or objective"), nil)
 		}
 	}
 	// anchor the seeded assets to this task's begin root as lineage/provenance
@@ -1700,7 +1703,7 @@ func (s *Server) seed(t *Task, text string) {
 			_ = t.Store.Anchor(begin, rootID)
 		}
 	}
-	log.Printf("[seed] task %s: 目标站点 %s", t.ID, u)
+	log.Printf(locale.Text(locale.ServerDefault(), "[seed] task %s: target site %s"), t.ID, u)
 	// 不在这里 Notify:首轮是否触发统一由 engine.Run 的 HasActiveIntent 决定(种子意图任务
 	// 跳过首轮)。seed 早于 Run 执行,若在此 Notify 会 buffered 到通道、被 plannerLoop 启动时
 	// 消费掉而绕过 Run 的门控 → 种子任务仍误触发首轮。
@@ -1712,16 +1715,16 @@ func (s *Server) seed(t *Task, text string) {
 // origin fact (RelDerivedFrom) so it still traces back to a fact node. Best-effort —
 // a failure just falls back to the normal planner-driven flow.
 func (s *Server) seedFirstIntent(t *Task) {
-	summary := fmt.Sprintf("完成任务目标：%s（任务：%s）", t.Goal, t.Description)
+	summary := fmt.Sprintf(locale.Text(locale.ServerDefault(), "Complete the task objective: %s (task: %s)"), t.Goal, t.Description)
 	id, err := t.Store.AddIntent(map[string]any{"summary": summary}, 8, nil, "seed")
 	if err != nil {
-		log.Printf("[seed] task %s: 下发种子意图失败: %v", t.ID, err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[seed] task %s: could not create seed intent: %v"), t.ID, err)
 		return
 	}
 	if origin, _ := t.Store.OriginFactID(); origin > 0 {
 		_ = t.Store.Link(origin, db.RelDerivedFrom, id)
 	}
-	log.Printf("[seed] task %s: 已下发种子意图 #%d", t.ID, id)
+	log.Printf(locale.Text(locale.ServerDefault(), "[seed] task %s: created seed intent #%d"), t.ID, id)
 }
 
 func (s *Server) getTask(w http.ResponseWriter, r *http.Request) {
@@ -1745,7 +1748,7 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Asset store is unavailable"))
 		return
 	}
 	// 资产覆盖度功能关闭 → 短路返回 {enabled:false}，前端据此隐藏覆盖度卡片/进度。
@@ -1756,7 +1759,7 @@ func (s *Server) taskCoverage(w http.ResponseWriter, r *http.Request) {
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	cov, err := as.TaskCoverageWithSources(taskID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	cov.Enabled = true
@@ -1773,13 +1776,13 @@ func (s *Server) taskCoverageGraph(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Asset store is unavailable"))
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	g, err := as.BuildCoverageGraph(taskID, t.ExpID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, g)
@@ -1795,12 +1798,12 @@ func (s *Server) taskAssetRefs(w http.ResponseWriter, r *http.Request) {
 	}
 	assetID, _ := strconv.ParseInt(r.URL.Query().Get("asset_id"), 10, 64)
 	if assetID <= 0 {
-		writeErr(w, 400, "需要 asset_id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "asset_id is required"))
 		return
 	}
 	refs, err := t.Store.AssetRefsWithSources(assetID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	intents := []CoverageAssetRefDTO{}
@@ -1829,13 +1832,13 @@ func (s *Server) taskScopeList(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Asset store is unavailable"))
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	rows, err := as.ListTaskScopeWithSources(taskID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"scope": rows})
@@ -1849,7 +1852,7 @@ func (s *Server) taskScopeAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Asset store is unavailable"))
 		return
 	}
 	var body struct {
@@ -1864,7 +1867,7 @@ func (s *Server) taskScopeAdd(w http.ResponseWriter, r *http.Request) {
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	ts, err := as.AddAgentScope(taskID, body.Kind, body.Value, body.Reason, "manual")
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	writeJSON(w, 200, ts)
@@ -1878,7 +1881,7 @@ func (s *Server) taskScopeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	as := s.m.Assets()
 	if as == nil {
-		writeErr(w, 503, "asset store 未启用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Asset store is unavailable"))
 		return
 	}
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
@@ -1889,7 +1892,7 @@ func (s *Server) taskScopeDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	deleted, err := as.DeleteTaskScope(taskID, scopeID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if !deleted {
@@ -1931,7 +1934,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 		limit := findingPaginationParam(q.Get("limit"), 20, 200)
 		fs, total, err := s.m.pg.ListFindingsPage(findingFilterFromQuery(q), page, limit)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		assets := s.resolveFindingAssets(fs)
@@ -1949,7 +1952,7 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := t.Store.ListByKind(db.KindFinding, 200)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	tid, _ := strconv.ParseInt(t.ID, 10, 64)
@@ -1968,13 +1971,13 @@ func (s *Server) findings(w http.ResponseWriter, r *http.Request) {
 	// the task UI suppress mutation affordances while retaining stable ids.
 	sources, err := t.Store.DirectSourceStores()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	for _, source := range sources {
 		nodes, listErr := source.Store.ListByKind(db.KindFinding, 200)
 		if listErr != nil {
-			writeErr(w, 500, listErr.Error())
+			writeError(w, 500, listErr)
 			return
 		}
 		for _, node := range nodes {
@@ -2048,7 +2051,7 @@ func (s *Server) resolveAssetIDs(ids []int64) map[int64]*db.Asset {
 func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
 	st, err := s.m.pg.FindingStats()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, st)
@@ -2064,7 +2067,7 @@ func (s *Server) getFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if f == nil {
@@ -2113,7 +2116,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 			}
 			id, err := strconv.ParseInt(part, 10, 64)
 			if err != nil || id <= 0 {
-				writeErr(w, 400, "bad finding id: "+part)
+				writeErr(w, 400, locale.Text(responseLanguage(w), "bad finding id: ")+part)
 				return
 			}
 			ids = append(ids, id)
@@ -2127,19 +2130,19 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	case "filtered", "":
 		filter = findingFilterFromQuery(q)
 	default:
-		writeErr(w, 400, "bad scope: "+scope)
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad scope: ")+scope)
 		return
 	}
 
 	fs, err := s.m.pg.ListFindingsForExport(filter, ids)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 
 	stage, err := os.MkdirTemp("", "artex-finding-export-")
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	defer os.RemoveAll(stage)
@@ -2157,16 +2160,16 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 	switch format {
 	case "md-single":
 		setDownload("text/markdown; charset=utf-8", "findings-"+stamp+".md")
-		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now)))
+		_, _ = w.Write([]byte(report.FindingsMarkdown(fs, now, locale.FromRequest(r))))
 	case "md-zip":
 		path := filepath.Join(stage, "findings.zip")
-		if err := buildFindingsEvidenceZip(path, fs, stage, now); err != nil {
-			writeErr(w, 500, err.Error())
+		if err := buildFindingsEvidenceZip(path, fs, stage, now, locale.FromRequest(r)); err != nil {
+			writeError(w, 500, err)
 			return
 		}
 		file, err := os.Open(path)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		defer file.Close()
@@ -2174,7 +2177,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		http.ServeContent(w, r, "findings.zip", now, file)
 	case "csv":
 		setDownload("text/csv; charset=utf-8", "findings-"+stamp+".csv")
-		_, _ = w.Write(report.FindingsCSV(fs))
+		_, _ = w.Write(report.FindingsCSV(fs, locale.FromRequest(r)))
 	case "json":
 		assets := s.resolveFindingAssets(fs)
 		out := make([]FindingDTO, 0, len(fs))
@@ -2190,7 +2193,7 @@ func (s *Server) findingsExport(w http.ResponseWriter, r *http.Request) {
 		enc.SetIndent("", "  ")
 		_ = enc.Encode(out)
 	default:
-		writeErr(w, 400, "bad format: "+format)
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad format: ")+format)
 	}
 }
 
@@ -2225,7 +2228,7 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if f == nil {
@@ -2244,7 +2247,7 @@ func (s *Server) findingLineage(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, edges, err := t.Store.FindingLineage(*f.NodeID)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"nodes": taskNodeDTOs(nodes), "edges": edgeDTOs(edges)})
@@ -2267,7 +2270,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		VulnClass *string `json:"vulnclass"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeErr(w, 400, "bad json: "+err.Error())
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json: ")+err.Error())
 		return
 	}
 	if body.Status == nil && body.Severity == nil && body.Name == nil && body.VulnClass == nil {
@@ -2276,7 +2279,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Status != nil {
 		if !db.ValidFindingStatus(*body.Status) {
-			writeErr(w, 400, "bad status: "+*body.Status)
+			writeErr(w, 400, locale.Text(responseLanguage(w), "bad status: ")+*body.Status)
 			return
 		}
 		// 走带通知的版本：状态更新与「状态变更推送事件」在同一事务里落库，
@@ -2284,7 +2287,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 		// 所以只记日志、不向调用方报错。
 		from, found, notified, err := s.m.pg.SetFindingStatusWithNotify(r.Context(), id, *body.Status)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if !found {
@@ -2292,17 +2295,17 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !notified && from != *body.Status {
-			log.Printf("[notify] 状态变更事件未登记 finding=%d %s→%s（状态已更新）", id, from, *body.Status)
+			log.Printf(locale.Text(responseLanguage(w), "[notify] Status-change event not recorded for finding=%d %s→%s (status was updated)"), id, from, *body.Status)
 		}
 	}
 	if body.Severity != nil {
 		if !db.ValidSeverity(*body.Severity) {
-			writeErr(w, 400, "bad severity: "+*body.Severity)
+			writeErr(w, 400, locale.Text(responseLanguage(w), "bad severity: ")+*body.Severity)
 			return
 		}
 		n, err := s.m.pg.SetFindingSeverity(id, *body.Severity)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if n == 0 {
@@ -2313,7 +2316,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 	if body.Name != nil {
 		n, err := s.m.pg.SetFindingName(id, strings.TrimSpace(*body.Name))
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if n == 0 {
@@ -2324,7 +2327,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 	if body.VulnClass != nil {
 		n, err := s.m.pg.SetFindingVulnClass(id, strings.TrimSpace(*body.VulnClass))
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if n == 0 {
@@ -2334,7 +2337,7 @@ func (s *Server) patchFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if f == nil {
@@ -2354,7 +2357,7 @@ func (s *Server) deleteFinding(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := s.m.pg.DeleteFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if n == 0 {
@@ -2379,7 +2382,7 @@ func (s *Server) intents(w http.ResponseWriter, r *http.Request) {
 		in, err := t.Store.ListByKind(db.KindIntent, limit)
 		if err != nil {
 			log.Printf("[intents] task=%s limit=%d: %v", t.ID, limit, err)
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		writeJSON(w, 200, taskNodeDTOs(in))
@@ -2393,18 +2396,18 @@ func (s *Server) intents(w http.ResponseWriter, r *http.Request) {
 	in, hasMore, err := taskIntentHistoryPage(t.Store, before, limit, false, 0)
 	if err != nil {
 		log.Printf("[intents] task=%s before=%d limit=%d: %v", t.ID, before, limit, err)
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	sources, err := t.Store.DirectSourceStores()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	for _, source := range sources {
 		items, sourceMore, sourceErr := taskIntentHistoryPage(source.Store, before, limit, true, source.Task.TaskID)
 		if sourceErr != nil {
-			writeErr(w, 500, sourceErr.Error())
+			writeError(w, 500, sourceErr)
 			return
 		}
 		in = append(in, items...)
@@ -2497,28 +2500,28 @@ func (s *Server) explorationGraph(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, err := t.Store.Nodes(2000)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	edges, err := t.Store.Edges(5000)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	sources, err := t.Store.DirectSourceStores()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	for _, source := range sources {
 		sourceNodes, nodeErr := source.Store.Nodes(2000)
 		if nodeErr != nil {
-			writeErr(w, 500, nodeErr.Error())
+			writeError(w, 500, nodeErr)
 			return
 		}
 		sourceEdges, edgeErr := source.Store.Edges(5000)
 		if edgeErr != nil {
-			writeErr(w, 500, edgeErr.Error())
+			writeError(w, 500, edgeErr)
 			return
 		}
 		sourceNodes, sourceEdges = inheritedGraphSnapshot(sourceNodes, sourceEdges, source.Task.TaskID)
@@ -2555,7 +2558,7 @@ func (s *Server) explorationNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	nodes, total, err := t.Store.NodesPage(filter, page, size)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	ids := make([]int64, 0, len(nodes))
@@ -2566,7 +2569,7 @@ func (s *Server) explorationNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	edges, err := t.Store.EdgesTouching(ids)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	neighbourSet := map[int64]bool{}
@@ -2584,7 +2587,7 @@ func (s *Server) explorationNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	neighbours, err := t.Store.NodesByIDs(neighbourIDs)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	refs := make(map[string]TaskNodeDTO, len(neighbours))
@@ -2664,7 +2667,7 @@ func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("[activity] task=%s since=%d limit=%d intent=%v: %v", t.ID, since, limit, intentPtr, err)
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"items": activityDTOs(items), "cursor": cursor})
@@ -2749,7 +2752,7 @@ func (s *Server) activityHistory(w http.ResponseWriter, r *http.Request) {
 	if filter.Main && filter.MainSeg == nil { // bare "main" → the current segment
 		seg, err := t.Store.CurrentMainSeg()
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		filter.MainSeg = &seg
@@ -2758,7 +2761,7 @@ func (s *Server) activityHistory(w http.ResponseWriter, r *http.Request) {
 	limit := min(atoiDefault(q.Get("limit"), 200), 500) // cap so one request can't pull an unbounded slice
 	store, sourceTaskID, err := activitySessionStore(t, filter)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if store == nil {
@@ -2770,7 +2773,7 @@ func (s *Server) activityHistory(w http.ResponseWriter, r *http.Request) {
 	snapshot, err := t.Store.ActivityMaxID()
 	if err != nil {
 		log.Printf("[activity/history] task=%s session=%s snapshot: %v", t.ID, sess, err)
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	var items []db.Activity
@@ -2784,7 +2787,7 @@ func (s *Server) activityHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		log.Printf("[activity/history] task=%s session=%s before=%d limit=%d: %v", t.ID, sess, before, limit, err)
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if sourceTaskID > 0 {
@@ -2819,17 +2822,17 @@ func (s *Server) tokenStats(w http.ResponseWriter, r *http.Request) {
 	}
 	stats, err := t.Store.TokenStatsByWorker()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	sessions, err := t.Store.TokenStatsBySession()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	total, err := t.Store.TokenTotal() // whole-task total (all agents)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"workers": stats, "sessions": sessions, "total": tokenTotalDTO(total)})
@@ -2845,7 +2848,7 @@ func (s *Server) tokenDailyStats(w http.ResponseWriter, r *http.Request) {
 	}
 	buckets, err := s.m.pg.TokenDailyAll(days)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if buckets == nil {
@@ -2864,7 +2867,7 @@ func (s *Server) conversationTokens(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.m.pg.ConversationTokenSummaries()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, rows)
@@ -2906,7 +2909,7 @@ func (s *Server) getLogsHistory(w http.ResponseWriter, r *http.Request) {
 		rows, err = s.m.pg.ListLogsBefore(before, limit)
 	}
 	if err != nil {
-		writeErr(w, 500, "db: "+err.Error())
+		writeErr(w, 500, locale.Text(responseLanguage(w), "db: ")+err.Error())
 		return
 	}
 	items := make([]LogLine, 0, len(rows))
@@ -3083,7 +3086,7 @@ func (s *Server) activityDetail(w http.ResponseWriter, r *http.Request) {
 	seq, _ := strconv.ParseInt(r.PathValue("seq"), 10, 64)
 	d, err := taskActivityDetail(t, seq)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"detail": d})
@@ -3140,7 +3143,7 @@ func (s *Server) getTrafficHosts(w http.ResponseWriter, r *http.Request) {
 	}
 	hosts, err := tr.Hosts()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"hosts": hosts})
@@ -3164,7 +3167,7 @@ func (s *Server) deleteTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := tr.DeleteHost(host)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": n})
@@ -3199,7 +3202,7 @@ func (s *Server) deleteTrafficHosts(w http.ResponseWriter, r *http.Request) {
 	}
 	n, err := tr.DeleteHostsExact(hosts)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": n})
@@ -3218,7 +3221,7 @@ func (s *Server) deleteAllTraffic(w http.ResponseWriter, r *http.Request) {
 	}
 	n, reclaimed, err := tr.DeleteAll()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": n, "reclaimed": reclaimed})
@@ -3239,7 +3242,7 @@ func (s *Server) getTrafficExchange(w http.ResponseWriter, r *http.Request) {
 	}
 	req, resp, err := tr.Get(id)
 	if err != nil {
-		writeErr(w, 404, err.Error())
+		writeError(w, 404, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"req": req, "resp": resp})
@@ -3262,7 +3265,7 @@ func (s *Server) getTrafficBlob(w http.ResponseWriter, r *http.Request) {
 	}
 	f, size, err := tr.Blob(hash)
 	if err != nil {
-		writeErr(w, 404, err.Error())
+		writeError(w, 404, err)
 		return
 	}
 	defer f.Close()
@@ -3270,7 +3273,7 @@ func (s *Server) getTrafficBlob(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", hash+".bin"))
 	if _, err := io.Copy(w, f); err != nil {
-		log.Printf("[traffic] 下载 blob %s 中断：%v", hash, err)
+		log.Printf(locale.Text(responseLanguage(w), "[traffic] Blob download %s interrupted: %v"), hash, err)
 	}
 }
 
@@ -3289,6 +3292,7 @@ func (s *Server) settingsPayload() map[string]any {
 		concLimit = defaultConcurrencyLimit // 关闭时也回显一个合理默认值给 UI
 	}
 	return map[string]any{
+		"language":                 string(locale.ServerDefault()),
 		"traffic_capture":          s.m.TrafficEnabled(),
 		"agent_traffic_binding":    s.m.pg.GetBool(settingAgentTrafficBinding, false),
 		"llm_record":               s.m.LLMRecordEnabled(),
@@ -3344,11 +3348,11 @@ func notifyDigestIntervalMin(pg *db.DB) int {
 func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 	p := detectPython()
 	if p == "" {
-		writeErr(w, 404, "未检测到 python(python3/python 均不在 PATH)")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "Python was not detected (neither python3 nor python is on PATH)"))
 		return
 	}
 	if err := s.m.pg.SetSetting(settingPythonInterp, p); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"python_interpreter": p})
@@ -3359,9 +3363,10 @@ func (s *Server) pgDetectPython(w http.ResponseWriter, r *http.Request) {
 // off, agents get no proxy config, no traffic tools, and no proxy prompt content.
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		TrafficCapture      *bool `json:"traffic_capture"`
-		AgentTrafficBinding *bool `json:"agent_traffic_binding"`
-		LLMRecord           *bool `json:"llm_record"` // LLM 录制开关（默认关）；即时生效，无需重建 agent
+		Language            *string `json:"language"`
+		TrafficCapture      *bool   `json:"traffic_capture"`
+		AgentTrafficBinding *bool   `json:"agent_traffic_binding"`
+		LLMRecord           *bool   `json:"llm_record"` // LLM 录制开关（默认关）；即时生效，无需重建 agent
 		// Web search. WebSearchEnabled/Backend toggle the tool + backend; BraveKey/TavilyKey
 		// are optional — omit (null) to leave a stored key untouched, send "" to clear.
 		WebSearchEnabled *bool   `json:"web_search_enabled"`
@@ -3391,32 +3396,44 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		NotifyDigestMins *int    `json:"notify_digest_interval_min"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
+	}
+	if req.Language != nil {
+		lang := locale.Lang(*req.Language)
+		if !locale.Supported(lang) {
+			writeErr(w, 400, "language must be en or ko")
+			return
+		}
+		if err := s.m.pg.SetSetting(settingLanguage, string(lang)); err != nil {
+			writeError(w, 500, err)
+			return
+		}
+		locale.SetServerDefault(lang)
 	}
 	if req.ConstraintsInjectPlanner != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectPlanner, *req.ConstraintsInjectPlanner); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.ConstraintsInjectWorker != nil {
 		if err := s.m.pg.SetBool(settingConstraintsInjectWorker, *req.ConstraintsInjectWorker); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.NoaCompaction != nil {
 		// 每 run 读的解析器,切换即时对之后启动的 run 生效,无需 applyLLM 重建。
 		if err := s.m.SetNoaCompaction(*req.NoaCompaction); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	// 推送全局项:投递引擎每轮重新读取,所以即时生效、无需重启。
 	if req.NotifyEnabled != nil {
 		if err := s.m.pg.SetBool(settingNotifyEnabled, *req.NotifyEnabled); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
@@ -3425,28 +3442,28 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// 留着尾部斜杠会产出 "//function/..." 这种双斜杠路径。
 		base := trimTrailingSlash(strings.TrimSpace(*req.NotifyBaseURL))
 		if base != "" && !strings.HasPrefix(base, "http://") && !strings.HasPrefix(base, "https://") {
-			writeErr(w, 400, "回链地址需以 http:// 或 https:// 开头")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "Return-link URL must start with http:// or https://"))
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyPublicBaseURL, base); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.NotifyDigestMins != nil {
 		// 下限 1 分钟:更短的周期等于实时推送,那样应该直接把渠道改成 realtime 模式。
 		if *req.NotifyDigestMins < 1 || *req.NotifyDigestMins > 24*60 {
-			writeErr(w, 400, "汇总周期需在 1 到 1440 分钟之间")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "Digest interval must be between 1 and 1440 minutes"))
 			return
 		}
 		if err := s.m.pg.SetSetting(settingNotifyDigestMinutes, strconv.Itoa(*req.NotifyDigestMins)); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.Workers != nil {
 		if err := s.m.SetWorkers(*req.Workers); err != nil {
-			writeErr(w, 400, err.Error())
+			writeError(w, 400, err)
 			return
 		}
 	}
@@ -3464,7 +3481,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			limit = *req.ConcurrencyLimit
 		}
 		if err := s.m.SetConcurrency(on, limit); err != nil {
-			writeErr(w, 400, err.Error())
+			writeError(w, 400, err)
 			return
 		}
 		// 立即协调一次:关闭时放行全部排队,调高上限时补位启动,不必等下一个 tick。
@@ -3472,28 +3489,28 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.PythonInterp != nil {
 		if err := s.m.pg.SetSetting(settingPythonInterp, strings.TrimSpace(*req.PythonInterp)); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.LLMRecord != nil {
 		// 录制器每次调用读取该标志，切换即时生效，无需 applyLLM 重建。
 		if err := s.m.SetLLMRecordEnabled(*req.LLMRecord); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	changed := false
 	if req.LLMPoolEnabled != nil {
 		if err := s.m.SetLLMPoolEnabled(*req.LLMPoolEnabled); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		changed = true // the provider chain itself changes shape → rebuild
 	}
 	if req.LLMPoolBindFallback != nil {
 		if err := s.m.SetLLMPoolBindFallback(*req.LLMPoolBindFallback); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		changed = true
@@ -3505,13 +3522,13 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AgentTrafficBinding != nil {
 		if err := s.m.pg.SetBool(settingAgentTrafficBinding, *req.AgentTrafficBinding); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 	}
 	if req.TrafficCapture != nil {
 		if err := s.m.SetTrafficEnabled(*req.TrafficCapture); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		changed = true
@@ -3519,7 +3536,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.GlobalProxy != nil {
 		// Validation failure (bad scheme/host) is a client error, not a 500.
 		if err := s.m.SetGlobalProxy(*req.GlobalProxy); err != nil {
-			writeErr(w, 400, err.Error())
+			writeError(w, 400, err)
 			return
 		}
 		changed = true // capture-off egress is baked into agents at build time → rebuild
@@ -3534,7 +3551,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			backend = *req.WebSearchBackend
 		}
 		if err := s.m.SetWebSearch(on, backend, req.BraveKey, req.TavilyKey, req.WebSearchProxy); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		changed = true
@@ -3546,7 +3563,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		s.cfgMu.Unlock()
 		if on {
 			if err := s.applyLLM(cfg); err != nil {
-				writeErr(w, 500, err.Error())
+				writeError(w, 500, err)
 				return
 			}
 		}
@@ -3568,7 +3585,7 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	// Empty body is fine — fall back entirely to the saved config below.
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	_, backend, storedBraveKey, storedTavilyKey, _ := s.m.WebSearch()
@@ -3608,7 +3625,7 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(results) == 0 {
-		writeJSON(w, 200, map[string]any{"ok": false, "error": "搜索返回 0 条结果（可能被限流或代理不通）", "backend": backend})
+		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), "Search returned no results (possibly rate-limited or proxy unavailable)"), "backend": backend})
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true, "count": len(results), "backend": backend})
@@ -3624,7 +3641,7 @@ func (s *Server) mainSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	list, err := t.Store.ListMainSessions()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	current := 0
@@ -3644,12 +3661,12 @@ func (s *Server) newMainSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法新建会话")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; a conversation cannot be created"))
 		return
 	}
 	m, err := t.Store.NewMainSession()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"seq": m.Seq, "created_at": rfc3339(m.CreatedAt), "current": m.Seq})
@@ -3662,7 +3679,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; new messages cannot be sent"))
 		return
 	}
 	// 注意:任务暂停(paused)不拦截主 Agent 对话。主 Agent 编排会话独立于 planner/
@@ -3673,7 +3690,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		Seg         *int             `json:"seg,omitempty"`         // 目标主会话分段;缺省=最新段
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, req.Message)
@@ -3686,15 +3703,15 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 	s.chatMu.Lock()
 	if s.engine.IsDeleting(t.ID) {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "任务正在删除，无法发送新消息")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being deleted; new messages cannot be sent"))
 		return
 	}
 	if s.chatBusy[t.ID] {
 		s.chatMu.Unlock()
-		writeErr(w, 409, "主 Agent 正在处理上一条消息，请稍候")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "The main agent is processing the previous message; please wait"))
 		return
 	}
-	ctx, cancel := context.WithCancelCause(s.ctx)
+	ctx, cancel := context.WithCancelCause(backgroundLanguage(s.ctx, r.Context()))
 	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: req.Message})
 	s.chatBusy[t.ID] = true
 	s.chatCancel[t.ID] = cancel
@@ -3746,18 +3763,18 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 			// 把上传附件的【绝对路径】清单拼进发给 agent 的消息,它据此用 Read/Bash 打开文件。
 			// taskDir = agent 的工作目录(CWD),与 chatUpload 落盘、ensureRunDir 一致。
 			taskDir := filepath.Join(s.m.dir, "tasks", t.ID)
-			agentMsg := composeAgentMessage(agentMessage, req.Attachments, taskDir)
+			agentMsg := composeAgentMessageForLanguage(agentMessage, req.Attachments, taskDir, locale.FromContext(ctx))
 			s.engine.BeginLLMCall(t.ID)
 			_, err := ma.Chat(ctx, maTaskID, mainSeg, s.m.Assets(), t.Store, t.Goal, agentMsg, emit, t.Notify, resume, t.NotifyGoal, t.NotifyHint)
 			s.engine.EndLLMCall(t.ID)
 			if err != nil && ctx.Err() == nil {
-				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: "（主 Agent 出错：" + err.Error() + "）", MainSeg: segPtr})
+				s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", IsError: true, Summary: locale.Text(responseLanguage(w), "(Main-agent error: ") + err.Error() + ")", MainSeg: segPtr})
 			}
 		}()
 		writeJSON(w, 202, map[string]any{"status": "accepted", "mode": "llm"})
 		return
 	}
-	reply := s.fallbackChat(t, req.Message)
+	reply := s.fallbackChat(t, req.Message, locale.FromContext(ctx))
 	s.engine.emitActivity(t, db.Activity{Worker: "mainagent", Kind: "text", Summary: reply, MainSeg: segPtr})
 	s.finishTaskChat(t.ID, cancel)
 	writeJSON(w, 200, map[string]any{"reply": reply, "mode": "rule"})
@@ -3813,18 +3830,19 @@ func (s *Server) stopChat(w http.ResponseWriter, r *http.Request) {
 }
 
 // fallbackChat is the no-LLM human-steering handler: simple命令 + 态势摘要.
-func (s *Server) fallbackChat(t *Task, msg string) string {
+func (s *Server) fallbackChat(t *Task, msg string, langs ...locale.Lang) string {
 	m := strings.TrimSpace(msg)
-	lower := strings.ToLower(m)
+	intentText, intentCommand := steeringCommandText(m, "intent", "의도", "意图")
+	hintText, hintCommand := steeringCommandText(m, "hint", "힌트", "提示")
 	switch {
-	case strings.HasPrefix(m, "意图") || strings.HasPrefix(lower, "intent"):
-		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "意图"), "intent"))
+	case intentCommand:
+		text := intentText
 		_, _ = t.Store.AddIntent(map[string]any{"summary": text}, 9, nil, "human")
-		return "已注入一条高优先级意图：" + text
-	case strings.HasPrefix(m, "提示") || strings.HasPrefix(lower, "hint"):
-		text := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(m, "提示"), "hint"))
+		return locale.Text(locale.First(langs), "Added a high-priority intent: ") + text
+	case hintCommand:
+		text := hintText
 		_, _ = t.Store.AddNode(db.KindHint, map[string]any{"text": text}, 0, "active", "human", nil)
-		return "已记录提示，规划者下次会读到：" + text
+		return locale.Text(locale.First(langs), "Hint saved for the planner's next round: ") + text
 	default:
 		assetCounts, _ := s.m.Assets().CountsByType()
 		assets := 0
@@ -3833,7 +3851,7 @@ func (s *Server) fallbackChat(t *Task, msg string) string {
 		}
 		fnd, _ := t.Store.ListByKind(db.KindFinding, 1000)
 		fr, _ := t.Store.Frontier(1000)
-		return fmt.Sprintf("（规则模式，未配置 LLM）当前态势：资产 %d，待领意图 %d，确认发现 %d。\n可用指令：以\"意图 ...\"注入意图，\"提示 ...\"给规划者提示。", assets, len(fr), len(fnd))
+		return fmt.Sprintf(locale.Text(locale.First(langs), "(Rule mode, no LLM configured) Assets: %d; queued intents: %d; confirmed findings: %d.\nCommands: \"intent ...\" adds an intent; \"hint ...\" adds a planner hint."), assets, len(fr), len(fnd))
 	}
 }
 
@@ -3853,7 +3871,7 @@ func (s *Server) getReport(w http.ResponseWriter, r *http.Request) {
 	}
 	md := report.Markdown(report.Input{
 		Title: t.Description, Goal: t.Goal, GeneratedAt: time.Now(),
-		AssetCounts: counts, Findings: findings,
+		AssetCounts: counts, Findings: findings, Language: locale.FromRequest(r),
 	})
 	w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
 	w.WriteHeader(200)
@@ -3896,7 +3914,7 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func writeErr(w http.ResponseWriter, code int, msg string) {
-	writeJSON(w, code, map[string]any{"error": msg})
+	writeJSON(w, code, map[string]any{"error": locale.Text(responseLanguage(w), msg)})
 }
 
 func atoiDefault(s string, d int) int {
@@ -3904,4 +3922,15 @@ func atoiDefault(s string, d int) int {
 		return n
 	}
 	return d
+}
+
+// steeringCommandText accepts English/Korean commands and legacy Chinese aliases.
+// Only the command prefix is interpreted; the user's remaining content is preserved.
+func steeringCommandText(message string, prefixes ...string) (string, bool) {
+	for _, prefix := range prefixes {
+		if strings.HasPrefix(strings.ToLower(message), strings.ToLower(prefix)) {
+			return strings.TrimSpace(message[len(prefix):]), true
+		}
+	}
+	return "", false
 }

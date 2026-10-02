@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"io"
 	"net/http"
 	"net/url"
@@ -85,7 +86,7 @@ func normalizeHeaders(headers map[string]string) (map[string]string, error) {
 	for key, value := range headers {
 		clean := strings.TrimSpace(key)
 		if clean == "" || strings.ContainsAny(clean, "\r\n") {
-			return nil, fmt.Errorf("invalid HTTP header name %q", key)
+			return nil, locale.Errorf("invalid HTTP header name %q", key)
 		}
 		out[clean] = value
 	}
@@ -148,7 +149,7 @@ func NewSSE(ctx context.Context, server, sseURL string, headers map[string]strin
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		cancel()
-		return nil, fmt.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
+		return nil, locale.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
 	}
 	reader := bufio.NewReader(resp.Body)
 	endpoint, err := readSSEEndpoint(reader, sseURL)
@@ -183,7 +184,7 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 	for {
 		line, err := r.ReadString('\n')
 		if err != nil {
-			return "", fmt.Errorf("mcp sse endpoint: %w", err)
+			return "", locale.Errorf("mcp sse endpoint: %w", err)
 		}
 		line = strings.TrimRight(line, "\r\n")
 		if !strings.HasPrefix(line, "data:") {
@@ -195,7 +196,7 @@ func readSSEEndpoint(r *bufio.Reader, base string) (string, error) {
 		}
 		u, err := url.Parse(candidate)
 		if err != nil {
-			return "", fmt.Errorf("mcp sse endpoint URL: %w", err)
+			return "", locale.Errorf("mcp sse endpoint URL: %w", err)
 		}
 		if !u.IsAbs() {
 			b, err := url.Parse(base)
@@ -315,9 +316,9 @@ func (c *Client) wrap(rt remoteTool) actool.CoreTool {
 			for _, blk := range res.Content {
 				text += blk.Text
 			}
-			// 与内置/自定义工具一致：超长输出走 Capture——按会话 MaxOutputChars（默认
-			// 30000）截断，配了 ToolOutputDir 时全量溢写到磁盘只留 head + 指针，避免大
-			// MCP 结果整段灌爆上下文。
+			// Like built-in/custom tools, Capture truncates long output using the
+			// session MaxOutputChars (default 30000). With ToolOutputDir configured,
+			// spill the full result to disk and retain a head plus pointer in context.
 			return actool.Result{Content: []llm.ContentBlock{llm.TextBlock(actool.Capture(tc, text))}, IsError: res.IsError}, nil
 		},
 	})
@@ -340,14 +341,14 @@ func (c *Client) Call(ctx context.Context, tool string, args any) (string, error
 		IsError bool `json:"isError"`
 	}
 	if err := json.Unmarshal(raw, &res); err != nil {
-		return "", fmt.Errorf("bad MCP response: %w", err)
+		return "", locale.Errorf("bad MCP response: %w", err)
 	}
 	var text strings.Builder
 	for _, blk := range res.Content {
 		text.WriteString(blk.Text)
 	}
 	if res.IsError {
-		return text.String(), fmt.Errorf("mcp tool %q error: %s", tool, text.String())
+		return text.String(), locale.Errorf("mcp tool %q error: %s", tool, text.String())
 	}
 	return text.String(), nil
 }
@@ -400,7 +401,7 @@ func (c *Client) call(ctx context.Context, method string, params any) (json.RawM
 		return nil, err
 	}
 	if resp == nil {
-		return nil, fmt.Errorf("mcp: empty response for %s", method)
+		return nil, locale.Errorf("mcp: empty response for %s", method)
 	}
 	if resp.Error != nil {
 		return nil, resp.Error
@@ -461,7 +462,7 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("mcp http %d: %s", resp.StatusCode, readSnippet(resp.Body))
+		return nil, locale.Errorf("mcp http %d: %s", resp.StatusCode, readSnippet(resp.Body))
 	}
 	if !expectResp {
 		return nil, nil // notification — no JSON-RPC body to parse
@@ -471,7 +472,7 @@ func (c *Client) roundTrip(ctx context.Context, body rpcRequest, expectResp bool
 	}
 	var out rpcResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("mcp: decode json response: %w", err)
+		return nil, locale.Errorf("mcp: decode json response: %w", err)
 	}
 	return &out, nil
 }
@@ -515,7 +516,7 @@ func (c *Client) legacyRoundTrip(ctx context.Context, body rpcRequest, expectRes
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
+		return nil, locale.Errorf("mcp sse http %d: %s", resp.StatusCode, readSnippet(resp.Body))
 	}
 	if !expectResp {
 		return nil, nil
@@ -524,7 +525,7 @@ func (c *Client) legacyRoundTrip(ctx context.Context, body rpcRequest, expectRes
 	case response := <-responseCh:
 		return response, nil
 	case err := <-c.streamErr:
-		return nil, fmt.Errorf("mcp sse stream: %w", err)
+		return nil, locale.Errorf("mcp sse stream: %w", err)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
@@ -569,7 +570,7 @@ func parseSSE(r io.Reader, wantID int) (*rpcResponse, error) {
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
-	return nil, fmt.Errorf("mcp: no matching response in event stream")
+	return nil, locale.Errorf("mcp: no matching response in event stream")
 }
 
 func readSnippet(r io.Reader) string {

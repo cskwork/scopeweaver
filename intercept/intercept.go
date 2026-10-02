@@ -14,7 +14,6 @@ package intercept
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -23,6 +22,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
 // ctxKey is the unexported context key type to avoid collisions.
@@ -399,7 +399,7 @@ func (i *Interceptor) SetJudgeConfig(c JudgeConfig) error {
 	// Store the prompt only when it differs from the built-in template, so version
 	// updates to DefaultJudgePrompt flow through for users who never customized it.
 	promptToStore := ""
-	if strings.TrimSpace(c.Prompt) != "" && strings.TrimSpace(c.Prompt) != strings.TrimSpace(DefaultJudgePrompt) {
+	if strings.TrimSpace(c.Prompt) != "" && !IsDefaultJudgePrompt(c.Prompt) {
 		promptToStore = c.Prompt
 	}
 	if err := i.db.SetSetting(settingJudgePrompt, promptToStore); err != nil {
@@ -443,26 +443,26 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	}
 
 	input, contextErr := BuildReviewInput(cctx, tool, arguments)
-	cfg.Prompt = EffectiveJudgePrompt(cfg.Prompt)
+	cfg.Prompt = EffectiveJudgePrompt(cfg.Prompt, locale.FromContext(cctx))
 	var out Decision
 	var err error
 	var modelInput []byte
 	if contextErr != nil {
 		// Invalid current arguments cannot be reviewed faithfully, regardless of
 		// the configured model-failure strategy. A human must resolve the input.
-		out = Decision{Action: "ask", ModelFallback: true, Message: "审查上下文不完整，需要人工确认：" + contextErr.Error()}
+		out = Decision{Action: "ask", ModelFallback: true, Message: locale.Text(locale.FromContext(ctx), "Review context is incomplete; human confirmation is required: ") + locale.ErrorMessage(locale.FromContext(ctx), contextErr)}
 	} else {
 		modelInput, _ = json.Marshal(input)
 		out, err = rv(cctx, cfg.ProfileID, cfg.Prompt, input)
 	}
 	if err != nil {
-		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: "模型审批失败,按失败策略处理: " + err.Error()}
+		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: locale.Text(locale.FromContext(ctx), "Model review failed; applying failure policy: ") + locale.ErrorMessage(locale.FromContext(ctx), err)}
 	}
 	switch out.Action {
 	case "allow", "ask", "deny":
 		// valid verdict
 	default:
-		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: "模型输出无法解析,按失败策略处理"}
+		out = Decision{ProfileID: out.ProfileID, ModelFallback: true, Action: cfg.FailAction, Message: locale.Text(locale.FromContext(ctx), "Model output could not be parsed; applying failure policy")}
 	}
 	// A model verdict never carries a rule; keep RuleID 0 (→ NULL) for history.
 	out.RuleID = 0
@@ -477,9 +477,9 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	configJSON, _ := json.Marshal(cfg)
 	out.ConfigDigest = digestInput(configJSON)
 	if out.Message == "" {
-		out.Message = "[模型] " + judgeActionLabel(out.Action)
-	} else if !strings.HasPrefix(out.Message, "[模型]") {
-		out.Message = "[模型] " + out.Message
+		out.Message = locale.Text(locale.FromContext(ctx), "[Model] ") + judgeActionLabel(out.Action, locale.FromContext(ctx))
+	} else if !strings.HasPrefix(out.Message, locale.Text(locale.FromContext(ctx), "[Model]")) {
+		out.Message = locale.Text(locale.FromContext(ctx), "[Model] ") + out.Message
 	}
 	if out.Action == "ask" {
 		out.TimeoutEnabled = true
@@ -489,14 +489,14 @@ func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.Raw
 	return out, true
 }
 
-func judgeActionLabel(action string) string {
+func judgeActionLabel(action string, langs ...locale.Lang) string {
 	switch action {
 	case "allow":
-		return "放行"
+		return locale.Text(locale.First(langs), "Allow")
 	case "deny":
-		return "拦截"
+		return locale.Text(locale.First(langs), "Block")
 	case "ask":
-		return "转人工审批"
+		return locale.Text(locale.First(langs), "Request human approval")
 	default:
 		return action
 	}
@@ -505,7 +505,7 @@ func judgeActionLabel(action string) string {
 // Match evaluates the rule list (priority DESC) against a tool call.
 // Returns (Decision, true) for the first matching enabled rule, or
 // (Decision{}, false) if no rule matches.
-func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
+func (i *Interceptor) Match(toolName string, input []byte, langs ...locale.Lang) (Decision, bool) {
 	rules, err := i.rules()
 	if err != nil || len(rules) == 0 {
 		return Decision{}, false
@@ -514,7 +514,7 @@ func (i *Interceptor) Match(toolName string, input []byte) (Decision, bool) {
 		if ruleMatches(r, toolName, input) {
 			msg := r.Message
 			if msg == "" {
-				msg = defaultMessage(r.Action, r.Name)
+				msg = defaultMessage(r.Action, r.Name, langs...)
 			}
 			configJSON, _ := json.Marshal(r.InterceptRule)
 			return Decision{
@@ -547,12 +547,12 @@ func ruleMatches(r compiledRule, toolName string, input []byte) bool {
 	return strings.Contains(subject, r.Pattern)
 }
 
-func defaultMessage(action, name string) string {
+func defaultMessage(action, name string, langs ...locale.Lang) string {
 	switch action {
 	case "deny":
-		return "拦截规则 [" + name + "] 禁止执行此工具"
+		return locale.Text(locale.First(langs), "Interception rule [") + name + locale.Text(locale.First(langs), "] prohibits this tool call")
 	case "ask":
-		return "拦截规则 [" + name + "] 要求用户审批，请等待"
+		return locale.Text(locale.First(langs), "Interception rule [") + name + locale.Text(locale.First(langs), "] requires user approval; please wait")
 	default:
 		return ""
 	}
@@ -609,7 +609,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 	})
 	activity := db.Activity{
 		Kind:    "intercept_request",
-		Summary: fmt.Sprintf("工具 %s 请求审批 (#%d)", toolName, pendingID),
+		Summary: fmt.Sprintf(locale.Text(locale.FromContext(ctx), "Tool %s requests approval (#%d)"), toolName, pendingID),
 		Detail:  string(detail),
 	}
 
@@ -628,8 +628,8 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		case allowed := <-ch:
 			return allowed
 		case <-ctx.Done():
-			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "工作已取消")
-			_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "执行前工作已取消", false)
+			_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", locale.Text(locale.FromContext(ctx), "Work was cancelled"))
+			_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", locale.Text(locale.FromContext(ctx), "Work was cancelled before execution"), false)
 			return false
 		}
 	}
@@ -649,7 +649,7 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		if allowed {
 			action = "allow"
 		}
-		resolved, err := i.db.ResolveIntercept(pendingID, "timeout", action, "审批超时，按超时策略处理")
+		resolved, err := i.db.ResolveIntercept(pendingID, "timeout", action, locale.Text(locale.FromContext(ctx), "Approval timed out; applying timeout policy"))
 		if err != nil {
 			return false
 		}
@@ -659,13 +659,13 @@ func (i *Interceptor) HandleAsk(ctx context.Context, convID int64, dec Decision,
 		}
 		return allowed
 	case <-ctx.Done():
-		_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", "工作已取消")
-		_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", "执行前工作已取消", false)
+		_, _ = i.db.ResolveIntercept(pendingID, "denied", "deny", locale.Text(locale.FromContext(ctx), "Work was cancelled"))
+		_ = i.db.CompleteIntercept(pendingID, audit.RunID, audit.ToolUseID, "not_executed", locale.Text(locale.FromContext(ctx), "Work was cancelled before execution"), false)
 		return false
 	}
 }
 
-var ErrAlreadyDecided = errors.New("审批已处理或不存在，请刷新记录")
+var ErrAlreadyDecided = locale.NewError("Approval was already resolved or does not exist; refresh the record")
 
 // Decide resolves a pending request. Called by the HTTP decide endpoint.
 func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
@@ -673,9 +673,9 @@ func (i *Interceptor) Decide(pendingID int64, allowed bool) error {
 	if allowed {
 		status = "allowed"
 	}
-	action, reason := "deny", "人工拒绝执行"
+	action, reason := "deny", locale.Text(locale.ServerDefault(), "Human denied execution")
 	if allowed {
-		action, reason = "allow", "人工允许执行"
+		action, reason = "allow", locale.Text(locale.ServerDefault(), "Human allowed execution")
 	}
 	resolved, err := i.db.ResolveIntercept(pendingID, status, action, reason)
 	if err != nil {

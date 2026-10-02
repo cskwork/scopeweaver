@@ -4,9 +4,10 @@ import (
 	"net/http"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
-// ---------- P3 agent triggers (仅自定义 agent) ----------
+// ---------- P3 agent triggers (custom agents only) ----------
 
 func (s *Server) pgListTriggers(w http.ResponseWriter, r *http.Request) {
 	pg, a, ok := s.agentByKey(w, r)
@@ -15,7 +16,7 @@ func (s *Server) pgListTriggers(w http.ResponseWriter, r *http.Request) {
 	}
 	trs, err := pg.ListTriggersFor(a.Key)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"triggers": trs})
@@ -40,12 +41,12 @@ type triggerReq struct {
 
 // validateTrigger enforces the shared trigger rules for create/update:
 // at least one condition, and on_tool_call requires a non-empty tool set.
-func validateTrigger(req *triggerReq) string {
+func validateTrigger(req *triggerReq, langs ...locale.Lang) string {
 	if req.IntervalSec == 0 && !req.OnFinding && !req.OnGoalMet && !req.OnTaskTimeout && !req.OnToolCall && !req.OnTaskCreate {
-		return "至少选择一种触发条件(定时/发现finding/目标达成/任务超时/工具调用/任务创建)"
+		return locale.Text(locale.First(langs), "Select at least one trigger condition (schedule, finding, goal completion, task timeout, tool call, or task creation)")
 	}
 	if req.OnToolCall && len(req.ToolNames) == 0 {
-		return "工具调用触发至少选择一个工具"
+		return locale.Text(locale.First(langs), "Select at least one tool for a tool-call trigger")
 	}
 	return ""
 }
@@ -56,18 +57,18 @@ func (s *Server) pgCreateTrigger(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if a.Builtin {
-		writeErr(w, 400, "触发器仅支持自定义 agent")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "Triggers are supported only for custom agents"))
 		return
 	}
 	var req triggerReq
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.IntervalSec < 0 {
 		req.IntervalSec = 0
 	}
-	if msg := validateTrigger(&req); msg != "" {
+	if msg := validateTrigger(&req, responseLanguage(w)); msg != "" {
 		writeErr(w, 400, msg)
 		return
 	}
@@ -79,7 +80,7 @@ func (s *Server) pgCreateTrigger(w http.ResponseWriter, r *http.Request) {
 		ToolCallMessage: req.ToolCallMessage, TaskCreateMessage: req.TaskCreateMessage, ToolNames: req.ToolNames,
 	})
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, tr)
@@ -92,18 +93,18 @@ func (s *Server) pgUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad trigger id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad trigger id"))
 		return
 	}
 	var req triggerReq
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.IntervalSec < 0 {
 		req.IntervalSec = 0
 	}
-	if msg := validateTrigger(&req); msg != "" {
+	if msg := validateTrigger(&req, responseLanguage(w)); msg != "" {
 		writeErr(w, 400, msg)
 		return
 	}
@@ -114,7 +115,7 @@ func (s *Server) pgUpdateTrigger(w http.ResponseWriter, r *http.Request) {
 		GoalMessage: req.GoalMessage, TaskTimeoutMessage: req.TaskTimeoutMessage,
 		ToolCallMessage: req.ToolCallMessage, TaskCreateMessage: req.TaskCreateMessage, ToolNames: req.ToolNames,
 	}); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -127,11 +128,11 @@ func (s *Server) pgDeleteTrigger(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad trigger id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad trigger id"))
 		return
 	}
 	if err := pg.DeleteTrigger(id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": id})

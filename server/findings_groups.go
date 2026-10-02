@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
 const maxFindingFollowUpRunes = 4000
@@ -26,13 +27,13 @@ func findingPaginationParam(raw string, fallback, upperBound int) int {
 }
 
 // findingFilterFromQuery builds the shared findings filter from a request's
-// query string. 列表 / 分组 / 资产树 / 导出走同一份解析,新增筛选项只改这里。
+// query string. Lists, groups, asset trees, and exports share this parser; add filters here.
 func findingFilterFromQuery(q url.Values) db.FindingFilter {
 	return db.FindingFilter{
 		Severity:  normFilter(q.Get("severity")),
 		Status:    normFilter(q.Get("status")),
 		VulnClass: normFilter(q.Get("vulnclass")),
-		// task_id(独立于会切到「按任务节点」分支的 task 参数):全局表按任务筛选。
+		// task_id filters the global table, independently of task, which selects the task-node view.
 		TaskID:     normFilter(q.Get("task_id")),
 		Query:      q.Get("q"),
 		Sort:       q.Get("sort"),
@@ -40,12 +41,12 @@ func findingFilterFromQuery(q url.Values) db.FindingFilter {
 	}
 }
 
-// findingAssetTree serves the「按资产」view's left-hand tree: every asset that
+// findingAssetTree serves the "By asset" view's left-hand tree: every asset that
 // carries at least one matching finding, plus the ancestors needed to place it.
 func (s *Server) findingAssetTree(w http.ResponseWriter, r *http.Request) {
 	tree, err := s.m.pg.BuildFindingAssetTree(findingFilterFromQuery(r.URL.Query()))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, tree)
@@ -61,7 +62,7 @@ func (s *Server) findingGroups(w http.ResponseWriter, r *http.Request) {
 	limit := findingPaginationParam(q.Get("limit"), 10, 100)
 	groups, total, findingTotal, err := s.m.pg.ListFindingGroups(findingFilterFromQuery(q), page, limit)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	// PostgreSQL owns paused/queued persistence. The live engine adds the same
@@ -92,7 +93,7 @@ func (s *Server) findingGroups(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deepenFinding(w http.ResponseWriter, r *http.Request) {
 	id := int64(atoiDefault(r.PathValue("id"), 0))
 	if id <= 0 {
-		writeErr(w, 400, "bad finding id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad finding id"))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 32<<10)
@@ -102,42 +103,42 @@ func (s *Server) deepenFinding(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, locale.Text(responseLanguage(w), "Request body is too large"))
 		} else {
-			writeErr(w, http.StatusBadRequest, "bad json: "+err.Error())
+			writeError(w, http.StatusBadRequest, locale.Errorf("bad json: %w", err))
 		}
 		return
 	}
 	description := strings.TrimSpace(req.Description)
 	switch {
 	case description == "":
-		writeErr(w, 400, "description is required")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "description is required"))
 		return
 	case utf8.RuneCountInString(description) > maxFindingFollowUpRunes:
-		writeErr(w, 400, fmt.Sprintf("description must be at most %d characters", maxFindingFollowUpRunes))
+		writeErr(w, 400, fmt.Sprintf(locale.Text(responseLanguage(w), "description must be at most %d characters"), maxFindingFollowUpRunes))
 		return
 	}
 
 	finding, err := s.m.pg.GetFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if finding == nil {
-		writeErr(w, 404, "finding not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "finding not found"))
 		return
 	}
 	if finding.TaskID == nil || finding.NodeID == nil {
-		writeErr(w, 409, "finding origin task or node is no longer available")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "finding origin task or node is no longer available"))
 		return
 	}
 	t, ok := s.m.Task(i64s(*finding.TaskID))
 	if !ok || t == nil {
-		writeErr(w, 409, "finding origin task is no longer available")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "finding origin task is no longer available"))
 		return
 	}
 	if !s.engine.beginTaskOperation(t.ID) {
-		writeErr(w, 409, "task is being deleted")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "task is being deleted"))
 		return
 	}
 	defer s.engine.decInflight(t.ID)
@@ -145,24 +146,24 @@ func (s *Server) deepenFinding(w http.ResponseWriter, r *http.Request) {
 	audit := db.Activity{
 		Worker:  "system",
 		Kind:    "text",
-		Summary: "人工提交漏洞深入利用意图",
+		Summary: locale.Text(responseLanguage(w), "User submitted a finding follow-up intent"),
 		Detail:  description,
 	}
 	intentID, audit, err := t.Store.AddFindingFollowUpIntent(id, *finding.NodeID, description, audit)
 	if errors.Is(err, db.ErrFindingOriginUnavailable) {
-		writeErr(w, 409, "finding origin task or node is no longer available")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "finding origin task or node is no longer available"))
 		return
 	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	queued, err := s.admitTask(t, "resume")
 	if err != nil {
 		if rollbackErr := t.Store.DiscardOpenIntent(intentID); rollbackErr != nil {
-			err = errors.Join(err, fmt.Errorf("discard follow-up intent %d: %w", intentID, rollbackErr))
+			err = errors.Join(err, locale.Errorf("discard follow-up intent %d: %w", intentID, rollbackErr))
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	// The audit row committed atomically with the intent. Publish that exact row;

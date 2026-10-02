@@ -39,7 +39,7 @@ func (s *Server) listConstraints(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := t.Store.ListConstraints()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"constraints": constraintDTOs(rows)})
@@ -78,7 +78,7 @@ func (s *Server) addConstraint(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := t.Store.AddConstraint(kind, text, "human")
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, ConstraintDTO{ID: strconv.FormatInt(id, 10), Kind: kind, Text: text, Origin: "human"})
@@ -121,7 +121,7 @@ func (s *Server) editConstraint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := t.Store.UpdateConstraint(cid, kind, text); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, ConstraintDTO{ID: strconv.FormatInt(cid, 10), Kind: kind, Text: text})
@@ -146,7 +146,7 @@ func (s *Server) deleteConstraint(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := t.Store.DeleteConstraint(cid); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})

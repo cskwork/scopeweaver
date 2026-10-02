@@ -2,7 +2,7 @@ package server
 
 import (
 	"errors"
-	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -31,31 +31,31 @@ func (s *Server) updateTaskMetadata(w http.ResponseWriter, r *http.Request) {
 	if err := decode(r, &request); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, "Request body is too large")
 		} else {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, err)
 		}
 		return
 	}
 	if request.Name == nil && request.Pinned == nil {
-		writeErr(w, http.StatusBadRequest, "至少需要提供 name 或 pinned")
+		writeErr(w, http.StatusBadRequest, "Provide at least name or pinned")
 		return
 	}
 	if request.Name != nil {
 		name := strings.TrimSpace(*request.Name)
 		if name == "" {
-			writeErr(w, http.StatusBadRequest, "任务名称不能为空")
+			writeErr(w, http.StatusBadRequest, "Task name must not be empty")
 			return
 		}
 		if utf8.RuneCountInString(name) > maxTaskNameRunes {
-			writeErr(w, http.StatusBadRequest, fmt.Sprintf("任务名称最多 %d 个字符", maxTaskNameRunes))
+			writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "Task name must be at most %d characters", maxTaskNameRunes))
 			return
 		}
 		request.Name = &name
 	}
 	task, err := s.m.UpdateTaskMetadata(taskID, db.TaskPatch{Name: request.Name, Pinned: request.Pinned})
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if task == nil {

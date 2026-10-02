@@ -4,36 +4,34 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"net/http"
 	"strings"
 	"text/template"
 	"time"
 )
 
-// webhookChannel 是通用 Webhook 适配器：用户自定 URL、方法、请求头与 JSON 模板。
-// 它的存在让本功能不必为 Slack / Mattermost / Discord / 自建系统各写一个实现——
-// 那些平台都能被一个可配模板覆盖。
+// webhookChannel supports custom URLs, methods, headers, and JSON templates, covering Slack,
+// Mattermost, Discord, and private receivers without separate adapters.
 type webhookChannel struct{}
 
 func (webhookChannel) Kind() string { return KindWebhook }
 
-// 通用 Webhook 没有官方限制，返回 0 表示默认不限流，由使用者按对端能力自定。
+// Generic webhooks have no platform-wide rate limit; zero leaves operators to configure the receiver's
+// capacity.
 func (webhookChannel) DefaultRatePerMin() int { return 0 }
 
-// 掩码 url 与 headers：目标地址本身常带 token，自定义头里通常放着鉴权凭据，
-// 两者都会出现在接口回显里，所以都要挡。
-// 代价是编辑时若想改动其中一个头，需要重新填整组头（掩码值会被解释为「保持原值」）——
-// 这个取舍是刻意的：宁可多填一次，也不把凭据回显到浏览器。
+// Mask URLs and headers because both commonly contain authentication tokens. Editing a header requires
+// resubmitting the entire header object; masks mean preserve. This deliberate inconvenience prevents
+// credential exposure to browsers.
 func (webhookChannel) SecretKeys() []string { return []string{"url", "headers"} }
 
-// 目的地是 url。改 url 时必须重新表态 headers —— 否则原始 Authorization 头
-// 会被原样发到新地址，这正是掩码绕过的主路径。
+// Changing url requires an explicit headers choice; otherwise stored Authorization headers would be
+// sent to the new destination, bypassing masking.
 func (webhookChannel) DestinationKeys() []string { return []string{"url"} }
 
-// webhookDefaultTemplate 是未填模板时的兜底请求体：一个直白的 JSON 结构，
-// 覆盖绝大多数「收一条 JSON 入库」的自建接收端。
+// webhookDefaultTemplate supplies straightforward JSON for receivers that simply ingest and store
+// notification objects.
 const webhookDefaultTemplate = `{
   "title": {{json .Title}},
   "batch": {{.Batch}},
@@ -54,14 +52,14 @@ const webhookDefaultTemplate = `{
   ]
 }`
 
-// webhookTemplateData 是暴露给用户模板的上下文。
+// webhookTemplateData is the context exposed to user templates.
 type webhookTemplateData struct {
 	Title   string
 	Batch   bool
 	Count   int
 	Items   []webhookItem
 	HomeURL string
-	// SentAt 是本次投递时间（RFC3339），供接收端记录。
+	// SentAt records this delivery time in RFC3339 format for receivers.
 	SentAt string
 }
 
@@ -76,30 +74,31 @@ type webhookItem struct {
 	DetailURL     string
 	FromStatus    string
 	ToStatus      string
-	// StatusLabel 是状态变更的可读描述，如「待处理 → 已修复」；非状态变更时为空。
+	// StatusLabel describes a status transition; it is empty for other events.
 	StatusLabel string
 }
 
 func (webhookChannel) Validate(cfg map[string]any) error {
 	raw := cfgString(cfg, "url")
 	if raw == "" {
-		return errors.New("缺少目标 URL")
+		return locale.NewError("Destination URL is required")
 	}
 	if err := validateHTTPURL(raw); err != nil {
-		return fmt.Errorf("目标 URL 无效: %w", err)
+		return locale.Errorf("Invalid destination URL: %w", err)
 	}
 	if m := strings.ToUpper(cfgString(cfg, "method")); m != "" && m != http.MethodGet && m != http.MethodPost && m != http.MethodPut && m != http.MethodPatch {
-		return fmt.Errorf("不支持的方法 %s（可用 GET/POST/PUT/PATCH）", m)
+		return locale.Errorf("Unsupported method %s (use GET/POST/PUT/PATCH)", m)
 	}
 	if tpl := cfgString(cfg, "body_template"); tpl != "" {
 		if _, err := parseWebhookTemplate(tpl); err != nil {
-			return fmt.Errorf("请求体模板语法错误: %w", err)
+			return locale.Errorf("Invalid request body template syntax: %w", err)
 		}
 	}
 	return nil
 }
 
 func (c webhookChannel) Send(ctx context.Context, cfg map[string]any, m Message) (int, error) {
+	m = m.withContextLanguage(ctx)
 	if err := c.Validate(cfg); err != nil {
 		return 0, Permanent(err)
 	}
@@ -108,25 +107,25 @@ func (c webhookChannel) Send(ctx context.Context, cfg map[string]any, m Message)
 		method = http.MethodPost
 	}
 
-	// GET 不带请求体：把内容塞进 query 超出模板能力范围，也不符合 GET 语义，
-	// 所以 GET 只适合「命中即触发钩子」这类接收端。
+	// GET sends no body. Encoding content into queries is outside template scope and GET semantics; use
+	// GET only for trigger-on-request hooks.
 	var payload any
 	if method != http.MethodGet {
 		body, err := renderWebhookBody(cfgString(cfg, "body_template"), m)
 		if err != nil {
 			return 0, Permanent(err)
 		}
-		// 模板渲染出的是字符串形式的 JSON，这里转成 json.RawMessage 原样发出，
-		// 避免二次转义把用户精心构造的结构套进一个 JSON 字符串里。
+		// Send rendered JSON as json.RawMessage to avoid wrapping the user's structure in a doubly escaped
+		// JSON string.
 		if !json.Valid([]byte(body)) {
-			return 0, Permanent(errors.New("请求体模板渲染结果不是合法 JSON"))
+			return 0, Permanent(locale.NewError("Rendered request body template is not valid JSON"))
 		}
 		payload = json.RawMessage(body)
 	}
 
 	headers := cfgMap(cfg, "headers")
 	if ct := cfgString(cfg, "content_type"); ct != "" {
-		// 允许覆盖，但放在 headers 之后应用，保证显式配置优先。
+		// Apply the explicit setting after custom headers so it takes precedence.
 		if headers == nil {
 			headers = map[string]string{}
 		}
@@ -135,42 +134,37 @@ func (c webhookChannel) Send(ctx context.Context, cfg map[string]any, m Message)
 	if _, err := doJSON(ctx, method, cfgString(cfg, "url"), headers, payload); err != nil {
 		return 0, err
 	}
-	// 通用 Webhook 不截断正文（接收端是用户自己的服务，体积由 body_template 决定），
-	// 因此整批都算送达。
+	// Generic webhooks do not truncate user-controlled bodies, so the entire batch counts as delivered.
 	return len(m.Items), nil
 }
 
-// renderWebhookBody 用用户模板（或默认模板）渲染请求体。
+// renderWebhookBody renders the user template or default request body.
 func renderWebhookBody(tpl string, m Message) (string, error) {
 	if strings.TrimSpace(tpl) == "" {
 		tpl = webhookDefaultTemplate
 	}
 	t, err := parseWebhookTemplate(tpl)
 	if err != nil {
-		return "", fmt.Errorf("请求体模板语法错误: %w", err)
+		return "", locale.Errorf("Invalid request body template syntax: %w", err)
 	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, newWebhookTemplateData(m)); err != nil {
-		return "", fmt.Errorf("渲染请求体模板失败: %w", err)
+		return "", locale.Errorf("Failed to render request body template: %w", err)
 	}
 	return buf.String(), nil
 }
 
-// parseWebhookTemplate 解析模板。
-//
-// missingkey=zero 让缺失的 map 键渲染成零值而不是报错——但本文件的上下文是结构体，
-// 主要作用是让 .Items 为空时 range 不出错。真正需要防的是 .Items 为 nil。
+// parseWebhookTemplate uses missingkey=zero for missing map entries. The actual context is a struct;
+// empty/nil Items must remain safe to range over.
 func parseWebhookTemplate(tpl string) (*template.Template, error) {
 	return template.New("body").Funcs(webhookTemplateFuncs).Option("missingkey=zero").Parse(tpl)
 }
 
-// webhookTemplateFuncs 是暴露给模板的辅助函数。
+// webhookTemplateFuncs defines helpers available to templates.
 var webhookTemplateFuncs = template.FuncMap{
-	// json 把任意值序列化成 JSON。
-	//
-	// 这个函数不是锦上添花而是必需的：省去它，用户只能写 {{.Title}} 直接插值，
-	// 而漏洞标题里只要有引号或换行，整段请求体就不再是合法 JSON——接收端会
-	// 拒收，且报错信息指向「JSON 解析失败」，完全联想不到是标题里有个引号。
+	// json serializes arbitrary values safely. It is essential: direct title interpolation produces
+	// invalid JSON when findings contain quotes or newlines, causing receiver parse errors that obscure
+	// the underlying title issue.
 	"json": func(v any) (string, error) {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -178,7 +172,7 @@ var webhookTemplateFuncs = template.FuncMap{
 		}
 		return string(raw), nil
 	},
-	// jsons 用于把 JSON 片段嵌进另一段 JSON 字符串值内部（做一层字符串转义）。
+	// jsons escapes a JSON fragment for embedding inside another JSON string value.
 	"jsons": func(v any) (string, error) {
 		raw, err := json.Marshal(v)
 		if err != nil {
@@ -188,7 +182,7 @@ var webhookTemplateFuncs = template.FuncMap{
 		if err != nil {
 			return "", err
 		}
-		// 去掉外层引号：调用方自己决定要不要加引号。
+		// Remove outer quotes so callers control whether to include them.
 		return string(quoted[1 : len(quoted)-1]), nil
 	},
 }
@@ -208,7 +202,7 @@ func newWebhookTemplateData(m Message) webhookTemplateData {
 			Name:          it.Name,
 			VulnClass:     it.VulnClass,
 			Severity:      it.Severity,
-			SeverityLabel: SeverityLabel(it.Severity),
+			SeverityLabel: SeverityLabel(it.Severity, locale.Resolve(m.Language)),
 			Summary:       it.Summary,
 			Assets:        append([]string{}, it.Assets...),
 			DetailURL:     it.DetailURL,
@@ -216,7 +210,7 @@ func newWebhookTemplateData(m Message) webhookTemplateData {
 			ToStatus:      it.ToStatus,
 		}
 		if it.IsStatusChange() {
-			wi.StatusLabel = StatusLabel(it.FromStatus) + " → " + StatusLabel(it.ToStatus)
+			wi.StatusLabel = StatusLabel(it.FromStatus, locale.Resolve(m.Language)) + " → " + StatusLabel(it.ToStatus, locale.Resolve(m.Language))
 		}
 		d.Items = append(d.Items, wi)
 	}

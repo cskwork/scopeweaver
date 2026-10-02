@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -26,8 +27,8 @@ type chatAttachment struct {
 	Name string `json:"name"`
 	Path string `json:"path"`
 	Size int64  `json:"size"`
-	// Abs 是落盘的绝对路径(m.dir 已是绝对)。建任务前暂存(scope=staging)时前端要用它把
-	// 提示词写进描述;task/session 走 composeAgentMessage 在后端拼路径,不依赖此字段。
+	// Abs is the persisted absolute path (m.dir is already absolute). Before task creation, staging uploads use it
+	// in the frontend task description; task/session uploads use backend composeAgentMessage and do not depend on this field.
 	Abs string `json:"abs,omitempty"`
 }
 
@@ -41,8 +42,10 @@ type chatAttachment struct {
 //
 //	scope=task    → <workDir>/tasks/<id>/uploads/
 //	scope=session → <workDir>/sessions/<id>/uploads/
-//	scope=staging → <workDir>/drafts/<id>/uploads/   (建任务前暂存:任务尚无 ID,
-//	                文件先落这里,前端按返回的 abs 绝对路径写进任务描述)
+//
+// scope=staging -> <workDir>/drafts/<id>/uploads/ (before task creation, when no task ID exists;
+//
+//	files land here and the frontend inserts the returned absolute path into the description).
 func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 	var sub string
 	taskScoped := false
@@ -55,12 +58,12 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 	case "staging":
 		sub = "drafts"
 	default:
-		writeErr(w, 400, "scope 必须是 task / session / staging")
+		writeErr(w, 400, "scope must be task / session / staging")
 		return
 	}
 	id := r.URL.Query().Get("id")
 	if !safeChatID.MatchString(id) {
-		writeErr(w, 400, "非法 id")
+		writeErr(w, 400, "Invalid ID")
 		return
 	}
 	if taskScoped {
@@ -69,24 +72,24 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !s.engine.beginTaskOperation(id) {
-			writeErr(w, http.StatusConflict, "任务正在删除，无法上传附件")
+			writeErr(w, http.StatusConflict, "The task is being deleted; attachments cannot be uploaded")
 			return
 		}
 		defer s.engine.decInflight(id)
 	}
 	dir := filepath.Join(s.m.dir, sub, id, "uploads")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		writeErr(w, 500, "建目录失败: "+err.Error())
+		writeError(w, 500, locale.Errorf("Create directory failed: %w", err))
 		return
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxChatUpload)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
-		writeErr(w, 400, "解析上传失败或超出大小限制: "+err.Error())
+		writeError(w, 400, locale.Errorf("Could not parse upload or upload exceeds size limit: %w", err))
 		return
 	}
 	files := r.MultipartForm.File["file"]
 	if len(files) == 0 {
-		writeErr(w, 400, "缺少上传文件(表单字段 file)")
+		writeErr(w, 400, "Missing upload file (form field file)")
 		return
 	}
 	out := make([]chatAttachment, 0, len(files))
@@ -97,7 +100,7 @@ func (s *Server) chatUpload(w http.ResponseWriter, r *http.Request) {
 		}
 		dest := uniqueUploadPath(dir, name)
 		if err := saveUpload(hdr, dest); err != nil {
-			writeErr(w, 500, "保存失败: "+err.Error())
+			writeError(w, 500, locale.Errorf("Save failed: %w", err))
 			return
 		}
 		base := filepath.Base(dest)
@@ -128,14 +131,19 @@ func uniqueUploadPath(dir, name string) string {
 // dir (its CWD); we emit ABSOLUTE paths (baseDir + relative) so the agent can Read/Bash
 // them unambiguously regardless of how it interprets relative paths.
 func composeAgentMessage(msg string, atts []chatAttachment, baseDir string) string {
+	return composeAgentMessageForLanguage(msg, atts, baseDir, locale.ServerDefault())
+}
+
+// composeAgentMessageForLanguage localizes only the authored attachment guidance.
+func composeAgentMessageForLanguage(msg string, atts []chatAttachment, baseDir string, lang locale.Lang) string {
 	if len(atts) == 0 {
 		return msg
 	}
 	var b strings.Builder
 	b.WriteString(msg)
-	b.WriteString("\n\n【用户上传的附件】(绝对路径，需要时用 Read/Bash 查看)：")
+	b.WriteString(locale.Text(lang, "\n\n[User-uploaded attachments] (absolute paths; inspect with Read/Bash when needed):"))
 	for _, a := range atts {
-		fmt.Fprintf(&b, "\n- %s（%s）", filepath.Join(baseDir, a.Path), humanBytes(a.Size))
+		fmt.Fprintf(&b, "\n- %s (%s)", filepath.Join(baseDir, a.Path), humanBytes(a.Size))
 	}
 	return b.String()
 }

@@ -24,8 +24,6 @@ web/next-env.d.ts
 *.swp
 *.swo
 
-# docs
-/docs/
 
 # os
 .DS_Store
@@ -34,9 +32,9 @@ Thumbs.db
 # claude code local state
 .claude/
 
-# 内嵌前端的单二进制产物
+# Binary with embedded frontend
 /artex
-# 一键更新在可执行文件旁留下的中间产物（暂存件 / 备份 / 失败版本 / 升级标记）
+# Self-update staging, backup, failed binary and marker
 /artex.new
 /artex.new.sha256
 /artex.old
@@ -45,16 +43,23 @@ Thumbs.db
 /server/webui/dist/
 /dist/
 
-# JWT 签名密钥（运行时生成，存项目根，绝不提交）
+# Runtime JWT signing key; never commit
 /jwt.key
 
-# Docker 部署生成的本地环境（含密码/密钥，不提交）
+# Local Docker environment with passwords/keys; never commit
 .env
 
-# 调度器运行/模拟产生的事件日志（测试产物，不提交）
+# Scheduler test event logs
 *-events.csv
 
-# bench 基准测试相关（本地产物，不提交）
+# Local benchmark artifacts
 /bench/
 /Dockerfile.bench
 /Dockerfile.bench.v2
+/scopeweaver
+/scopeweaver.exe
+/scopeweaver.new
+/scopeweaver.new.sha256
+/scopeweaver.old
+/scopeweaver.failed
+/scopeweaver.upgrade.json

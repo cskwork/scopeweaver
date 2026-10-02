@@ -3,13 +3,13 @@ package server
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
 // companyScopeInputs accepts both the new [{kind,value}] contract and the
@@ -23,9 +23,9 @@ func decodeCompanyMutationRequest(w http.ResponseWriter, r *http.Request, value 
 	if err := json.NewDecoder(r.Body).Decode(value); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求正文过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, locale.Text(responseLanguage(w), "Request body is too large"))
 		} else {
-			writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			writeError(w, http.StatusBadRequest, locale.Errorf("invalid JSON: %w", err))
 		}
 		return false
 	}
@@ -46,7 +46,7 @@ func (items *companyScopeInputs) UnmarshalJSON(data []byte) error {
 		}
 		var structured db.ScopeInput
 		if err := json.Unmarshal(raw, &structured); err != nil {
-			return fmt.Errorf("scope[%d] must be a string or {kind,value}", i)
+			return locale.Errorf("scope[%d] must be a string or {kind,value}", i)
 		}
 		out = append(out, structured)
 	}
@@ -77,12 +77,12 @@ func (s *Server) companyStore() *db.CompanyStore {
 func (s *Server) listCompanies(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	companies, err := cs.ListCompanies()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, companies)
@@ -95,7 +95,7 @@ func (s *Server) listCompanies(w http.ResponseWriter, r *http.Request) {
 func (s *Server) createCompany(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	var req struct {
@@ -108,25 +108,25 @@ func (s *Server) createCompany(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Name = strings.TrimSpace(req.Name)
 	if req.Name == "" {
-		writeErr(w, 400, "name required")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "name required"))
 		return
 	}
 	if err := db.ValidateCompanyScopeInputBounds(req.Scope); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	id, added, skipped, invalid, scopeErrs, err := cs.CreateCompanyWithScope(req.Name, req.Logo, req.Scope, "api")
 	if err != nil {
 		if errors.Is(err, db.ErrCompanyNameConflict) {
-			writeErr(w, http.StatusConflict, "企业名称已存在")
+			writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Company name already exists"))
 			return
 		}
 		var validationErr *db.CompanyScopeValidationError
 		if errors.As(err, &validationErr) {
-			writeErr(w, http.StatusBadRequest, validationErr.Error())
+			writeError(w, http.StatusBadRequest, validationErr)
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	out := map[string]any{
@@ -149,26 +149,26 @@ func (s *Server) createCompany(w http.ResponseWriter, r *http.Request) {
 func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeErr(w, 400, "invalid id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid id"))
 		return
 	}
 	c, err := cs.GetCompany(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if c == nil {
-		writeErr(w, 404, "company not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "company not found"))
 		return
 	}
 	scope, err := cs.GetScope(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"company": c, "scope": scope})
@@ -181,12 +181,12 @@ func (s *Server) getCompany(w http.ResponseWriter, r *http.Request) {
 func (s *Server) addCompanyScope(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeErr(w, 400, "invalid company id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid company id"))
 		return
 	}
 	var req struct {
@@ -198,7 +198,7 @@ func (s *Server) addCompanyScope(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := db.ValidateCompanyScopeInputBounds(req.Scope); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
+		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	var added, skipped, invalid int
@@ -211,15 +211,15 @@ func (s *Server) addCompanyScope(w http.ResponseWriter, r *http.Request) {
 	}
 	if mutationErr != nil {
 		if errors.Is(mutationErr, db.ErrCompanyNotFound) {
-			writeErr(w, http.StatusNotFound, "company not found")
+			writeErr(w, http.StatusNotFound, locale.Text(responseLanguage(w), "company not found"))
 			return
 		}
 		var validationErr *db.CompanyScopeValidationError
 		if errors.As(mutationErr, &validationErr) {
-			writeErr(w, http.StatusBadRequest, validationErr.Error())
+			writeError(w, http.StatusBadRequest, validationErr)
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, mutationErr.Error())
+		writeError(w, http.StatusInternalServerError, mutationErr)
 		return
 	}
 	out := map[string]any{
@@ -247,12 +247,12 @@ func (s *Server) addCompanyScope(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteCompany(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
-		writeErr(w, 400, "invalid id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid id"))
 		return
 	}
 	var req struct {
@@ -263,16 +263,16 @@ func (s *Server) deleteCompany(w http.ResponseWriter, r *http.Request) {
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&req); err != nil {
 		if !errors.Is(err, io.EOF) {
-			writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+			writeError(w, http.StatusBadRequest, locale.Errorf("invalid JSON: %w", err))
 			return
 		}
 	} else {
 		var trailing any
 		if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
 			if err == nil {
-				writeErr(w, http.StatusBadRequest, "invalid JSON: multiple values")
+				writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "invalid JSON: multiple values"))
 			} else {
-				writeErr(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+				writeError(w, http.StatusBadRequest, locale.Errorf("invalid JSON: %w", err))
 			}
 			return
 		}
@@ -281,10 +281,10 @@ func (s *Server) deleteCompany(w http.ResponseWriter, r *http.Request) {
 	assetsDeleted, err := s.m.DeleteCompanyWithAssets(id, req.DeleteAssets)
 	if err != nil {
 		if errors.Is(err, db.ErrCompanyNotFound) {
-			writeErr(w, http.StatusNotFound, "company not found")
+			writeErr(w, http.StatusNotFound, locale.Text(responseLanguage(w), "company not found"))
 			return
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": 1, "assets_deleted": assetsDeleted})
@@ -297,11 +297,11 @@ func (s *Server) deleteCompany(w http.ResponseWriter, r *http.Request) {
 func (s *Server) reattribute(w http.ResponseWriter, r *http.Request) {
 	cs := s.companyStore()
 	if cs == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	if err := cs.RecomputeAttribution(); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -319,7 +319,7 @@ const (
 func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 	as := s.assetStore()
 	if as == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	q := r.URL.Query()
@@ -343,11 +343,11 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 
 	if dsl := q.Get("dsl"); dsl != "" {
 		if err := db.ValidateDSL(dsl); err != nil {
-			writeErr(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		// task_id scopes the DSL search to a task's assets (the task detail
-		// "测试资产" search); 0 means the global asset view.
+		// "Test assets" search); 0 means the global asset view.
 		taskID, _ := strconv.ParseInt(q.Get("task_id"), 10, 64)
 		total, err = as.CountDSL(dsl, typ, taskID)
 		if err == nil && offset < total {
@@ -379,7 +379,7 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{
@@ -396,7 +396,7 @@ func (s *Server) listAssets(w http.ResponseWriter, r *http.Request) {
 func (s *Server) assetCounts(w http.ResponseWriter, r *http.Request) {
 	as := s.assetStore()
 	if as == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	var counts map[string]int
@@ -407,7 +407,7 @@ func (s *Server) assetCounts(w http.ResponseWriter, r *http.Request) {
 		counts, err = as.CountsByType()
 	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, counts)
@@ -420,23 +420,23 @@ func (s *Server) assetCounts(w http.ResponseWriter, r *http.Request) {
 func (s *Server) deleteAssets(w http.ResponseWriter, r *http.Request) {
 	as := s.assetStore()
 	if as == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	var req struct {
 		IDs []int64 `json:"ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, "invalid JSON: "+err.Error())
+		writeError(w, 400, locale.Errorf("invalid JSON: %w", err))
 		return
 	}
 	if len(req.IDs) == 0 {
-		writeErr(w, 400, "ids required")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "ids required"))
 		return
 	}
 	deleted, err := as.DeleteByIDs(req.IDs)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"deleted": deleted})
@@ -449,7 +449,7 @@ func (s *Server) deleteAssets(w http.ResponseWriter, r *http.Request) {
 func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 	as := s.assetStore()
 	if as == nil {
-		writeErr(w, 503, "database unavailable")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "database unavailable"))
 		return
 	}
 	var req struct {
@@ -489,7 +489,7 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 		} `json:"assets"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, 400, "invalid JSON: "+err.Error())
+		writeError(w, 400, locale.Errorf("invalid JSON: %w", err))
 		return
 	}
 
@@ -534,15 +534,15 @@ func (s *Server) insertAssets(w http.ResponseWriter, r *http.Request) {
 			}
 			id, err = as.UpsertEndpoint(db.UpsertEndpointReq{URL: a.URL, Method: a.Method, Params: a.Params, IP: svcIP, TaskID: req.TaskID})
 		default:
-			errs = append(errs, errEntry{Index: i, Error: "unknown type: " + a.Type})
+			errs = append(errs, errEntry{Index: i, Error: locale.Text(responseLanguage(w), "unknown type: %s", a.Type)})
 			continue
 		}
 		if err != nil {
-			errs = append(errs, errEntry{Index: i, Error: err.Error()})
+			errs = append(errs, errEntry{Index: i, Error: locale.ErrorMessage(responseLanguage(w), err)})
 			continue
 		}
 		if req.TaskID > 0 {
-			_ = as.SetTaskAssetSource(req.TaskID, id, "api", "通过资产 API 登记", nil)
+			_ = as.SetTaskAssetSource(req.TaskID, id, "api", locale.Text(responseLanguage(w), "Registered through the asset API"), nil)
 		}
 		results = append(results, result{Index: i, ID: id, Type: a.Type})
 	}

@@ -2,8 +2,11 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"log"
 	"strconv"
 	"strings"
@@ -37,13 +40,13 @@ func jsonResult(v any) (actool.Result, error) {
 // decides who actually sees any of them.
 //
 //nolint:unused // used as the hostTools provider in wireAgentAugment
-func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
-	tools := append(s.m.HostTools(), s.orchestrationTools()...)
-	tools = append(tools, s.findingRetestTools()...)
-	tools = append(tools, s.platformTools()...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
-	custom, err := s.customTools()
+func (s *Server) hostTools(ctx context.Context) ([]actool.CoreTool, map[string][]string) {
+	tools := append(s.m.HostTools(locale.FromContext(ctx)), s.orchestrationTools(locale.FromContext(ctx))...)
+	tools = append(tools, s.findingRetestTools(locale.FromContext(ctx))...)
+	tools = append(tools, s.platformTools(locale.FromContext(ctx))...) // 平台操作工具(建改 skill/工具/MCP，给 Auto 用)
+	custom, err := s.customToolsForLanguage(locale.FromContext(ctx))
 	if err != nil {
-		log.Printf("[custom-tool] 加载失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[custom-tool] Loading failed: %v"), err)
 		return tools, nil
 	}
 	tools = append(tools, custom...)
@@ -62,22 +65,22 @@ func (s *Server) hostTools() ([]actool.CoreTool, map[string][]string) {
 
 // orchestrationTools returns the cross-task tool set. Bound per-agent via the
 // tools table (default: no binding — opt-in for orchestration agents).
-func (s *Server) orchestrationTools() []actool.CoreTool {
+func (s *Server) orchestrationTools(langs ...locale.Lang) []actool.CoreTool {
 	return []actool.CoreTool{
-		s.toolListTasks(),
-		s.toolListLLMProfiles(),
-		s.toolSpawnTask(),
-		s.toolPauseTask(),
-		s.toolGetTaskGraph(),
-		s.toolListTaskFindings(),
-		s.toolAddHint(),
-		s.toolGetWorkerTrace(),
-		s.toolListWorkerTraces(),
-		s.toolSearchWorkerTraces(),
-		s.toolGetTaskNodeDetail(),
-		s.toolUpdateFindingReport(),
-		s.toolGetFindingTraffic(),
-		s.toolBindFindingTraffic(),
+		s.toolListTasks(langs...),
+		s.toolListLLMProfiles(langs...),
+		s.toolSpawnTask(langs...),
+		s.toolPauseTask(langs...),
+		s.toolGetTaskGraph(langs...),
+		s.toolListTaskFindings(langs...),
+		s.toolAddHint(langs...),
+		s.toolGetWorkerTrace(langs...),
+		s.toolListWorkerTraces(langs...),
+		s.toolSearchWorkerTraces(langs...),
+		s.toolGetTaskNodeDetail(langs...),
+		s.toolUpdateFindingReport(langs...),
+		s.toolGetFindingTraffic(langs...),
+		s.toolBindFindingTraffic(langs...),
 	}
 }
 
@@ -152,17 +155,17 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 	}
 	_ = json.Unmarshal(in, &head)
 	if strings.TrimSpace(head.TaskID) == "" {
-		return actool.Errorf("task_id 为必填"), nil
+		return actool.Errorf(locale.Text(locale.FromContext(ctx), "task_id is required")), nil
 	}
 	t, ok := s.m.Task(head.TaskID)
 	if !ok {
-		return actool.Errorf("task 不存在: " + head.TaskID), nil
+		return actool.Errorf(locale.Text(locale.FromContext(ctx), "Task not found: ") + head.TaskID), nil
 	}
 	var m map[string]json.RawMessage
 	_ = json.Unmarshal(in, &m)
 	delete(m, "task_id")
 	inner, _ := json.Marshal(m)
-	tsx := agent.NewToolSet(t.Store, "orchestrator")
+	tsx := agent.NewToolSet(t.Store, "orchestrator", locale.FromContext(ctx))
 	if s.m.Assets() != nil {
 		tsx.SetAssetStore(s.m.Assets(), s.m.Assets().Companies())
 	}
@@ -173,9 +176,9 @@ func (s *Server) delegateToTask(ctx context.Context, in json.RawMessage, pick fu
 
 // --- tools ---
 
-func (s *Server) toolListTasks() actool.CoreTool {
+func (s *Server) toolListTasks(langs ...locale.Lang) actool.CoreTool {
 	return roTool("list_tasks",
-		"列出所有任务(id/描述/目标/状态/运行时长/父任务/LLM 配置)，编排 agent 用它掌握全局、看哪些任务卡太久、各自用哪个 LLM。运行时长：运行中=创建→现在，终态=创建→最后活动(秒)。llm_profile：任务 planner/worker 用的配置名，(激活配置)=跟随全局激活。",
+		locale.Text(locale.First(langs), "List all tasks with id/description/objective/state/elapsed time/parent/LLM profile, so orchestration can inspect progress, stalls, and model assignments. Elapsed seconds run from creation to now for active tasks or last activity for terminal tasks. llm_profile is the planner/worker profile name; active profile means following the global selection."),
 		objSchema(map[string]any{}),
 		func(context.Context, json.RawMessage) (actool.Result, error) {
 			lastAct, _ := s.m.PG().LastActivityAll()
@@ -205,11 +208,11 @@ func (s *Server) toolListTasks() actool.CoreTool {
 				}
 				llmState := t.llmStateSnapshot()
 				if llmState.ProfileID == nil {
-					row["llm_profile"] = "(激活配置)"
+					row["llm_profile"] = locale.Text(locale.First(langs), "(active profile)")
 				} else if n, ok := profName[*llmState.ProfileID]; ok {
 					row["llm_profile"] = n
 				} else {
-					row["llm_profile"] = fmt.Sprintf("#%d(已删除)", *llmState.ProfileID)
+					row["llm_profile"] = fmt.Sprintf(locale.Text(locale.First(langs), "#%d (deleted)"), *llmState.ProfileID)
 				}
 				out = append(out, row)
 			}
@@ -219,9 +222,9 @@ func (s *Server) toolListTasks() actool.CoreTool {
 
 // toolListLLMProfiles lists the available LLM profiles (name/model/active) so an
 // orchestration agent can pick one for spawn_task's llm_profile. Never leaks keys.
-func (s *Server) toolListLLMProfiles() actool.CoreTool {
+func (s *Server) toolListLLMProfiles(langs ...locale.Lang) actool.CoreTool {
 	return roTool("list_llm_profiles",
-		"列出可用的 LLM 配置(profile)：id、名称、模型、格式、是否为当前激活配置。用 id 给 spawn_task 的 llm_profile_id 参数指定子任务专属 LLM（如侦察用便宜模型、利用用强模型）。不含 API Key。",
+		locale.Text(locale.First(langs), "List available LLM profiles: id, name, model, format, and active status. Use an ID as spawn_task.llm_profile_id to assign a child task's model. API keys are never included."),
 		objSchema(map[string]any{}),
 		func(context.Context, json.RawMessage) (actool.Result, error) {
 			profs, err := s.m.pg.ListProfiles()
@@ -238,20 +241,20 @@ func (s *Server) toolListLLMProfiles() actool.CoreTool {
 		})
 }
 
-func (s *Server) toolSpawnTask() actool.CoreTool {
+func (s *Server) toolSpawnTask(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("spawn_task",
-		"新建一个子任务并启动探索引擎，返回 task_id。用于把一件事(如一道题/一个目标)派成独立任务。parent_ref 可选：填当前编排关联的父任务 id 做父子关联。",
+		locale.Text(locale.First(langs), "Create a child task and start its exploration engine, returning task_id. Delegate one objective as an independent task. Optional parent_ref associates it with the current parent task."),
 		objSchema(map[string]any{
-			"description":            strParam("任务描述(简短标题)"),
-			"goal":                   strParam("任务目标(要达成什么)"),
-			"parent_ref":             strParam("可选：父任务 id(做父子关联)"),
-			"source_task_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": fmt.Sprintf("可选：只读继承的来源任务 id 列表(最多 %d 个)。子任务可只读引用这些任务已探明的资产/结论作为起点；与 parent_ref 的纯父子指针不同，这是内容继承。", db.MaxTaskSourceCount)},
-			"llm_profile_id":         map[string]any{"type": "integer", "description": "可选：指定本子任务 planner/worker 用的 LLM 配置 id(见 list_llm_profiles)；留空则继承父任务、再回退全局激活配置"},
-			"timeout_seconds":        map[string]any{"type": "integer", "description": "可选：任务级超时(秒)。到点后触发优雅收尾并进入 timeout 终态；留空或 0 = 不限时"},
-			"plan_heartbeat_seconds": map[string]any{"type": "integer", "description": "可选：planner 心跳触发间隔(秒)。距上轮规划结束/任务开始满该值且期间无触发 → 触发一轮规划(兜底死锁 + 唤醒去监督飞行中的 worker)。留空或 0 = 默认 600(10min)；"},
-			"seed_first_intent":      map[string]any{"type": "boolean", "description": "可选：对于简单任务可开启，创建时直接下发一条种子意图(内容=描述+目标)让 worker 免等首轮 planner 直接开跑测试；默认 false(走标准先规划再执行)。"},
+			"description":            strParam(locale.Text(locale.First(langs), "Task description, a short title")),
+			"goal":                   strParam(locale.Text(locale.First(langs), "Task objective: the outcome to achieve")),
+			"parent_ref":             strParam(locale.Text(locale.First(langs), "Optional parent task ID for parent-child association")),
+			"source_task_ids":        map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": fmt.Sprintf(locale.Text(locale.First(langs), "Optional read-only source task IDs, at most %d. The child may reference their established assets/conclusions as starting context. Unlike parent_ref, this is content inheritance."), db.MaxTaskSourceCount)},
+			"llm_profile_id":         map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Optional LLM profile ID for this child's planner/worker, from list_llm_profiles; otherwise inherit the parent's profile, then the globally active profile")},
+			"timeout_seconds":        map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Optional task timeout in seconds; triggers graceful settlement and terminal timeout state. Omitted/0 means unlimited.")},
+			"plan_heartbeat_seconds": map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Optional planner heartbeat in seconds: if no trigger arrives since the last planning round/task start, wake planning to avoid stalls and supervise workers. Omitted/0 uses the configured default.")},
+			"seed_first_intent":      map[string]any{"type": "boolean", "description": locale.Text(locale.First(langs), "Optional for simple tasks: create an initial intent from description+goal so a worker starts without waiting for the first planner round. Default false uses the normal plan-then-execute flow.")},
 		}, "description", "goal"),
-		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
+		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				Description          string          `json:"description"`
 				Goal                 string          `json:"goal"`
@@ -264,27 +267,27 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			}
 			_ = json.Unmarshal(in, &a)
 			if strings.TrimSpace(a.Description) == "" {
-				a.Description = "未命名任务"
+				a.Description = locale.Text(locale.First(langs), "Untitled task")
 			}
 			if strings.TrimSpace(a.Goal) == "" {
-				return actool.Errorf("goal 为必填"), nil
+				return actool.Errorf(locale.Text(locale.First(langs), "goal is required")), nil
 			}
 			if a.TimeoutSeconds < 0 {
 				a.TimeoutSeconds = 0
 			}
 			// 只读继承来源任务：数量上限 + 每个 id 有效/去重/存在，校验规则与 HTTP 建任务一致。
 			if len(a.SourceTaskIDs) > db.MaxTaskSourceCount {
-				return actool.Errorf(fmt.Sprintf("关联任务最多选择 %d 个", db.MaxTaskSourceCount)), nil
+				return actool.Errorf(fmt.Sprintf(locale.Text(locale.First(langs), "At most %d source tasks may be selected"), db.MaxTaskSourceCount)), nil
 			}
 			sourceIDs := make([]int64, 0, len(a.SourceTaskIDs))
 			seenSources := map[int64]bool{}
 			for _, raw := range a.SourceTaskIDs {
 				id, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
 				if err != nil || id <= 0 || seenSources[id] {
-					return actool.Errorf("关联任务 id 无效或重复"), nil
+					return actool.Errorf(locale.Text(locale.First(langs), "Source task ID is invalid or duplicated")), nil
 				}
 				if _, ok := s.m.Task(strconv.FormatInt(id, 10)); !ok {
-					return actool.Errorf(fmt.Sprintf("关联任务 #%d 不存在", id)), nil
+					return actool.Errorf(fmt.Sprintf(locale.Text(locale.First(langs), "Source task #%d does not exist"), id)), nil
 				}
 				seenSources[id] = true
 				sourceIDs = append(sourceIDs, id)
@@ -293,7 +296,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 			var pin *int64
 			if id := parseProfileID(a.LLMProfileID); id > 0 {
 				if _, ok := s.loadProfileConfig(id); !ok {
-					return actool.Errorf(fmt.Sprintf("LLM 配置 #%d 不存在或未设置 API Key", id)), nil
+					return actool.Errorf(fmt.Sprintf(locale.Text(locale.First(langs), "LLM profile #%d does not exist or has no API key"), id)), nil
 				}
 				pin = &id
 			} else if a.ParentRef != "" {
@@ -306,6 +309,7 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 				llmIDs = []int64{*pin}
 			}
 			t, err := s.m.CreateTaskWithOptions(a.Description, a.Goal, db.TaskCreateOptions{
+				Language:             s.childTaskLanguage(ctx, a.ParentRef),
 				SourceTaskIDs:        sourceIDs,
 				LLMProfileIDs:        llmIDs,
 				TimeoutSeconds:       a.TimeoutSeconds,
@@ -328,9 +332,9 @@ func (s *Server) toolSpawnTask() actool.CoreTool {
 		})
 }
 
-func (s *Server) toolPauseTask() actool.CoreTool {
-	return wrTool("pause_task", "暂停指定任务(停止其 planner/worker 循环)。",
-		objSchema(map[string]any{"task_id": strParam("要暂停的任务 id")}, "task_id"),
+func (s *Server) toolPauseTask(langs ...locale.Lang) actool.CoreTool {
+	return wrTool("pause_task", locale.Text(locale.First(langs), "Pause a task and stop its planner/worker loops."),
+		objSchema(map[string]any{"task_id": strParam(locale.Text(locale.First(langs), "Task ID to pause"))}, "task_id"),
 		func(_ context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				TaskID string `json:"task_id"`
@@ -338,7 +342,7 @@ func (s *Server) toolPauseTask() actool.CoreTool {
 			_ = json.Unmarshal(in, &a)
 			t, ok := s.m.Task(a.TaskID)
 			if !ok {
-				return actool.Errorf("task 不存在: " + a.TaskID), nil
+				return actool.Errorf(locale.Text(locale.First(langs), "Task not found: ") + a.TaskID), nil
 			}
 			if _, err := s.applyTaskControlWithCause(t, "pause", agent.AbortPausedByOrchestrator); err != nil {
 				return actool.Errorf(err.Error()), nil
@@ -347,72 +351,72 @@ func (s *Server) toolPauseTask() actool.CoreTool {
 		})
 }
 
-func (s *Server) toolGetTaskGraph() actool.CoreTool {
-	return roTool("get_task_graph", "读指定任务的探索图总览(同 graph_overview：资产计数/frontier/发现/覆盖等)，用 task_id 指定任务。",
-		objSchema(map[string]any{"task_id": strParam("任务 id")}, "task_id"),
+func (s *Server) toolGetTaskGraph(langs ...locale.Lang) actool.CoreTool {
+	return roTool("get_task_graph", locale.Text(locale.First(langs), "Read a task's graph overview by task_id: asset counts, frontier, findings, coverage, and related situation data, like graph_overview."),
+		objSchema(map[string]any{"task_id": strParam(locale.Text(locale.First(langs), "Task ID"))}, "task_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).GraphOverviewTool)
 		})
 }
 
-func (s *Server) toolListTaskFindings() actool.CoreTool {
-	return roTool("list_task_findings", "读指定任务的确认漏洞(含 flag/PoC；每条带 id/task_id/intent_id/vulnclass/severity/摘要/状态)，用 task_id 指定任务。",
-		objSchema(map[string]any{"task_id": strParam("任务 id")}, "task_id"),
+func (s *Server) toolListTaskFindings(langs ...locale.Lang) actool.CoreTool {
+	return roTool("list_task_findings", locale.Text(locale.First(langs), "Read confirmed findings for task_id, including flags/PoC and id/task_id/intent_id/vulnclass/severity/summary/status."),
+		objSchema(map[string]any{"task_id": strParam(locale.Text(locale.First(langs), "Task ID"))}, "task_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).ListFindingsTool)
 		})
 }
 
-func (s *Server) toolAddHint() actool.CoreTool {
-	return wrTool("add_task_hint", "给指定任务注入战略提示(该任务的 planner 下轮生成意图时会读到)。\n"+
-		"★优先批量：多条提示放进 hints 数组一次提交（返回 ids 数组，与 hints 等长同序，失败项 id=0）；单条则省略 hints 直接给顶层 text。",
+func (s *Server) toolAddHint(langs ...locale.Lang) actool.CoreTool {
+	return wrTool("add_task_hint", locale.Text(locale.First(langs), "Add strategic hints to a task for its planner's next round.\n")+
+		locale.Text(locale.First(langs), "Prefer one hints batch; returned ids match length/order and failed entries are 0. For one hint, omit hints and provide top-level text."),
 		objSchema(map[string]any{
-			"task_id":      strParam("任务 id"),
-			"hints":        map[string]any{"type": "array", "description": "【优先用这个】提示数组，每个元素字段同顶层（text/asset_ids/traffic_refs）。", "items": objSchema(map[string]any{"text": strParam("提示内容"), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}, "traffic_refs": agent.HintTrafficSchema()})},
-			"text":         strParam("[单条] 提示内容"),
-			"traffic_refs": agent.HintTrafficSchema(),
-			"asset_ids":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "锚定的资产 id（可选，0/1/多个；该任务内的资产 id）"},
+			"task_id":      strParam(locale.Text(locale.First(langs), "Task ID")),
+			"hints":        map[string]any{"type": "array", "description": locale.Text(locale.First(langs), "Preferred hints array; each item uses text/asset_ids/traffic_refs."), "items": objSchema(map[string]any{"text": strParam(locale.Text(locale.First(langs), "Hint text")), "asset_ids": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}, "traffic_refs": agent.HintTrafficSchema(locale.First(langs))})},
+			"text":         strParam(locale.Text(locale.First(langs), "Single hint text")),
+			"traffic_refs": agent.HintTrafficSchema(locale.First(langs)),
+			"asset_ids":    map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": locale.Text(locale.First(langs), "Optional anchored asset IDs in that task (zero/one/many)")},
 		}, "task_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).AddHintTool)
 		})
 }
 
-func (s *Server) toolGetWorkerTrace() actool.CoreTool {
+func (s *Server) toolGetWorkerTrace(langs ...locale.Lang) actool.CoreTool {
 	return roTool("get_task_worker_trace",
-		"看指定任务里某个 work(意图)的执行过程：get_task_worker_trace(task_id, intent_id) 看步骤摘要；再带 step_ids=[...] 取那几步完整内容(一次最多 5 个,多传只返回前 5 个)。",
+		locale.Text(locale.First(langs), "Inspect a worker intent's trace in a task. get_task_worker_trace(task_id,intent_id) returns step summaries; add step_ids for full content, at most the first five per call."),
 		objSchema(map[string]any{
-			"task_id":   strParam("任务 id"),
-			"intent_id": map[string]any{"type": "integer", "description": "意图 id(该任务里的 work)"},
-			"step_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": "可选：要取完整内容的步骤 id(一次最多 5 个,多传只返回前 5 个,其余在 omitted_step_ids 里列出)"},
+			"task_id":   strParam(locale.Text(locale.First(langs), "Task ID")),
+			"intent_id": map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Intent ID for work in that task")},
+			"step_ids":  map[string]any{"type": "array", "items": map[string]any{"type": "integer"}, "description": locale.Text(locale.First(langs), "Optional step IDs for full content, at most five; excess IDs appear in omitted_step_ids")},
 		}, "task_id", "intent_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).GetWorkerTraceTool)
 		})
 }
 
-func (s *Server) toolListWorkerTraces() actool.CoreTool {
-	return roTool("list_task_worker_traces", "列出指定任务里跑过哪些 work(意图) + 各自步数，用于发现哪些 work 值得翻看(再用 get_task_worker_trace)。",
-		objSchema(map[string]any{"task_id": strParam("任务 id")}, "task_id"),
+func (s *Server) toolListWorkerTraces(langs ...locale.Lang) actool.CoreTool {
+	return roTool("list_task_worker_traces", locale.Text(locale.First(langs), "List executed intents and step counts for a task to identify traces worth inspecting with get_task_worker_trace."),
+		objSchema(map[string]any{"task_id": strParam(locale.Text(locale.First(langs), "Task ID"))}, "task_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).ListWorkerTracesTool)
 		})
 }
 
-func (s *Server) toolSearchWorkerTraces() actool.CoreTool {
-	return roTool("search_task_worker_traces", "在指定任务里按关键字搜索所有 work 的执行过程(返回命中步骤摘要 + intent_id)。",
-		objSchema(map[string]any{"task_id": strParam("任务 id"), "q": strParam("搜索关键字")}, "task_id", "q"),
+func (s *Server) toolSearchWorkerTraces(langs ...locale.Lang) actool.CoreTool {
+	return roTool("search_task_worker_traces", locale.Text(locale.First(langs), "Search all worker traces in a task by keyword, returning matching step summaries and intent_id."),
+		objSchema(map[string]any{"task_id": strParam(locale.Text(locale.First(langs), "Task ID")), "q": strParam(locale.Text(locale.First(langs), "Search keyword"))}, "task_id", "q"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).SearchWorkerTracesTool)
 		})
 }
 
-func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
+func (s *Server) toolGetTaskNodeDetail(langs ...locale.Lang) actool.CoreTool {
 	return roTool("get_task_node_detail",
-		"读指定任务里某个探索图节点的完整内容(发现/事实/意图/目标：摘要 + 详情/证据/PoC)。id 为探索节点 id(如 report_finding 返回、或 list_task_findings 里的 id)。写漏洞报告前用它取该漏洞的完整证据。",
+		locale.Text(locale.First(langs), "Read full exploration-node content for a task (finding/fact/intent/goal: summary, detail, evidence, PoC). id is the exploration node ID from report_finding or list_task_findings, not an asset ID. Read full finding evidence before writing its report."),
 		objSchema(map[string]any{
-			"task_id": strParam("任务 id"),
-			"id":      map[string]any{"type": "integer", "description": "探索图节点 id(非资产 id)"},
+			"task_id": strParam(locale.Text(locale.First(langs), "Task ID")),
+			"id":      map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Exploration node ID, not an asset ID")},
 		}, "task_id", "id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			return s.delegateToTask(ctx, in, (*agent.ToolSet).NodeDetailTool)
@@ -423,13 +427,13 @@ func (s *Server) toolGetTaskNodeDetail() actool.CoreTool {
 // finding_id is the id report_finding returned ("finding recorded: <id>", the
 // finding node id). The write (SetFindingReportByNodeID) is keyed by node_id and
 // task-agnostic, so this host tool needs no task_id / exploration store.
-func (s *Server) toolUpdateFindingReport() actool.CoreTool {
+func (s *Server) toolUpdateFindingReport(langs ...locale.Lang) actool.CoreTool {
 	return wrTool("update_finding_report",
-		"为已登记的漏洞写入/更新【详细报告】(Markdown 全文,整段覆盖旧内容)。finding_id 传 report_finding 返回的那个 id(\"finding recorded: <id>\" 里的数字)。报告建议包含:漏洞概述、影响与危害、复现步骤、证据/PoC、修复建议。",
+		locale.Text(locale.First(langs), "Write/update a registered finding's detailed Markdown report, replacing the previous report. finding_id takes the exploration node ID in report_finding's \"finding recorded: <id>\" line. Include overview, impact, reproduction, evidence/PoC, and remediation."),
 		objSchema(map[string]any{
-			"finding_id":       map[string]any{"type": "integer", "description": "目标漏洞 id(report_finding 返回的 id)"},
-			"report":           strParam("详细报告全文,Markdown 格式"),
-			"evidence_version": map[string]any{"type": "integer", "description": "get_finding_traffic 返回的证据 version；用于防止报告覆盖新的证据变更"},
+			"finding_id":       map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Target exploration finding node ID returned by report_finding")},
+			"report":           strParam(locale.Text(locale.First(langs), "Complete detailed report in Markdown")),
+			"evidence_version": map[string]any{"type": "integer", "description": locale.Text(locale.First(langs), "Evidence version returned by get_finding_traffic, preventing reports from overwriting newer evidence changes")},
 		}, "finding_id", "report"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
@@ -440,14 +444,14 @@ func (s *Server) toolUpdateFindingReport() actool.CoreTool {
 			_ = json.Unmarshal(in, &a)
 			nodeID := parseProfileID(a.FindingID) // 复用「数字或数字字符串」解析
 			if nodeID <= 0 {
-				return actool.Errorf("finding_id 无效"), nil
+				return actool.Errorf(locale.Text(locale.First(langs), "Invalid finding_id")), nil
 			}
 			n, err := s.m.pg.SetFindingReportVersionByNodeID(ctx, nodeID, a.Report, a.EvidenceVersion)
 			if err != nil {
 				return actool.Errorf(err.Error()), nil
 			}
 			if n == 0 {
-				return actool.Errorf(fmt.Sprintf("未找到 finding_id=%d 对应的漏洞记录(先用 report_finding 登记)", nodeID)), nil
+				return actool.Errorf(fmt.Sprintf(locale.Text(locale.First(langs), "No finding record for finding_id=%d; register it first with report_finding"), nodeID)), nil
 			}
 			return actool.Text(fmt.Sprintf("finding %d report updated (%d chars)", nodeID, len(a.Report))), nil
 		})
@@ -474,7 +478,7 @@ func (s *Server) seedOrchestrationTools() {
 	// task-op + platform tools default-bind to the built-in Auto agent (它天生用来
 	// 操作平台)。SeedTool 首插入生效;老库已 seed 的行由 seedAutoDefaultBindings 补绑。
 	autoAgents, _ := json.Marshal([]string{"auto"})
-	for _, t := range s.orchestrationTools() {
+	for _, t := range s.orchestrationTools(locale.En) {
 		schema, _ := json.Marshal(t.InputSchema())
 		bindings := autoAgents
 		if t.Name() == "bind_finding_traffic" {
@@ -482,7 +486,7 @@ func (s *Server) seedOrchestrationTools() {
 		}
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, bindings)
 	}
-	for _, t := range s.platformTools() {
+	for _, t := range s.platformTools(locale.En) {
 		schema, _ := json.Marshal(t.InputSchema())
 		_ = s.m.PG().SeedTool(t.Name(), t.Description(), schema, autoAgents)
 	}
@@ -518,7 +522,7 @@ func (s *Server) refreshBuiltinToolSchemas() {
 	if v, _, _ := s.m.pg.GetSetting(flag); v == "true" {
 		return
 	}
-	tools := append(s.orchestrationTools(), s.platformTools()...)
+	tools := append(s.orchestrationTools(locale.En), s.platformTools(locale.En)...)
 	for _, t := range tools {
 		schema, _ := json.Marshal(t.InputSchema())
 		if err := s.m.pg.RefreshToolDefaults(t.Name(), t.Description(), schema); err != nil {
@@ -543,7 +547,7 @@ func (s *Server) refreshBuiltinToolSchemas() {
 		}
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
-	log.Printf("[tools] 已刷新 orchestration/platform 工具 schema 到代码默认(一次性)")
+	log.Print(locale.Text(locale.ServerDefault(), "[tools] Refreshed orchestration/platform schemas to code defaults (one-time)"))
 }
 
 // unbindGoalMetDefault removes goal_met's default "planner" binding ONCE (guarded by
@@ -557,7 +561,7 @@ func (s *Server) unbindGoalMetDefault() {
 		return
 	}
 	if err := s.m.pg.RemoveAgentFromTool("planner", "goal_met"); err != nil {
-		log.Printf("[tools] goal_met 解绑 planner 失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[tools] Could not unbind goal_met from planner: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -587,10 +591,10 @@ func (s *Server) reseedGoalsPrompt() {
 		return
 	}
 	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
-		log.Printf("[prompts] goals 提示词重刷为新默认失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[prompts] Could not refresh the goals default: %v"), err)
 		return
 	}
-	log.Printf("[prompts] goals 提示词已追加新默认版本(加入抽操作约束步,一次性)")
+	log.Print(locale.Text(locale.ServerDefault(), "[prompts] Added goals default version with constraint extraction (one-time)"))
 }
 
 // reseedMainAgentPrompt 把 mainagent 提示词刷成【当前代码默认】——默认正文新增了「目标全部
@@ -617,10 +621,10 @@ func (s *Server) reseedMainAgentPrompt() {
 		return
 	}
 	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
-		log.Printf("[prompts] mainagent 提示词重刷为新默认失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[prompts] Could not refresh the mainagent default: %v"), err)
 		return
 	}
-	log.Printf("[prompts] mainagent 提示词已追加新默认版本(加入目标达成后反问建目标,一次性)")
+	log.Print(locale.Text(locale.ServerDefault(), "[prompts] Added mainagent default version with confirmation before new post-completion goals (one-time)"))
 }
 
 // reseedPlannerPrompt 把 planner 提示词刷成【当前代码默认】——默认正文做了精简重构,并把「克制」降级为
@@ -648,10 +652,10 @@ func (s *Server) reseedPlannerPrompt() {
 		return
 	}
 	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
-		log.Printf("[prompts] planner 提示词重刷为新默认失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[prompts] Could not refresh the planner default: %v"), err)
 		return
 	}
-	log.Printf("[prompts] planner 提示词已追加新默认版本(精简重构+克制降级去重+深度优先+否定复核上界,一次性)")
+	log.Print(locale.Text(locale.ServerDefault(), "[prompts] Added planner default with deduplication, depth priority, and bounded negative rechecks (one-time)"))
 }
 
 // reseedWorkerPrompt 把 worker 提示词刷成【当前代码默认】——默认正文 record_fact 段删掉了「否定类结论
@@ -678,10 +682,10 @@ func (s *Server) reseedWorkerPrompt() {
 		return
 	}
 	if _, err := s.m.pg.ResetPromptToDefault(a.ID, tmpl); err != nil {
-		log.Printf("[prompts] worker 提示词重刷为新默认失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[prompts] Could not refresh the worker default: %v"), err)
 		return
 	}
-	log.Printf("[prompts] worker 提示词已追加新默认版本(查上下文段收敛为 list_assets/list_findings,去掉 list_facts/node_detail/asset_neighbors,一次性)")
+	log.Print(locale.Text(locale.ServerDefault(), "[prompts] Added worker default with focused list_assets/list_findings context guidance (one-time)"))
 }
 
 // reporterToolCallMessage 必须无条件要求先读一次 get_finding_traffic 再写报告。
@@ -689,16 +693,16 @@ func (s *Server) reseedWorkerPrompt() {
 // 写成「启用自动绑定才读」,默认关闭配置下 reporter 就不会传 evidence_version,
 // SetFindingReportVersionByNodeID 便按 legacy 语义写 -1,漏洞详情与 Markdown 导出
 // 从此常驻「证据已变更，报告待更新」,而 UI 上没有任何入口能把它清掉。
-const reporterToolCallMessage = "上面刚有一个漏洞被 report_finding 登记。请读取返回 JSON 的 finding_id（独立漏洞记录 ID）与 finding_node_id（探索节点 ID），" +
-	"先用 get_finding_traffic(finding_id) 读取当前证据清单及其 version（空清单是正常情况，照常写报告）；" +
-	"若运行指引启用自动绑定，在读取前先核实并关联本次漏洞的流量。节点详情使用 finding_node_id。" +
-	"最后调用 update_finding_report(finding_id=finding_node_id, report, evidence_version=实际读取版本) 保存，" +
-	"evidence_version 必须传，否则报告会被永久标记为待更新。不要混用两种编号。"
+const reporterToolCallMessage = "A finding was just registered by report_finding. Read finding_id (independent finding record) and finding_node_id (exploration node) from the returned JSON. " +
+	"Use get_finding_traffic(finding_id) to read the evidence list and version; an empty list is valid and does not block reporting. " +
+	"If run guidance enables automatic binding, verify and bind this finding's traffic before reading. Use finding_node_id for node details. " +
+	"Finally save with update_finding_report(finding_id=finding_node_id, report, evidence_version=the version actually read). " +
+	"evidence_version is required or the report remains stale. Never mix the two ID namespaces."
 
 // 旧版触发消息(0.3.8 及更早)。只有仍与它逐字相同的记录才会被迁移覆盖，用户改过的保持原样。
-const reporterToolCallMessageV1 = "上面刚有一个漏洞被 report_finding 登记。请从触发上下文里取出 finding_id" +
-	"（工具返回 \"finding recorded: <id>\" 里的数字）与任务 id，按你的职责撰写该漏洞的详细报告，" +
-	"最后调用 update_finding_report(finding_id, report) 保存。"
+const reporterToolCallMessageV1 = "A finding was just registered by report_finding. Extract its finding_id " +
+	"(the number in \"finding recorded: <id>\") and task ID from the trigger context, write its detailed report, " +
+	"then save with update_finding_report(finding_id, report)."
 
 // upgradeReporterTriggerMessage 把老库里仍是默认文案的 reporter 触发消息刷成新版本。
 // seedReporterAgent 受 reporter_agent_seed_v1 守卫且只在新建 agent 时写触发器，所以
@@ -712,19 +716,19 @@ func (s *Server) upgradeReporterTriggerMessage() {
 	defer func() { _ = s.m.pg.SetSetting(flag, "true") }() // 只尝试一次
 	triggers, err := s.m.pg.ListTriggersFor("reporter")
 	if err != nil {
-		log.Printf("[reporter] 读取触发器失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not read triggers: %v"), err)
 		return
 	}
 	for _, t := range triggers {
-		if !t.OnToolCall || t.ToolCallMessage != reporterToolCallMessageV1 {
+		if !t.OnToolCall || !isLegacyReporterTrigger(t.ToolCallMessage) {
 			continue // 用户改过或不是 finding 触发器，不动。
 		}
 		t.ToolCallMessage = reporterToolCallMessage
 		if err := s.m.pg.UpdateTrigger(t); err != nil {
-			log.Printf("[reporter] 升级触发消息失败: %v", err)
+			log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not upgrade trigger message: %v"), err)
 			return
 		}
-		log.Printf("[reporter] 触发消息已升级为读取并回传 evidence_version")
+		log.Print(locale.Text(locale.ServerDefault(), "[reporter] Trigger message now reads and returns evidence_version"))
 	}
 }
 
@@ -742,20 +746,20 @@ func (s *Server) seedReporterAgent() {
 	if exist, _ := s.m.pg.GetAgentByKey("reporter"); exist != nil {
 		return // key 已被占用(用户手建过)——不覆盖
 	}
-	a, err := s.m.pg.CreateAgent("reporter", "报告撰写",
-		"漏洞详细报告撰写：发现漏洞时自动触发，查取证据与执行过程后写 Markdown 报告并回写。")
+	a, err := s.m.pg.CreateAgent("reporter", "Report writer",
+		"Writes detailed vulnerability reports: triggered by findings, reads evidence and execution traces, then saves a Markdown report.")
 	if err != nil {
-		log.Printf("[reporter] 创建 agent 失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not create agent: %v"), err)
 		return
 	}
 	if err := s.m.pg.SeedPromptIfEmpty(a.ID, agent.ReporterDefaultPrompt); err != nil {
-		log.Printf("[reporter] seed prompt 失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not seed prompt: %v"), err)
 	}
 	// 触发运行策略：parallel + none —— 一漏洞一报告、多个 finding 并发各写各的。
 	// merge 必须为 none：否则(默认 all)一波 finding 会被合并成一次运行，并行就没意义。
 	// maxParallel=5：同时最多 5 个报告会话，避免瞬时太多 LLM 调用。
 	if err := s.m.pg.SetAgentTriggerBehavior("reporter", "parallel", "none", 5); err != nil {
-		log.Printf("[reporter] 设置触发运行策略失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not set trigger behavior: %v"), err)
 	}
 	// 绑定它需要的工具：写报告 + 读证据/执行过程/态势。
 	if err := s.m.pg.AddAgentToToolBinding("reporter", []string{
@@ -763,7 +767,7 @@ func (s *Server) seedReporterAgent() {
 		"get_task_worker_trace", "list_task_worker_traces", "search_task_worker_traces",
 		"get_task_graph",
 	}); err != nil {
-		log.Printf("[reporter] 绑定工具失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not bind tools: %v"), err)
 	}
 	// 触发器：report_finding 被调用即触发（工具返回 "finding recorded: <id>" 带上 finding_id，
 	// 任务 id 也在触发消息里）。
@@ -774,9 +778,9 @@ func (s *Server) seedReporterAgent() {
 		ToolNames:       []string{"report_finding"},
 		ToolCallMessage: reporterToolCallMessage,
 	}); err != nil {
-		log.Printf("[reporter] 创建触发器失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[reporter] Could not create trigger: %v"), err)
 	}
-	log.Printf("[reporter] 已预置「报告撰写」agent + finding 触发器")
+	log.Print(locale.Text(locale.ServerDefault(), "[reporter] Seeded report-writer agent and finding trigger"))
 }
 
 // seedAutoReportFindingBinding adds "auto" to report_finding's binding ONCE so
@@ -787,7 +791,7 @@ func (s *Server) seedAutoReportFindingBinding() {
 		return
 	}
 	if err := s.m.pg.AddAgentToToolBinding("auto", []string{"report_finding"}); err != nil {
-		log.Printf("[auto] report_finding 默认绑定失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[auto] Could not bind report_finding by default: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -803,7 +807,7 @@ func (s *Server) seedPlannerDefaultBindings() {
 		return
 	}
 	if err := s.m.pg.AddAgentToToolBinding("planner", []string{"report_finding"}); err != nil {
-		log.Printf("[planner] report_finding 默认绑定失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[planner] Could not bind report_finding by default: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -820,7 +824,7 @@ func (s *Server) seedPlannerListAssetsBinding() {
 		return
 	}
 	if err := s.m.pg.AddAgentToToolBinding("planner", []string{"list_assets"}); err != nil {
-		log.Printf("[planner] list_assets 默认绑定失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[planner] Could not bind list_assets by default: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -838,11 +842,11 @@ func (s *Server) seedCompanyScopeRebind() {
 		return
 	}
 	if err := s.m.pg.AddAgentToToolBinding("planner", []string{"add_company_scope"}); err != nil {
-		log.Printf("[planner] add_company_scope 默认绑定失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[planner] Could not bind add_company_scope by default: %v"), err)
 		return
 	}
 	if err := s.m.pg.RemoveAgentFromTool("worker", "add_company_scope"); err != nil {
-		log.Printf("[worker] add_company_scope 解绑失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[worker] Could not unbind add_company_scope: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -869,7 +873,7 @@ func (s *Server) seedWorkerReadToolsUnbind() {
 		"list_facts", "list_companies", "list_worker_traces",
 	} {
 		if err := s.m.pg.RemoveAgentFromTool("worker", k); err != nil {
-			log.Printf("[worker] %s 从 worker 解绑失败: %v", k, err)
+			log.Printf(locale.Text(locale.ServerDefault(), "[worker] Could not unbind %s: %v"), k, err)
 			return // 出错则不落 flag，下次启动重试
 		}
 	}
@@ -890,7 +894,7 @@ func (s *Server) seedWorkerReadbackRebind() {
 	if err := s.m.pg.AddAgentToToolBinding("worker", []string{
 		"search_all_worker_traces", "get_worker_trace", "node_detail",
 	}); err != nil {
-		log.Printf("[worker] 回看/详情工具补绑失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[worker] Could not bind trace/detail tools: %v"), err)
 		return // 出错则不落 flag，下次启动重试
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
@@ -906,15 +910,24 @@ func (s *Server) seedAutoDefaultBindings() {
 		return
 	}
 	keys := make([]string, 0, len(platformToolKeys)+12)
-	for _, t := range s.orchestrationTools() {
+	for _, t := range s.orchestrationTools(locale.En) {
 		keys = append(keys, t.Name())
 	}
 	keys = append(keys, platformToolKeys...)
 	// 资产工具：Auto 操作平台常要看/登记资产、管理公司范围。
 	keys = append(keys, "insert_assets", "add_company_scope", "list_assets")
 	if err := s.m.pg.AddAgentToToolBinding("auto", keys); err != nil {
-		log.Printf("[auto] 默认绑定失败: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[auto] Default tool binding failed: %v"), err)
 		return
 	}
 	_ = s.m.pg.SetSetting(flag, "true")
+}
+
+// Match the exact historical stock trigger without rewriting custom trigger text.
+func isLegacyReporterTrigger(text string) bool {
+	if text == reporterToolCallMessageV1 {
+		return true
+	}
+	digest := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(digest[:]) == "c10b22c2daf51a0e4998fe0e84a2e22baf70927a6f7368874e1e1e0b0eacb02b"
 }

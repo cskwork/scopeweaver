@@ -10,6 +10,7 @@ import (
 
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
+	"github.com/Autumn-27/artex/locale"
 )
 
 type goalSpec struct {
@@ -18,13 +19,13 @@ type goalSpec struct {
 }
 
 // launchTask runs the shared post-creation sequence for a task created via ANY
-// path (HTTP createTask 或 orchestration spawn_task),避免两处复制粘贴:
-//  1. seed 根资产,喂给事件驱动 loop;
-//  2. 可选种子意图,worker 免等首轮 planner 直接开跑;
-//  3. 后台异步做目标分解(发「第 0 轮目标拆解」round + LLM 分解步骤 + 逐条 goal,页面可见),
-//     分解完再 engine.Run —— 引擎在 goal 节点就绪后才启动,避免 planner 抢在 goal 之前跑的竞态。
+// path (HTTP createTask or orchestration spawn_task), avoiding duplicate setup:
+// 1. Seed root assets and feed the event-driven loop.
+// 2. Optionally seed intents so workers can start before the first planner round.
+// 3. Decompose goals asynchronously, emitting round zero, LLM steps, and individual goals for the UI.
+//    Start engine.Run only after goal nodes exist, preventing the planner from racing goal creation.
 //
-// 异步(goroutine)所以调用方立即返回,两条路径行为一致:秒建任务、后台拆目标。
+// The goroutine returns immediately to both callers: fast task creation, background decomposition.
 func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 	if !s.engine.beginTaskOperation(t.ID) {
 		return
@@ -35,17 +36,17 @@ func (s *Server) launchTask(t *Task, seedText string, seedFirstIntent bool) {
 	}
 	s.engine.decInflight(t.ID)
 	if _, err := s.admitTask(t, "bootstrap"); err != nil {
-		log.Printf("[concurrency] task %s 启动失败: %v", t.ID, err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[concurrency] task %s could not start: %v"), t.ID, err)
 	}
 }
 
 func (s *Server) startTaskEngine(t *Task) {
-	ctx := s.engine.execContextFor(s.ctx, t.ID)
+	ctx := s.engine.execContextFor(locale.WithLang(s.ctx, taskLanguage(s.m.pg, t.ID)), t.ID)
 	if ctx.Err() != nil || s.engine.IsDeleting(t.ID) {
 		return
 	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
-		Summary: "第 0 轮目标拆解"})
+		Summary: locale.Text(locale.ServerDefault(), "Round 0: goal decomposition")})
 	goals := s.createGoals(ctx, t, func(r db.Activity) {
 		s.engine.emitActivity(t, r)
 	})
@@ -130,10 +131,10 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	lifecycle := t.lifecycleSnapshot()
 	if requirePaused {
 		if isTerminalStatus(lifecycle.Status) {
-			return false, fmt.Errorf("终态任务不能执行继续")
+			return false, locale.Errorf("Terminal tasks cannot be resumed")
 		}
 		if !lifecycle.Paused {
-			return false, fmt.Errorf("仅已暂停的任务可以继续")
+			return false, locale.Errorf("Only paused tasks can be resumed")
 		}
 		mode = s.resumeAdmissionMode(t)
 	}
@@ -177,8 +178,8 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	// this ordering, its already-running worker loops can claim the newly-opened
 	// intent in the gap between status=running and queued=true.
 	if shouldQueue || wasTerminal || wasPaused || wasQueued {
-		s.engine.Pause(t.ID, agent.Causef("queued_for_admission", "任务等待运行准入",
-			"任务正在等待并发队列或准入状态提交，本次执行已停止；只有获得运行槽后才会重新领取意图"))
+		s.engine.Pause(t.ID, agent.Causef("queued_for_admission", locale.Text(locale.ServerDefault(), "Task awaiting execution admission"),
+			"%s", locale.Text(locale.ServerDefault(), "The task is awaiting queue/admission state commit. This run stopped; intents will be claimed again only after an execution slot is granted.")))
 	}
 
 	status := lifecycle.Status
@@ -199,12 +200,12 @@ func (s *Server) admitTaskWhen(t *Task, mode string, requirePaused bool) (queued
 	}
 	if shouldQueue {
 		if !wasQueued {
-			summary := fmt.Sprintf("已排队：达到并发上限 %d，等待空位后自动开始", limit)
+			summary := fmt.Sprintf(locale.Text(locale.ServerDefault(), "Queued: concurrency limit %d reached; starts automatically when a slot is free"), limit)
 			switch {
 			case !ready:
-				summary = "已排队：当前没有可运行的 LLM 配置，配置恢复后自动开始"
+				summary = locale.Text(locale.ServerDefault(), "Queued: no usable LLM profile; starts automatically when configuration recovers")
 			case readyBacklog:
-				summary = "已排队：已有更早的任务等待运行，将按 FIFO 顺序自动开始"
+				summary = locale.Text(locale.ServerDefault(), "Queued: earlier tasks are waiting; starts automatically in FIFO order")
 			}
 			s.engine.emitActivity(t, db.Activity{Worker: "system", Kind: "text", Summary: summary})
 		}
@@ -266,15 +267,15 @@ func (s *Server) reconcileConcurrency() {
 				continue
 			}
 			mode := s.resumeAdmissionMode(task)
-			s.engine.Pause(task.ID, agent.Causef("llm_unavailable_queued", "LLM 不可用，任务进入等待队列",
-				"任务当前无法解析可运行的 Planner/Worker LLM，已释放并发槽；配置恢复后按队列顺序继续"))
+			s.engine.Pause(task.ID, agent.Causef("llm_unavailable_queued", locale.Text(locale.ServerDefault(), "LLM unavailable; task queued"),
+				"%s", locale.Text(locale.ServerDefault(), "No usable Planner/Worker LLM could be resolved. The execution slot was released; task resumes in queue order when configuration recovers.")))
 			if err := s.m.EnqueueTask(task.ID, mode); err != nil {
 				s.engine.Resume(task)
-				log.Printf("[concurrency] task %s 因 LLM 不可用入队失败: %v", task.ID, err)
+				log.Printf(locale.Text(locale.ServerDefault(), "[concurrency] task %s could not queue after LLM became unavailable: %v"), task.ID, err)
 				continue
 			}
 			s.engine.emitActivity(task, db.Activity{Worker: "system", Kind: "text",
-				Summary: "已排队：当前没有可运行的 LLM 配置，配置恢复后自动开始"})
+				Summary: locale.Text(locale.ServerDefault(), "Queued: no usable LLM profile; starts automatically when configuration recovers")})
 		}
 	}
 
@@ -346,18 +347,18 @@ func (s *Server) reconcileConcurrency() {
 	}
 }
 
-// reviveTask 让一个已停下的任务重新跑起来:把终态(done/failed/timeout)拉回 running、
-// 解除暂停,并(重)启动引擎循环 + 唤醒。已在 running 且未暂停的任务:只剩 Run 里的一次
-// Notify,近乎无副作用。用于「主 agent set_goals 新增目标」和「重跑 blocked 意图」两处。
+// reviveTask restarts a stopped task: move done/failed/timeout back to running,
+// unpause, restart the engine loop, and wake it. An already running, unpaused task only receives
+// Run's notification. Used when the main agent adds goals and when blocked intents are rerun.
 //
-// 为什么必须显式复活:planner/worker 循环的终态门(engine.go)会吞掉普通 notify——光改
-// 图 + Notify 唤不醒已判完成的任务;重启后终态任务的 goroutine 也可能已不在,故还要 Run。
+// Explicit revival is necessary because planner/worker terminal-state guards discard ordinary notifications.
+// Updating the graph and notifying cannot wake a completed task; after restart its goroutine may also need Run.
 func (s *Server) reviveTask(t *Task) {
 	if t == nil {
 		return
 	}
 	if _, err := s.admitTask(t, "resume"); err != nil {
-		log.Printf("[revive] task %s 恢复失败: %v", t.ID, err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[revive] task %s could not resume: %v"), t.ID, err)
 	}
 }
 
@@ -396,7 +397,7 @@ func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity
 		// as a single goal so the task still has something to judge against. This is the
 		// only path that writes here — decomposed goals are already persisted by the tool.
 		if g := strings.TrimSpace(t.Goal); g != "" {
-			log.Printf("[goals] task %s: LLM 目标拆解无产出，回退为「原始目标作为单目标」", t.ID)
+			log.Printf(locale.Text(locale.FromContext(ctx), "[goals] task %s: LLM decomposition produced no goals; using the original objective as one goal"), t.ID)
 			origin, _ := t.Store.OriginFactID()
 			id, _ := t.Store.AddNode(db.KindGoal, map[string]any{"text": g}, 0, "open", "system", nil)
 			if origin > 0 && id > 0 {

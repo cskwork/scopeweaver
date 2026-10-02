@@ -1,5 +1,8 @@
 "use client";
 
+import { LanguageSelector } from "@/i18n/language-selector";
+import { translate as swt } from "@/i18n/runtime";
+import { useI18n } from "@/i18n";
 import { useEffect, useState } from "react";
 
 import { useRouter } from "next/navigation";
@@ -11,6 +14,9 @@ import { api } from "@/lib/api";
 import { auth } from "@/lib/auth";
 
 export default function SetupPage() {
+  "use no memo";
+  const { t: swt, locale: swLocale } = useI18n();
+
   const router = useRouter();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -23,18 +29,18 @@ export default function SetupPage() {
       .then(({ initialized }) => {
         if (initialized) router.replace("/login");
       })
-      .catch(() => setError("无法连接到后端服务"))
+      .catch(() => setError(swt("interface.m0001")))
       .finally(() => setChecking(false));
   }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (password !== confirm) {
-      setError("两次输入的密码不一致");
+      setError(swt("interface.m0041"));
       return;
     }
     if (password.length < 8) {
-      setError("密码长度至少 8 位");
+      setError(swt("interface.m0042"));
       return;
     }
     setLoading(true);
@@ -44,7 +50,7 @@ export default function SetupPage() {
       auth.setToken(token);
       router.replace("/function/tasks");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "初始化失败");
+      setError(err instanceof Error ? err.message : swt("interface.m0043"));
     } finally {
       setLoading(false);
     }
@@ -53,7 +59,8 @@ export default function SetupPage() {
   if (checking) return null;
 
   return (
-    <div className="flex h-dvh">
+    <div className="relative flex min-h-dvh">
+      <div className="absolute right-4 top-4 z-10"><LanguageSelector /></div>
       {/* Left panel */}
       <div className="hidden flex-col items-center justify-center bg-primary p-12 text-center lg:flex lg:w-1/3">
         <div className="relative flex items-center justify-center">
@@ -62,8 +69,8 @@ export default function SetupPage() {
           <div className="absolute size-40 rounded-full border border-primary-foreground/20" />
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="/logo.png"
-            alt="ARTEX"
+            src="/scopeweaver.svg"
+            alt="ScopeWeaver"
             width={160}
             height={160}
             className="relative brightness-0 invert"
@@ -75,36 +82,36 @@ export default function SetupPage() {
       <div className="flex w-full items-center justify-center bg-background p-8 lg:w-2/3">
         <div className="w-full max-w-md space-y-10 py-24 lg:py-32">
           <div className="space-y-4 text-center">
-            <h2 className="text-2xl font-medium tracking-tight">初始化密码</h2>
-            <p className="mx-auto max-w-xl text-muted-foreground">首次使用 ARTEX，请为账户设置一个登录密码（至少 8 位）</p>
+            <h2 className="text-2xl font-medium tracking-tight">{swt("interface.m0044")}</h2>
+            <p className="mx-auto max-w-xl text-muted-foreground">{swt("interface.m0045")}</p>
           </div>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
             <div className="space-y-1.5">
-              <Label htmlFor="password">新密码</Label>
+              <Label htmlFor="password">{swt("interface.m0046")}</Label>
               <Input
                 id="password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="至少 8 位"
+                placeholder={swt("interface.m0047")}
                 autoFocus
                 autoComplete="new-password"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="confirm">确认密码</Label>
+              <Label htmlFor="confirm">{swt("interface.m0048")}</Label>
               <Input
                 id="confirm"
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                placeholder="再次输入密码"
+                placeholder={swt("interface.m0049")}
                 autoComplete="new-password"
               />
             </div>
             {error && <p className="text-sm text-destructive">{error}</p>}
             <Button type="submit" className="w-full" disabled={loading || !password || !confirm}>
-              {loading ? "保存中..." : "设置密码并登录"}
+              {loading ? swt("interface.m0050") : swt("interface.m0051")}
             </Button>
           </form>
         </div>

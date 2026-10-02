@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -14,6 +13,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/llm"
 )
 
@@ -35,11 +35,11 @@ func (s *Server) wireInterceptReviewer() {
 			}
 		}
 		if profileID == 0 {
-			return intercept.Decision{}, fmt.Errorf("未配置可用的裁判模型")
+			return intercept.Decision{}, locale.Errorf("No available judge model is configured")
 		}
 		prov, _, ok := s.providerForProfile(profileID)
 		if !ok {
-			return intercept.Decision{ProfileID: profileID}, fmt.Errorf("裁判模型 profile %d 不可用", profileID)
+			return intercept.Decision{ProfileID: profileID}, locale.Errorf("Judge model profile %d is unavailable", profileID)
 		}
 		text, err := reviewCompletion(ctx, prov, prompt, input)
 		if err != nil {
@@ -47,7 +47,7 @@ func (s *Server) wireInterceptReviewer() {
 		}
 		v := intercept.ParseVerdict(text)
 		if v.Action == "" {
-			return intercept.Decision{ProfileID: profileID}, fmt.Errorf("模型裁决格式无效，必须包含裁决、实际操作、成功后的后果和命中规则")
+			return intercept.Decision{ProfileID: profileID}, locale.Errorf("Invalid model verdict format: verdict, actual operation, consequences of success, and matched rules are required")
 		}
 		return intercept.Decision{Action: v.Action, Message: v.Reason, ProfileID: profileID}, nil
 	})
@@ -94,7 +94,7 @@ func (s *Server) interceptListRules(w http.ResponseWriter, r *http.Request) {
 	}
 	rules, err := pg.ListInterceptRules()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if rules == nil {
@@ -110,16 +110,16 @@ func (s *Server) interceptCreateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	var req interceptRuleReq
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if err := validateInterceptRuleReq(req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	rule, err := pg.CreateInterceptRule(req.Name, req.MatchTarget, req.MatchType, req.Pattern, req.Action, req.Message, req.Priority, req.Enabled, req.TimeoutEnabled, req.TimeoutSeconds, req.TimeoutAction)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	s.m.interceptor.Invalidate()
@@ -133,21 +133,21 @@ func (s *Server) interceptUpdateRule(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad rule id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad rule id"))
 		return
 	}
 	var req interceptRuleReq
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if err := validateInterceptRuleReq(req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	rule, err := pg.UpdateInterceptRule(id, req.Name, req.MatchTarget, req.MatchType, req.Pattern, req.Action, req.Message, req.Priority, req.Enabled, req.TimeoutEnabled, req.TimeoutSeconds, req.TimeoutAction)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	s.m.interceptor.Invalidate()
@@ -161,11 +161,11 @@ func (s *Server) interceptDeleteRule(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad rule id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad rule id"))
 		return
 	}
 	if err := pg.DeleteInterceptRule(id); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	s.m.interceptor.Invalidate()
@@ -179,18 +179,18 @@ func (s *Server) interceptToggleRule(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad rule id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad rule id"))
 		return
 	}
 	var req struct {
 		Enabled bool `json:"enabled"`
 	}
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if err := pg.ToggleInterceptRule(id, req.Enabled); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	s.m.interceptor.Invalidate()
@@ -206,7 +206,7 @@ func (s *Server) interceptListPending(w http.ResponseWriter, r *http.Request) {
 	}
 	pending, err := pg.ListPendingIntercepts()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if pending == nil {
@@ -222,16 +222,16 @@ func (s *Server) interceptGetOne(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad pending id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad pending id"))
 		return
 	}
 	p, err := pg.GetInterceptPending(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if p == nil {
-		writeErr(w, 404, "not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "not found"))
 		return
 	}
 	writeJSON(w, 200, p)
@@ -244,19 +244,19 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 	}
 	taskID := r.PathValue("taskID")
 	if taskID == "" {
-		writeErr(w, 400, "bad task id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad task id"))
 		return
 	}
 	q := r.URL.Query()
 	filter, err := interceptFilterParams(q)
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if q.Get("page") == "" && q.Get("size") == "" && filter == (db.InterceptApprovalFilter{}) {
 		items, err := pg.ListTaskIntercepts(taskID)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if items == nil {
@@ -268,7 +268,7 @@ func (s *Server) interceptListTaskItems(w http.ResponseWriter, r *http.Request) 
 	page, size := interceptPageParams(q)
 	items, total, err := pg.ListTaskInterceptsPage(taskID, page, size, filter)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if items == nil {
@@ -285,13 +285,13 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter, err := interceptFilterParams(q)
 	if err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if q.Get("page") == "" && q.Get("size") == "" && filter == (db.InterceptApprovalFilter{}) {
 		items, err := pg.ListAllIntercepts(200)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		if items == nil {
@@ -303,7 +303,7 @@ func (s *Server) interceptHistory(w http.ResponseWriter, r *http.Request) {
 	page, size := interceptPageParams(q)
 	items, total, err := pg.ListAllInterceptsPage(page, size, filter)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if items == nil {
@@ -317,12 +317,12 @@ func interceptFilterParams(q url.Values) (db.InterceptApprovalFilter, error) {
 	switch filter.Status {
 	case "", "pending", "allowed", "denied", "timeout":
 	default:
-		return filter, fmt.Errorf("status 必须是 pending、allowed、denied 或 timeout")
+		return filter, locale.Errorf("status must be pending, allowed, denied, or timeout")
 	}
 	switch filter.DecisionSource {
 	case "", "model", "rule", "unknown":
 	default:
-		return filter, fmt.Errorf("decision_source 必须是 model、rule 或 unknown")
+		return filter, locale.Errorf("decision_source must be model, rule, or unknown")
 	}
 	return filter, nil
 }
@@ -345,39 +345,39 @@ func interceptPageParams(q url.Values) (int, int) {
 func (s *Server) interceptDecide(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathInt(r, "id")
 	if !ok {
-		writeErr(w, 400, "bad pending id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad pending id"))
 		return
 	}
 	var req struct {
 		Decision string `json:"decision"` // "allowed" | "denied"
 	}
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.Decision != "allowed" && req.Decision != "denied" {
-		writeErr(w, 400, "decision 必须是 allowed 或 denied")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "decision must be allowed or denied"))
 		return
 	}
 	if err := s.m.interceptor.Decide(id, req.Decision == "allowed"); err != nil {
 		if errors.Is(err, intercept.ErrAlreadyDecided) {
-			writeErr(w, 409, err.Error())
+			writeError(w, 409, err)
 			return
 		}
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// --- tool-config (全局工具拦截范围) ---
+// --- tool-config (global tool interception scope) ---
 
 // interceptGetToolConfig returns the list of tool names that are currently
 // configured to enter the intercept rule system.
 func (s *Server) interceptGetToolConfig(w http.ResponseWriter, r *http.Request) {
 	tools, err := s.m.interceptor.GetEnabledTools()
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"enabled_tools": tools})
@@ -390,48 +390,52 @@ func (s *Server) interceptSetToolConfig(w http.ResponseWriter, r *http.Request) 
 		EnabledTools []string `json:"enabled_tools"`
 	}
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	if req.EnabledTools == nil {
 		req.EnabledTools = []string{}
 	}
 	if err := s.m.interceptor.SetEnabledTools(req.EnabledTools); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
 }
 
-// --- LLM fallback judge config (全局模型兜底) ---
+// --- LLM fallback judge config (global model fallback) ---
 
 // interceptGetJudgeConfig returns the resolved judge configuration. Prompt is the
 // effective prompt (built-in template when unset), so the UI can prefill it.
 func (s *Server) interceptGetJudgeConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, 200, s.m.interceptor.GetJudgeConfig())
+	cfg := s.m.interceptor.GetJudgeConfig()
+	if intercept.IsDefaultJudgePrompt(cfg.Prompt) {
+		cfg.Prompt = locale.Text(locale.FromRequest(r), intercept.DefaultJudgePrompt)
+	}
+	writeJSON(w, 200, cfg)
 }
 
 // interceptSetJudgeConfig persists the judge configuration.
 func (s *Server) interceptSetJudgeConfig(w http.ResponseWriter, r *http.Request) {
 	var req intercept.JudgeConfig
 	if err := decode(r, &req); err != nil {
-		writeErr(w, 400, err.Error())
+		writeError(w, 400, err)
 		return
 	}
 	switch req.FailAction {
 	case "allow", "ask", "deny":
 	default:
-		writeErr(w, 400, "fail_action 必须是 allow、ask 或 deny")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "fail_action must be allow, ask, or deny"))
 		return
 	}
 	switch req.AskTimeoutAction {
 	case "allow", "deny":
 	default:
-		writeErr(w, 400, "ask_timeout_action 必须是 allow 或 deny")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "ask_timeout_action must be allow or deny"))
 		return
 	}
 	if err := s.m.interceptor.SetJudgeConfig(req); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
@@ -455,29 +459,29 @@ type interceptRuleReq struct {
 
 func validateInterceptRuleReq(req interceptRuleReq) error {
 	if req.Name == "" {
-		return fmt.Errorf("name 不能为空")
+		return locale.Errorf("name is required")
 	}
 	switch req.MatchTarget {
 	case "tool_name", "tool_input":
 	default:
-		return fmt.Errorf("match_target 必须是 tool_name 或 tool_input")
+		return locale.Errorf("match_target must be tool_name or tool_input")
 	}
 	switch req.MatchType {
 	case "string", "regex":
 	default:
-		return fmt.Errorf("match_type 必须是 string 或 regex")
+		return locale.Errorf("match_type must be string or regex")
 	}
 	if req.Pattern == "" {
-		return fmt.Errorf("pattern 不能为空")
+		return locale.Errorf("pattern is required")
 	}
 	switch req.Action {
 	case "allow", "deny", "ask":
 	default:
-		return fmt.Errorf("action 必须是 allow、deny 或 ask")
+		return locale.Errorf("action must be allow, deny, or ask")
 	}
 	if req.MatchType == "regex" {
 		if _, err := regexp.Compile(req.Pattern); err != nil {
-			return fmt.Errorf("pattern 不是有效正则：%w", err)
+			return locale.Errorf("pattern is not a valid regular expression: %w", err)
 		}
 	}
 	return nil
@@ -490,16 +494,16 @@ func (s *Server) interceptDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok || id <= 0 {
-		writeErr(w, 400, "bad approval id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad approval id"))
 		return
 	}
 	detail, err := pg.GetInterceptDetail(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if detail == nil {
-		writeErr(w, 404, "not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "not found"))
 		return
 	}
 	writeJSON(w, 200, detail)
@@ -513,20 +517,20 @@ func (s *Server) interceptExecution(w http.ResponseWriter, r *http.Request) {
 	}
 	id, ok := pathInt(r, "id")
 	if !ok || id <= 0 {
-		writeErr(w, 400, "bad approval id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad approval id"))
 		return
 	}
 	target, err := pg.GetInterceptExecution(id)
 	if errors.Is(err, db.ErrInterceptTaskDeleted) || errors.Is(err, db.ErrInterceptSessionDeleted) {
-		writeErr(w, http.StatusGone, err.Error())
+		writeError(w, http.StatusGone, err)
 		return
 	}
 	if errors.Is(err, db.ErrInterceptExecutionUnavailable) {
-		writeErr(w, 409, err.Error())
+		writeError(w, 409, err)
 		return
 	}
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if target == nil {
@@ -536,15 +540,15 @@ func (s *Server) interceptExecution(w http.ResponseWriter, r *http.Request) {
 		if convID, parseErr := strconv.ParseInt(r.URL.Query().Get("conversation"), 10, 64); parseErr == nil && convID > 0 {
 			conv, getErr := pg.GetConversation(convID)
 			if getErr != nil {
-				writeErr(w, 500, getErr.Error())
+				writeError(w, 500, getErr)
 				return
 			}
 			if conv == nil {
-				writeErr(w, http.StatusGone, "对话已被删除")
+				writeErr(w, http.StatusGone, locale.Text(responseLanguage(w), "Conversation has been deleted"))
 				return
 			}
 		}
-		writeErr(w, 404, "审批记录已被删除或不存在")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "Approval record was deleted or does not exist"))
 		return
 	}
 	writeJSON(w, 200, map[string]any{"conversation_id": target.ConversationID, "task_id": target.TaskID, "session": target.Session, "seq": target.Seq, "items": activityDTOs(target.Items)})

@@ -18,6 +18,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/artex/sidequestion"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
@@ -60,7 +61,7 @@ func (s *Server) initSideQuestions() {
 		return
 	}
 	if err := s.m.pg.InterruptSideRequests(s.ctx); err != nil {
-		log.Printf("[btw] recover: %v", err)
+		log.Printf(locale.Text(locale.ServerDefault(), "[btw] recover: %v"), err)
 	}
 	s.ctx = sidequestion.WithPublisher(s.ctx, func(snap sidequestion.Snapshot) {
 		s.side.mu.Lock()
@@ -114,7 +115,7 @@ func (s *Server) flushSideSnapshots() {
 		}
 		s.side.mu.Unlock()
 		if err != nil && !errors.Is(err, db.ErrSideParentGone) {
-			log.Printf("[btw] checkpoint persistence: %v", err)
+			log.Printf(locale.Text(locale.ServerDefault(), "[btw] checkpoint persistence: %v"), err)
 		}
 	}
 }
@@ -168,7 +169,7 @@ func (s *Server) drainTaskSideQuestions(ctx context.Context, taskID string) erro
 	defer s.side.mu.Unlock()
 	for _, snap := range s.side.pending {
 		if snap.Parent.TaskID == id {
-			return errors.New("旁路上下文尚未保存，请重试")
+			return locale.NewError("Side-question context has not been saved; retry")
 		}
 	}
 	return nil
@@ -193,7 +194,7 @@ func (s *Server) sideProvider(model sidequestion.Model) (llm.Provider, error) {
 		// Validate the persisted reference even if a previous provider is cached.
 		current, exists := s.loadProfileConfig(model.ProfileID)
 		if !exists || sideModel(current, model.ProfileID, model.Name).Identity != model.Identity {
-			return nil, errors.New("模型配置已删除或变化，请先运行主 Agent 更新上下文")
+			return nil, locale.NewError("Model configuration was deleted or changed; run the main agent to refresh context")
 		}
 		p, cfg, ok = s.providerForProfile(model.ProfileID)
 	} else {
@@ -202,7 +203,7 @@ func (s *Server) sideProvider(model sidequestion.Model) (llm.Provider, error) {
 		s.cfgMu.Unlock()
 	}
 	if !ok || p == nil || sideModel(cfg, model.ProfileID, model.Name).Identity != model.Identity {
-		return nil, errors.New("模型配置已删除或变化，请先运行主 Agent 更新上下文")
+		return nil, locale.NewError("Model configuration was deleted or changed; run the main agent to refresh context")
 	}
 	return p, nil
 }
@@ -210,22 +211,22 @@ func (s *Server) sideProvider(model sidequestion.Model) (llm.Provider, error) {
 func (s *Server) sideParent(w http.ResponseWriter, r *http.Request, kind string) (sidequestion.Parent, bool) {
 	p := sidequestion.Parent{}
 	if s.side == nil || s.m.pg == nil {
-		writeErr(w, 503, "旁路服务不可用")
+		writeErr(w, 503, locale.Text(responseLanguage(w), "Side-question service is unavailable"))
 		return p, false
 	}
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeErr(w, 400, "bad id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad id"))
 		return p, false
 	}
 	if kind == "conversation" {
 		c, err := s.m.pg.GetConversation(id)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return p, false
 		}
 		if c == nil {
-			writeErr(w, 404, "conversation not found")
+			writeErr(w, 404, locale.Text(responseLanguage(w), "conversation not found"))
 			return p, false
 		}
 		p.ConversationID = id
@@ -233,36 +234,36 @@ func (s *Server) sideParent(w http.ResponseWriter, r *http.Request, kind string)
 	}
 	t, ok := s.m.Task(r.PathValue("id"))
 	if !ok {
-		writeErr(w, 404, "task not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "task not found"))
 		return p, false
 	}
 	pt, err := s.m.pg.GetTask(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return p, false
 	}
 	if pt == nil || s.engine.IsDeleting(t.ID) {
-		writeErr(w, 409, "任务已归档或正在删除")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is archived or being deleted"))
 		return p, false
 	}
 	p.TaskID, p.ExplorationID = id, t.ExpID
 	if kind == "worker" {
 		iid, err := strconv.ParseInt(r.PathValue("iid"), 10, 64)
 		if err != nil || iid <= 0 {
-			writeErr(w, 400, "bad intent id")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "bad intent id"))
 			return p, false
 		}
 		n, err := t.Store.GetNode(iid)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return p, false
 		}
 		if n == nil || n.Kind != db.KindIntent {
-			writeErr(w, 404, "intent not found")
+			writeErr(w, 404, locale.Text(responseLanguage(w), "intent not found"))
 			return p, false
 		}
 		if n.State == "stopped" {
-			writeErr(w, 409, "Worker 已删除")
+			writeErr(w, 409, locale.Text(responseLanguage(w), "Worker has been deleted"))
 			return p, false
 		}
 		p.IntentID = iid
@@ -298,7 +299,7 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 		}
 		s.side.mu.Unlock()
 		if err := s.m.pg.ClearSideHistory(r.Context(), key); err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		writeJSON(w, 200, map[string]bool{"cleared": true})
@@ -306,14 +307,14 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 	}
 	snap, err := s.sideSnapshot(r.Context(), p)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if r.Method == "GET" {
 		before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
 		items, err := s.m.pg.SideHistory(r.Context(), key, before, 21)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		var next int64
@@ -323,7 +324,7 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 		}
 		current, err := s.m.pg.CurrentSideRequest(r.Context(), key)
 		if err != nil {
-			writeErr(w, 500, err.Error())
+			writeError(w, 500, err)
 			return
 		}
 		var meta any
@@ -331,7 +332,7 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 			_, modelErr := s.sideProvider(snap.Model)
 			reason := ""
 			if modelErr != nil {
-				reason = modelErr.Error()
+				reason = locale.ErrorMessage(responseLanguage(w), modelErr)
 			}
 			meta = map[string]any{"captured_at": snap.CapturedAt, "model": snap.Model, "available": modelErr == nil, "reason": reason}
 		}
@@ -344,38 +345,38 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 		ClientID string `json:"client_request_id"`
 	}
 	if json.NewDecoder(r.Body).Decode(&in) != nil {
-		writeErr(w, 400, "bad json")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "bad json"))
 		return
 	}
 	in.Question = strings.TrimSpace(in.Question)
 	if in.Question == "" || len([]rune(in.Question)) > 4000 || !validWorkerMessageRequestID(in.ClientID) {
-		writeErr(w, 400, "问题须为 1–4000 字符，并提供有效请求 ID")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "Question must contain 1–4000 characters and a valid request ID is required"))
 		return
 	}
 	s.side.commands.Lock()
 	defer s.side.commands.Unlock()
 	if p.TaskID > 0 && s.engine.IsDeleting(strconv.FormatInt(p.TaskID, 10)) {
-		writeErr(w, 409, "任务正在归档或删除")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being archived or deleted"))
 		return
 	}
 	if existing, err := s.m.pg.ExistingSideRequest(r.Context(), key, in.ClientID); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	} else if existing != nil {
 		if existing.Question != in.Question {
-			writeErr(w, 409, "同一请求 ID 不能用于不同问题")
+			writeErr(w, 409, locale.Text(responseLanguage(w), "A request ID cannot be reused for a different question"))
 			return
 		}
 		writeJSON(w, 200, existing)
 		return
 	}
 	if snap == nil {
-		writeErr(w, 409, "尚无上下文快照，请先运行主 Agent")
+		writeErr(w, 409, locale.Text(responseLanguage(w), "No context snapshot is available; run the main agent first"))
 		return
 	}
 	provider, err := s.sideProvider(snap.Model)
 	if err != nil {
-		writeErr(w, 409, err.Error())
+		writeError(w, 409, err)
 		return
 	}
 	s.side.mu.Lock()
@@ -388,11 +389,11 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 	}
 	s.side.mu.Unlock()
 	if busy {
-		writeErr(w, 409, db.ErrSideBusy.Error())
+		writeError(w, 409, db.ErrSideBusy)
 		return
 	}
 	if full {
-		writeErr(w, 429, "旁路请求已达并发上限，请稍后重试")
+		writeErr(w, 429, locale.Text(responseLanguage(w), "Side-question concurrency limit reached; retry later"))
 		return
 	}
 	agentQuestion, ok := s.prepareChatMentionMessage(w, in.Question)
@@ -400,16 +401,16 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 		return
 	}
 	if err = s.m.pg.SaveSideSnapshot(r.Context(), *snap); err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	e, created, err := s.m.pg.StartSideRequest(r.Context(), *snap, in.ClientID, in.Question)
 	if err != nil {
-		writeErr(w, 409, err.Error())
+		writeError(w, 409, err)
 		return
 	}
 	if created {
-		ctx, cancel := context.WithTimeout(s.ctx, 120*time.Second)
+		ctx, cancel := context.WithTimeout(backgroundLanguage(s.ctx, r.Context()), 120*time.Second)
 		s.side.mu.Lock()
 		s.side.runs[e.ID] = sideRun{key: key, parent: p, cancel: cancel, done: make(chan struct{})}
 		s.side.mu.Unlock()
@@ -457,7 +458,7 @@ func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sideq
 		defer stop()
 		ok, err := s.m.pg.UpdateSideRequest(writeCtx, e)
 		if err != nil {
-			log.Printf("[btw] answer persistence: %v", err)
+			log.Printf(locale.Text(locale.FromContext(ctx), "[btw] answer persistence: %v"), err)
 			return true, err
 		}
 		return ok, nil
@@ -488,14 +489,14 @@ func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sideq
 	e.Status = "completed"
 	if ctx.Err() != nil {
 		e.Status = "cancelled"
-		e.Error = "回答已停止"
+		e.Error = locale.Text(locale.FromContext(ctx), "Answer stopped")
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			e.Status = "failed"
-			e.Error = "旁路回答超过 120 秒，已停止"
+			e.Error = locale.Text(locale.FromContext(ctx), "Side-question answer exceeded 120 seconds and was stopped")
 		}
 	} else if runErr != nil {
 		e.Status = "failed"
-		e.Error = runErr.Error()
+		e.Error = locale.ErrorMessage(locale.FromContext(ctx), runErr)
 	}
 	for attempt := 0; attempt < 3; attempt++ {
 		if _, err := persist(); err == nil {
@@ -510,11 +511,11 @@ func (s *Server) runSide(ctx context.Context, cancel context.CancelFunc, e sideq
 func (s *Server) cancelSideRequest(w http.ResponseWriter, r *http.Request) {
 	e, err := s.m.pg.SideRequest(r.Context(), r.PathValue("requestID"))
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if e == nil {
-		writeErr(w, 404, "side question not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "side question not found"))
 		return
 	}
 	s.side.mu.Lock()
@@ -528,17 +529,17 @@ func (s *Server) cancelSideRequest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) sideEvents(w http.ResponseWriter, r *http.Request) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		writeErr(w, 500, "streaming unavailable")
+		writeErr(w, 500, locale.Text(responseLanguage(w), "streaming unavailable"))
 		return
 	}
 	id := r.PathValue("requestID")
 	first, err := s.m.pg.SideRequest(r.Context(), id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return
 	}
 	if first == nil {
-		writeErr(w, 404, "side question not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "side question not found"))
 		return
 	}
 	w.Header().Set("Content-Type", "text/event-stream")

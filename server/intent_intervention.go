@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"errors"
+	"github.com/Autumn-27/artex/locale"
 	"net/http"
 	"strconv"
 	"strings"
@@ -54,24 +55,24 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "请求体过大")
+			writeErr(w, http.StatusRequestEntityTooLarge, locale.Text(responseLanguage(w), "Request body is too large"))
 			return
 		}
-		writeErr(w, http.StatusBadRequest, "bad json: "+err.Error())
+		writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "bad json: ")+err.Error())
 		return
 	}
 	message := strings.TrimSpace(req.Message)
 	requestID := strings.TrimSpace(req.RequestID)
 	if message == "" {
-		writeErr(w, http.StatusBadRequest, "消息不能为空")
+		writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "Message cannot be empty"))
 		return
 	}
 	if len([]rune(message)) > 4000 {
-		writeErr(w, http.StatusBadRequest, "消息不能超过 4000 个字符")
+		writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "Message cannot exceed 4000 characters"))
 		return
 	}
 	if !validWorkerMessageRequestID(requestID) {
-		writeErr(w, http.StatusBadRequest, "request_id 必须是 1-128 位字母、数字、-、_、. 或 :")
+		writeErr(w, http.StatusBadRequest, locale.Text(responseLanguage(w), "request_id must be 1-128 letters, digits, hyphens, underscores, dots, or colons"))
 		return
 	}
 
@@ -79,33 +80,33 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 	// instead of a silent no-op. The intent itself must be paused: the UI flow is
 	// interrupt (pause) first, then send.
 	if s.engine.IsDeleting(t.ID) {
-		writeErr(w, http.StatusConflict, "任务正在删除，无法向 Worker 发送消息")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Task is being deleted; messages cannot be sent to workers"))
 		return
 	}
 	lifecycle := t.lifecycleSnapshot()
 	switch {
 	case lifecycle.Paused || s.engine.IsPaused(t.ID):
-		writeErr(w, http.StatusConflict, "任务已暂停，请先恢复任务再向 Worker 发送消息")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Task is paused; resume it before messaging a worker"))
 		return
 	case lifecycle.Queued:
-		writeErr(w, http.StatusConflict, "排队中的任务无法向 Worker 发送消息")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Queued tasks cannot receive worker messages"))
 		return
 	case isTerminalStatus(lifecycle.Status):
-		writeErr(w, http.StatusConflict, "终态任务无法向 Worker 发送消息")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Terminal tasks cannot receive worker messages"))
 		return
 	case s.engine.isSettling(t.ID):
-		writeErr(w, http.StatusConflict, "任务正在收尾，无法向 Worker 发送消息")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Task is settling; worker messages cannot be sent"))
 		return
 	}
 
 	node, err := t.Store.GetNode(iid)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err.Error())
+		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
 	if node == nil {
 		if inherited, sourceErr := t.Store.GetNodeWithSources(iid); sourceErr == nil && inherited != nil && inherited.Inherited {
-			writeErr(w, http.StatusConflict, "继承意图为只读，不能发送 Worker 消息")
+			writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Inherited intents are read-only and cannot receive worker messages"))
 			return
 		}
 		writeErr(w, http.StatusNotFound, "intent not found")
@@ -116,7 +117,7 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if node.State != "paused" {
-		writeErr(w, http.StatusConflict, "仅已暂停的 Worker 可以发送消息，请先暂停")
+		writeErr(w, http.StatusConflict, locale.Text(responseLanguage(w), "Only paused workers can receive messages; pause the worker first"))
 		return
 	}
 	agentMessage, ok := s.prepareChatMentionMessage(w, message)
@@ -130,9 +131,9 @@ func (s *Server) sendWorkerMessage(w http.ResponseWriter, r *http.Request) {
 	if err := s.engine.runDetachedIntent(s.ctx, t, iid, requestID, message, agentMessage); err != nil {
 		switch {
 		case errors.Is(err, db.ErrIntentStateConflict):
-			writeErr(w, http.StatusConflict, err.Error())
+			writeError(w, http.StatusConflict, err)
 		default:
-			writeErr(w, http.StatusInternalServerError, err.Error())
+			writeError(w, http.StatusInternalServerError, err)
 		}
 		return
 	}

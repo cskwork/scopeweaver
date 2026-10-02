@@ -1,6 +1,6 @@
 package db
 
-import "fmt"
+import "github.com/Autumn-27/artex/locale"
 
 // DiscardOpenIntent compensates a follow-up creation when task admission fails.
 // The task execution gate must still be held by the caller, so the intent cannot
@@ -26,7 +26,7 @@ func (s *ExplorationStore) DiscardOpenIntent(id int64) error {
 		return err
 	}
 	if removed != 1 {
-		return fmt.Errorf("open intent %d was not available for admission rollback", id)
+		return locale.Errorf("open intent %d was not available for admission rollback", id)
 	}
 	return tx.Commit()
 }

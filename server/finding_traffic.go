@@ -16,6 +16,7 @@ import (
 	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/evidence"
+	"github.com/Autumn-27/artex/locale"
 	actool "github.com/Autumn-27/norma/tool"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) seedFindingTrafficTools() {
 	for _, key := range []string{"report_finding", "update_finding_report"} {
 		var schema any
 		if key == "update_finding_report" {
-			schema = s.toolUpdateFindingReport().InputSchema()
+			schema = s.toolUpdateFindingReport(locale.En).InputSchema()
 		} else {
 			for _, seed := range agent.BuiltinToolSeeds() {
 				if seed.Key == key {
@@ -45,7 +46,7 @@ func (s *Server) seedFindingTrafficTools() {
 		}
 		raw, err := json.Marshal(schema)
 		if err != nil {
-			log.Printf("[evidence] tool schema: %v", err)
+			log.Printf(locale.Text(locale.ServerDefault(), "[evidence] tool schema: %v"), err)
 			return
 		}
 		var obj map[string]json.RawMessage
@@ -67,7 +68,7 @@ func (s *Server) seedFindingTrafficTools() {
 		_, err = s.m.pg.Exec(`UPDATE tools SET schema=jsonb_set(schema,ARRAY['properties',$2::text],$3::jsonb,true),updated_at=now()
 WHERE key=$1 AND system AND NOT(COALESCE(schema->'properties','{}'::jsonb) ? $2)`, key, name, string(properties[name]))
 		if err != nil {
-			log.Printf("[evidence] upgrade tool %s: %v", key, err)
+			log.Printf(locale.Text(locale.ServerDefault(), "[evidence] upgrade tool %s: %v"), key, err)
 			return
 		}
 	}
@@ -98,37 +99,37 @@ func evidenceError(w http.ResponseWriter, err error) {
 	if errors.Is(err, db.ErrFindingNotFound) || errors.Is(err, db.ErrEvidenceNotFound) {
 		status = http.StatusNotFound
 	}
-	writeErr(w, status, err.Error())
+	writeError(w, status, err)
 }
 
 func (s *Server) findingTrafficAccess(w http.ResponseWriter, r *http.Request, write bool) (int64, bool) {
 	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil || id <= 0 {
-		writeErr(w, 400, "invalid finding id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid finding id"))
 		return 0, false
 	}
 	f, err := s.m.pg.GetFinding(id)
 	if err != nil {
-		writeErr(w, 500, err.Error())
+		writeError(w, 500, err)
 		return 0, false
 	}
 	if f == nil {
-		writeErr(w, 404, "finding not found")
+		writeErr(w, 404, locale.Text(responseLanguage(w), "finding not found"))
 		return 0, false
 	}
 	if taskID := r.URL.Query().Get("context_task"); taskID != "" {
 		task := s.m.ResolveTask(taskID)
 		if task == nil {
-			writeErr(w, 404, "context task not found")
+			writeErr(w, 404, locale.Text(responseLanguage(w), "context task not found"))
 			return 0, false
 		}
 		_, inherited, allowed := findingProvenanceInTask(task, f.TaskID)
 		if !allowed {
-			writeErr(w, 404, "finding not available in task context")
+			writeErr(w, 404, locale.Text(responseLanguage(w), "finding not available in task context"))
 			return 0, false
 		}
 		if write && inherited {
-			writeErr(w, 403, "继承漏洞只读，请在来源任务中修改")
+			writeErr(w, 403, locale.Text(responseLanguage(w), "Inherited findings are read-only; edit them in the source task"))
 			return 0, false
 		}
 	}
@@ -167,11 +168,11 @@ func (s *Server) bindFindingTraffic(w http.ResponseWriter, r *http.Request) {
 		Refs []db.TrafficRef `json:"traffic_refs"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
-		writeErr(w, 400, "invalid body")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid body"))
 		return
 	}
 	if len(body.Refs) == 0 {
-		writeErr(w, 400, "请选择流量")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "Select traffic to bind"))
 		return
 	}
 	out, err := s.evidenceStore().Bind(r.Context(), id, body.Refs)
@@ -194,21 +195,21 @@ func (s *Server) editFindingTraffic(w http.ResponseWriter, r *http.Request) {
 		Order   []string `json:"binding_ids"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil || body.Version == nil {
-		writeErr(w, 400, "version 和有效请求体必填")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "version and a valid request body are required"))
 		return
 	}
 	var order []int64
 	bindingID := int64(0)
 	if r.Method == http.MethodPut {
 		if body.Order == nil {
-			writeErr(w, 400, "binding_ids 必填")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "binding_ids is required"))
 			return
 		}
 		order = []int64{}
 		for _, raw := range body.Order {
 			v, err := strconv.ParseInt(raw, 10, 64)
 			if err != nil || v <= 0 {
-				writeErr(w, 400, "invalid binding id")
+				writeErr(w, 400, locale.Text(responseLanguage(w), "invalid binding id"))
 				return
 			}
 			order = append(order, v)
@@ -217,7 +218,7 @@ func (s *Server) editFindingTraffic(w http.ResponseWriter, r *http.Request) {
 		var err error
 		bindingID, err = strconv.ParseInt(r.PathValue("binding_id"), 10, 64)
 		if err != nil || bindingID <= 0 {
-			writeErr(w, 400, "invalid binding id")
+			writeErr(w, 400, locale.Text(responseLanguage(w), "invalid binding id"))
 			return
 		}
 	}
@@ -238,9 +239,9 @@ type evidencePreview struct {
 	Binary     bool   `json:"binary"`
 }
 
-func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnapshot, side string, offset, length int64) (out evidencePreview, err error) {
+func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnapshot, side string, offset, length int64, langs ...locale.Lang) (out evidencePreview, err error) {
 	if offset < 0 || length < 0 {
-		return out, errors.New("offset / length 不能为负数")
+		return out, locale.NewError("offset / length must not be negative")
 	}
 	if length == 0 || length > 8192 {
 		length = 8192
@@ -251,7 +252,7 @@ func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnaps
 	}
 	defer f.Close()
 	if offset > total {
-		return out, errors.New("offset 超出正文长度")
+		return out, locale.NewError("offset exceeds the body length")
 	}
 	if _, err = f.Seek(offset, io.SeekStart); err != nil {
 		return out, err
@@ -274,7 +275,7 @@ func readEvidencePreview(store *evidence.Store, snapshot db.TrafficEvidenceSnaps
 	out = evidencePreview{Offset: offset, Total: total, NextOffset: offset + int64(len(raw)), Truncated: offset+int64(len(raw)) < total,
 		Binary: bytes.IndexByte(raw, 0) >= 0 || (offset == 0 && !utf8.Valid(raw))}
 	if out.Binary {
-		out.Content = fmt.Sprintf("[二进制正文，%d 字节；请下载查看]", total)
+		out.Content = fmt.Sprintf(locale.Text(locale.First(langs), "[Binary body, %d bytes; download to view]"), total)
 	} else {
 		out.Content = string(bytes.ToValidUTF8(raw, []byte("�")))
 	}
@@ -288,17 +289,17 @@ func (s *Server) getFindingTrafficDetail(w http.ResponseWriter, r *http.Request)
 	}
 	bid, err := strconv.ParseInt(r.PathValue("binding_id"), 10, 64)
 	if err != nil || bid <= 0 {
-		writeErr(w, 400, "invalid binding id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid binding id"))
 		return
 	}
 	store := s.evidenceStore()
 	var result any
 	err = store.WithBinding(r.Context(), id, bid, func(b db.FindingTrafficBinding) error {
-		req, err := readEvidencePreview(store, b.Snapshot, "request", 0, 8192)
+		req, err := readEvidencePreview(store, b.Snapshot, "request", 0, 8192, responseLanguage(w))
 		if err != nil {
 			return err
 		}
-		resp, err := readEvidencePreview(store, b.Snapshot, "response", 0, 8192)
+		resp, err := readEvidencePreview(store, b.Snapshot, "response", 0, 8192, responseLanguage(w))
 		if err != nil {
 			return err
 		}
@@ -319,7 +320,7 @@ func (s *Server) getFindingTrafficBody(w http.ResponseWriter, r *http.Request) {
 	}
 	bid, err := strconv.ParseInt(r.PathValue("binding_id"), 10, 64)
 	if err != nil || bid <= 0 {
-		writeErr(w, 400, "invalid binding id")
+		writeErr(w, 400, locale.Text(responseLanguage(w), "invalid binding id"))
 		return
 	}
 	side := r.URL.Query().Get("side")
@@ -357,7 +358,7 @@ func (s *Server) getFindingTrafficBody(w http.ResponseWriter, r *http.Request) {
 			*dst = v
 		}
 	}
-	preview, err := readEvidencePreview(store, b.Snapshot, side, offset, length)
+	preview, err := readEvidencePreview(store, b.Snapshot, side, offset, length, responseLanguage(w))
 	if err != nil {
 		evidenceError(w, err)
 		return
@@ -365,9 +366,10 @@ func (s *Server) getFindingTrafficBody(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, preview)
 }
 
-func (s *Server) toolGetFindingTraffic() actool.CoreTool {
-	return roTool("get_finding_traffic", "读取漏洞已绑定的真实流量证据，不依赖捕获开关。finding_id 使用 report_finding JSON 返回的独立漏洞记录 ID（不是第一行的探索节点 ID）。先不传 binding_id 获取清单及 version；空清单是正常情况，TCP 等非 HTTP 漏洞或未采集时仍可依据文字/命令证据编写报告，不强制绑定。有绑定时按 binding_id、side(request/response)、offset 分段读取正文。写报告时将读取的 version 作为 evidence_version 传给 update_finding_report，后者 finding_id 仍使用探索节点 ID。",
-		objSchema(map[string]any{"finding_id": strParam("独立漏洞记录 ID"), "binding_id": strParam("清单里的绑定 ID，省略则返回清单"), "side": strParam("request 或 response，默认 response"), "offset": map[string]any{"type": "integer"}, "length": map[string]any{"type": "integer"}}, "finding_id"),
+func (s *Server) toolGetFindingTraffic(langs ...locale.Lang) actool.CoreTool {
+	lang := findingToolLanguage(langs)
+	return roTool("get_finding_traffic", locale.Text(lang, "Read a finding's bound real traffic evidence regardless of the capture setting. finding_id is the independent record ID in report_finding JSON, not the exploration node ID on the first line. Omit binding_id to list bindings and version. An empty list is normal: TCP/non-HTTP or uncaptured findings can still be reported using textual/command evidence; binding is optional. For bindings, read body segments using binding_id, side (request/response), and offset. Pass the version actually read as evidence_version to update_finding_report, whose finding_id still uses the exploration node ID."),
+		objSchema(map[string]any{"finding_id": strParam(locale.Text(lang, "Independent finding record ID")), "binding_id": strParam(locale.Text(lang, "Binding ID from the list; omit to return the list")), "side": strParam(locale.Text(lang, "request or response; defaults to response")), "offset": map[string]any{"type": "integer"}, "length": map[string]any{"type": "integer"}}, "finding_id"),
 		func(ctx context.Context, in json.RawMessage) (actool.Result, error) {
 			var a struct {
 				FindingID      json.RawMessage `json:"finding_id"`
@@ -376,16 +378,16 @@ func (s *Server) toolGetFindingTraffic() actool.CoreTool {
 				Offset, Length int64
 			}
 			if err := json.Unmarshal(in, &a); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			id, bid := parseProfileID(a.FindingID), parseProfileID(a.BindingID)
 			if err := s.agentFindingTrafficAccess(ctx, id, false); err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			if len(a.BindingID) == 0 {
 				list, err := s.m.pg.GetFindingTraffic(ctx, id)
 				if err != nil {
-					return actool.Errorf(err.Error()), nil
+					return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 				}
 				return jsonResult(trafficSummary(list))
 			}
@@ -395,7 +397,7 @@ func (s *Server) toolGetFindingTraffic() actool.CoreTool {
 			store := s.evidenceStore()
 			var result any
 			err := store.WithBinding(ctx, id, bid, func(b db.FindingTrafficBinding) error {
-				preview, err := readEvidencePreview(store, b.Snapshot, a.Side, a.Offset, a.Length)
+				preview, err := readEvidencePreview(store, b.Snapshot, a.Side, a.Offset, a.Length, locale.FromContext(ctx))
 				if err != nil {
 					return err
 				}
@@ -407,7 +409,7 @@ func (s *Server) toolGetFindingTraffic() actool.CoreTool {
 				return nil
 			})
 			if err != nil {
-				return actool.Errorf(err.Error()), nil
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
 			return jsonResult(result)
 		})
