@@ -273,6 +273,14 @@ CGO_ENABLED=0 go build -tags embedui -o scopeweaver ./cmd/artex
 
 ## Configuration
 
+### Coding-agent integration
+
+Claude Code, Codex and Pi can create tasks, read progress, coverage and findings through the
+[agent adapter](adapters/agent/README.md). Claude Code/Codex use local stdio MCP; Pi uses a native
+extension. Reads are enabled by default, with task creation and pause/resume explicitly enabled
+through configuration. The adapter uses the existing authenticated API and keeps ScopeWeaver's
+internal agents and model configuration intact.
+
 **Database** (`config.json`, or override with the environment variable `ARTEX_PG_DSN`):
 
 ```json
