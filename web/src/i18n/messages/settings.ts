@@ -1,5 +1,14 @@
 // Complete paragraphs keep word order and emphasis natural in both languages.
 export const en = {
+  judgeUsageTitle: "Approval token usage",
+  judgeUsageHelp: "Totals for fallback approvals, counted separately from planner and worker calls.",
+  judgeUsageCalls: "Approval calls",
+  judgeUsageInput: "Input tokens",
+  judgeUsageOutput: "Output tokens",
+  judgeUsageCacheRead: "Cache read",
+  judgeUsageCacheWrite: "Cache write",
+  judgeUsageRecent: "Daily input and output tokens over the past 30 days",
+  judgeUsageDay: "{date} · {calls} calls · {tokens} tokens",
 
   setupUnavailableTitle: "Cannot confirm setup status",
   setupUnavailableHelp: "The backend or database is temporarily unavailable. Setup is disabled to protect any existing password. Restore the service and retry.",
@@ -22,6 +31,15 @@ export const en = {
   pagination: "{from}–{to} / {total} records",
 };
 export const ko: Record<keyof typeof en, string> = {
+  judgeUsageTitle: "승인 토큰 사용량",
+  judgeUsageHelp: "플래너 및 워커 호출과 별도로 집계한 대체 승인 모델의 누적 사용량입니다.",
+  judgeUsageCalls: "승인 호출",
+  judgeUsageInput: "입력 토큰",
+  judgeUsageOutput: "출력 토큰",
+  judgeUsageCacheRead: "캐시 읽기",
+  judgeUsageCacheWrite: "캐시 쓰기",
+  judgeUsageRecent: "최근 30일간 일별 입력 및 출력 토큰",
+  judgeUsageDay: "{date} · 호출 {calls}회 · 토큰 {tokens}개",
 
   setupUnavailableTitle: "초기 설정 상태를 확인할 수 없습니다",
   setupUnavailableHelp: "백엔드 또는 데이터베이스를 일시적으로 사용할 수 없습니다. 기존 암호를 보호하기 위해 초기 설정을 비활성화했습니다. 서비스를 복구한 후 다시 시도하세요.",

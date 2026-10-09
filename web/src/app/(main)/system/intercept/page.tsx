@@ -53,7 +53,38 @@ import {
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { InterceptRule, InterceptAction, JudgeConfig, LLMProfile, Tool } from "@/lib/types";
+import type { InterceptRule, InterceptAction, JudgeConfig, JudgeDayUsage, JudgeUsage, LLMProfile, Tool } from "@/lib/types";
+
+// A compact daily chart keeps the approval settings independent of chart libraries.
+function JudgeSparkbars({ daily }: { daily: JudgeDayUsage[] }) {
+  const { t, fmt } = useI18n();
+  const max = Math.max(1, ...daily.map((d) => d.input_tokens + d.output_tokens));
+  return (
+    <div className="flex h-16 items-end gap-0.5">
+      {daily.map((d) => {
+        const total = d.input_tokens + d.output_tokens;
+        const height = Math.max(2, Math.round((total / max) * 100));
+        return (
+          <div
+            key={d.date}
+            title={t("settings.judgeUsageDay", { date: d.date, calls: fmt.number(d.calls), tokens: fmt.number(total) })}
+            className="min-w-[2px] flex-1 rounded-sm bg-violet-500/60 hover:bg-violet-500"
+            style={{ height: `${height}%` }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function JudgeStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border bg-muted/20 px-3 py-2">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className="mt-0.5 text-lg font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+}
 
 // ---- tool scope ----
 
@@ -169,12 +200,22 @@ const defaultJudge = (): JudgeConfig => ({
 
 function JudgeCard() {
   "use no memo";
-  const { t: swt, locale: swLocale } = useI18n();
+  const { t: swt, locale: swLocale, fmt } = useI18n();
 
   const [cfg, setCfg] = React.useState<JudgeConfig>(defaultJudge());
   const [profiles, setProfiles] = React.useState<LLMProfile[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
+  const [usage, setUsage] = React.useState<JudgeUsage | null>(null);
+  const compactTokens = (n: number) => fmt.number(n, { notation: "compact", maximumFractionDigits: 1 });
+
+  const loadUsage = React.useCallback(async () => {
+    try {
+      setUsage(await api.interceptJudgeUsage(30));
+    } catch {
+      // Usage failures must not prevent editing the approval configuration.
+    }
+  }, []);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -192,6 +233,10 @@ function JudgeCard() {
   React.useEffect(() => {
     load();
   }, [load]);
+
+  React.useEffect(() => {
+    if (cfg.enabled) loadUsage();
+  }, [cfg.enabled, loadUsage]);
 
   function patch(p: Partial<JudgeConfig>) {
     setCfg((c) => ({ ...c, ...p }));
@@ -246,6 +291,37 @@ function JudgeCard() {
           <Switch checked={cfg.enabled} disabled={loading} onCheckedChange={(v) => patch({ enabled: v })} />
         </div>
       </div>
+
+      {cfg.enabled && usage && (
+        <Card>
+          <CardContent className="p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium">{swt("settings.judgeUsageTitle")}</p>
+                <p className="text-xs text-muted-foreground">{swt("settings.judgeUsageHelp")}</p>
+              </div>
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={loadUsage}>
+                {swt("common.refresh")}
+              </Button>
+            </div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+              <JudgeStat label={swt("settings.judgeUsageCalls")} value={fmt.number(usage.calls)} />
+              <JudgeStat label={swt("settings.judgeUsageInput")} value={compactTokens(usage.input_tokens)} />
+              <JudgeStat label={swt("settings.judgeUsageOutput")} value={compactTokens(usage.output_tokens)} />
+              <JudgeStat label={swt("settings.judgeUsageCacheRead")} value={compactTokens(usage.cache_read_tokens)} />
+              <JudgeStat label={swt("settings.judgeUsageCacheWrite")} value={compactTokens(usage.cache_write_tokens)} />
+            </div>
+            {usage.daily.length > 0 && (
+              <div className="mt-4">
+                <p className="mb-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {swt("settings.judgeUsageRecent")}
+                </p>
+                <JudgeSparkbars daily={usage.daily} />
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {cfg.enabled && (
         <div className="grid gap-4 lg:grid-cols-5">

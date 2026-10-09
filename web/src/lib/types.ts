@@ -1594,3 +1594,18 @@ export interface InterceptExecution {
   seq: number;
   items: Activity[];
 }
+
+export interface JudgeDayUsage {
+  date: string; // YYYY-MM-DD (UTC)
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+}
+export interface JudgeUsage {
+  calls: number;
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_tokens: number;
+  cache_write_tokens: number;
+  daily: JudgeDayUsage[];
+}
