@@ -35,3 +35,9 @@ func init() {
 	Register("Cannot roll back while an update is in progress", "Cannot roll back while an update is in progress", "업데이트 진행 중에는 롤백할 수 없습니다")
 	Register("[update] Manually rolled back to the previous version; exiting to complete the switch", "[update] Manually rolled back to the previous version; exiting to complete the switch", "[update] 이전 버전으로 수동 롤백했습니다. 전환을 완료하기 위해 종료합니다")
 }
+
+func init() {
+	Register("Data source is temporarily unavailable; please try again later", "Data source is temporarily unavailable; please try again later", "데이터 소스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요")
+	Register("Password must contain at least %d characters", "Password must contain at least %d characters", "암호는 최소 %d자여야 합니다")
+	Register("Password must not exceed %d bytes", "Password must not exceed %d bytes", "암호는 %d바이트를 초과할 수 없습니다")
+}

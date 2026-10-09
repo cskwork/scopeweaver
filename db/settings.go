@@ -25,6 +25,22 @@ ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`, key
 	return err
 }
 
+// InsertSettingIfAbsent preserves an existing value, including during concurrent
+// first-time password initialization. The primary key enforces the guarantee.
+func (d *DB) InsertSettingIfAbsent(key, value string) (inserted bool, err error) {
+	res, err := d.Exec(`
+INSERT INTO settings(key, value) VALUES ($1, $2)
+ON CONFLICT (key) DO NOTHING`, key, value)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // GetBool returns the boolean setting, or def when unset/unparseable.
 func (d *DB) GetBool(key string, def bool) bool {
 	v, ok, err := d.GetSetting(key)
