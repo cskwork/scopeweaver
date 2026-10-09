@@ -186,6 +186,30 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 ./build.sh --target linux/amd64 --upx
 ```
 
+### Reverse proxy deployments
+
+Production builds serve the UI, API, and live SSE streams from the same origin.
+You can expose HTTPS on port 443 and keep the backend port private. Disable proxy
+buffering and allow long-lived connections so live events reach the browser:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+}
+```
+
+Set `NEXT_PUBLIC_SSE_BASE` at build time only when SSE uses a different origin.
+Changing it at container runtime does not change the exported frontend. During
+`next dev`, SSE still connects directly to port 8787 to bypass Next.js buffering;
+an explicit empty `NEXT_PUBLIC_SSE_BASE` selects the same origin.
+
 ---
 
 ## Updating
