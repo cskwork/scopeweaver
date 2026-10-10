@@ -10,17 +10,33 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/crypto/bcrypt"
 )
 
 const (
-	jwtKeyFilename = "jwt.key"
-	authPassKey    = "auth.password_hash"
-	jwtTTL         = 7 * 24 * time.Hour
-	keyChars       = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	jwtKeyFilename   = "jwt.key"
+	authPassKey      = "auth.password_hash"
+	jwtTTL           = 7 * 24 * time.Hour
+	keyChars         = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	minPasswordRunes = 8
+	maxPasswordBytes = 72
 )
+
+// Database read failures must never be treated as an uninitialized password.
+const errDataSourceUnavailable = "Data source is temporarily unavailable; please try again later"
+
+func validatePassword(pw string) error {
+	if utf8.RuneCountInString(pw) < minPasswordRunes {
+		return locale.Errorf("Password must contain at least %d characters", minPasswordRunes)
+	}
+	if len(pw) > maxPasswordBytes {
+		return locale.Errorf("Password must not exceed %d bytes", maxPasswordBytes)
+	}
+	return nil
+}
 
 // loadOrCreateJWTKey reads the 32-byte signing key from keyDir/jwt.key. keyDir is
 // the project base dir (next to the executable), NOT the browsable workspace root
@@ -120,7 +136,11 @@ func (s *Server) authStatus(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	hash, _, _ := pg.GetSetting(authPassKey)
+	hash, _, err := pg.GetSetting(authPassKey)
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
 	writeJSON(w, 200, map[string]any{"initialized": hash != ""})
 }
 
@@ -130,7 +150,11 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 	if pg == nil {
 		return
 	}
-	existing, _, _ := pg.GetSetting(authPassKey)
+	existing, _, err := pg.GetSetting(authPassKey)
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
 	if existing != "" {
 		writeErr(w, 403, locale.Text(responseLanguage(w), "Password is already set"))
 		return
@@ -142,13 +166,23 @@ func (s *Server) authInit(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, locale.Text(responseLanguage(w), "Password cannot be empty"))
 		return
 	}
+	if err := validatePassword(req.Password); err != nil {
+		writeError(w, 400, err)
+		return
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
 		writeErr(w, 500, locale.Text(responseLanguage(w), "Password hashing failed"))
 		return
 	}
-	if err := pg.SetSetting(authPassKey, string(hash)); err != nil {
+	// The unique constraint protects against concurrent initialization requests.
+	inserted, err := pg.InsertSettingIfAbsent(authPassKey, string(hash))
+	if err != nil {
 		writeErr(w, 500, locale.Text(responseLanguage(w), "Save failed: ")+err.Error())
+		return
+	}
+	if !inserted {
+		writeErr(w, 403, "Password is already set")
 		return
 	}
 	tok, err := signJWT(s.jwtKey)
@@ -183,7 +217,15 @@ func (s *Server) authChangePassword(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, locale.Text(responseLanguage(w), "New password cannot be empty"))
 		return
 	}
-	hash, ok, _ := pg.GetSetting(authPassKey)
+	if err := validatePassword(req.NewPassword); err != nil {
+		writeError(w, 400, err)
+		return
+	}
+	hash, ok, err := pg.GetSetting(authPassKey)
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
 	if !ok || hash == "" {
 		writeErr(w, 403, locale.Text(responseLanguage(w), "Password is not initialized; set it first"))
 		return
@@ -222,7 +264,11 @@ func (s *Server) authLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 401, locale.Text(responseLanguage(w), "Incorrect username or password"))
 		return
 	}
-	hash, ok, _ := pg.GetSetting(authPassKey)
+	hash, ok, err := pg.GetSetting(authPassKey)
+	if err != nil {
+		writeErr(w, 503, errDataSourceUnavailable)
+		return
+	}
 	if !ok || hash == "" {
 		writeErr(w, 403, locale.Text(responseLanguage(w), "Password is not initialized; set it first"))
 		return
