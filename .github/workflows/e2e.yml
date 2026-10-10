@@ -45,6 +45,7 @@ jobs:
       - name: Build embedded binary
         run: |
           (cd web && npm ci && npm run build:static)
+          mkdir -p server/webui/dist
           rsync -a --delete web/out/ server/webui/dist/
           go build -tags embedui -o "$RUNNER_TEMP/scopeweaver" ./cmd/artex
       - name: Install browser
@@ -60,7 +61,7 @@ jobs:
         working-directory: e2e
         run: npm run smoke
       - if: failure()
-        run: cat "$RUNNER_TEMP/server.log"
+        run: cat "$RUNNER_TEMP/server.log" || true
       - if: always()
         uses: actions/upload-artifact@v7
         with:
