@@ -22,6 +22,9 @@ var schemaSQL string
 
 const schemaMigrationLockKey int64 = 7337741001
 
+// Leave room below PostgreSQL's default limit for other clients.
+const maxOpenConns = 32
+
 var schemaDeadlockRetryDelays = [...]time.Duration{
 	100 * time.Millisecond,
 	250 * time.Millisecond,
@@ -133,6 +136,11 @@ func Open(dsn string) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Queue excess queries instead of exhausting PostgreSQL connections.
+	sqlDB.SetMaxOpenConns(maxOpenConns)
+	sqlDB.SetMaxIdleConns(maxOpenConns)
+	sqlDB.SetConnMaxLifetime(30 * time.Minute)
+	sqlDB.SetConnMaxIdleTime(5 * time.Minute)
 	if err := sqlDB.Ping(); err != nil {
 		sqlDB.Close()
 		return nil, locale.Errorf("ping postgres (%s): %w", config.Redact(dsn), err)

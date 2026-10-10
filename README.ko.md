@@ -184,6 +184,30 @@ ARTEX_TARGETS=linux/amd64,windows/amd64 ./build.sh --release
 ./build.sh --target linux/amd64 --upx
 ```
 
+### 리버스 프록시 배포
+
+프로덕션 빌드는 UI, API, 실시간 SSE 스트림을 같은 출처에서 제공합니다.
+HTTPS 443 포트만 공개하고 백엔드 포트는 비공개로 유지할 수 있습니다.
+실시간 이벤트가 브라우저에 도달하도록 프록시 버퍼링을 끄고 긴 연결을 허용하세요.
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_buffering off;
+    proxy_cache off;
+    proxy_read_timeout 3600s;
+}
+```
+
+SSE가 다른 출처를 사용할 때만 빌드 시 `NEXT_PUBLIC_SSE_BASE`를 설정하세요.
+컨테이너 실행 시 변수를 바꿔도 내보낸 프런트엔드는 변경되지 않습니다.
+`next dev`에서는 Next.js 버퍼링을 우회하기 위해 SSE가 8787 포트에 직접 연결합니다.
+`NEXT_PUBLIC_SSE_BASE`를 빈 문자열로 지정하면 같은 출처를 사용합니다.
+
 ---
 
 ## 업데이트

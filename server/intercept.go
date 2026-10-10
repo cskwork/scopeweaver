@@ -13,9 +13,13 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/guard"
 	"github.com/Autumn-27/artex/intercept"
+	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/llm"
 )
+
+// judgeWorkerLane separates approval-model usage from other agent calls.
+const judgeWorkerLane = "judge"
 
 // chatGuard returns a guard wired with the manager's interceptor, used for chat
 // conversations. Called once per applyLLM so a new LLM config always gets a fresh guard.
@@ -41,6 +45,7 @@ func (s *Server) wireInterceptReviewer() {
 		if !ok {
 			return intercept.Decision{ProfileID: profileID}, locale.Errorf("Judge model profile %d is unavailable", profileID)
 		}
+		ctx = llmrec.WithWorker(ctx, judgeWorkerLane)
 		text, err := reviewCompletion(ctx, prov, prompt, input)
 		if err != nil {
 			return intercept.Decision{ProfileID: profileID}, err
@@ -439,6 +444,23 @@ func (s *Server) interceptSetJudgeConfig(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"ok": true})
+}
+
+// interceptJudgeUsage returns the fallback judge's cumulative token spend plus a
+// recent daily series, for the config page. ?days bounds the daily series (default 30).
+func (s *Server) interceptJudgeUsage(w http.ResponseWriter, r *http.Request) {
+	pg := s.m.PG()
+	if pg == nil {
+		writeJSON(w, 200, db.JudgeUsage{Daily: []db.JudgeDayUsage{}})
+		return
+	}
+	days := atoiDefault(r.URL.Query().Get("days"), 30)
+	usage, err := pg.JudgeUsageStats(days)
+	if err != nil {
+		writeErr(w, 500, err.Error())
+		return
+	}
+	writeJSON(w, 200, usage)
 }
 
 // --- helpers ---
