@@ -32,7 +32,7 @@ Counts include Go parent tests and their subtests. Package runs use separate dat
 
 The upstream mock preview has no notification metadata mock, so its Notifications page errors. The **real backend Notifications page and add-channel form pass** in both languages. No notification was sent during verification.
 
-The unchanged npm dependency set reports **14 audit findings: 1 critical, 9 high and 4 moderate**. Dependency upgrades remain separate work.
+The v0.1.0 verification recorded **14 npm audit findings: 1 critical, 9 high and 4 moderate**. Tooling dependencies have since received targeted updates. Next/React upgrades are separate work, and some findings depend on upstream fixes. Run `cd web && npm audit` for the current report; the historical count does not describe the updated lockfile.
 
 ## Scope and limits
 
