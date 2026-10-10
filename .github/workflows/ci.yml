@@ -77,6 +77,8 @@ jobs:
         run: |
           for script in *.sh; do bash -n "$script"; done
           sh -n start.sh
+      - name: Test local installer with isolated fixtures
+        run: bash e2e/install-local.sh
       - name: Run all Go packages with separate disposable databases
         env:
           PGHOST: localhost
