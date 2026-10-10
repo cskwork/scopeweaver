@@ -26,7 +26,7 @@ Counts include Go parent tests and their subtests. Package runs use separate dat
 
 ## Inherited issues
 
-`TestGraphOverviewExpandsAssociatedCompanyScope` still fails with `task scope missing: <nil>`. The same failure was reproduced in untouched upstream source. It is not excluded or marked successful, so the complete backend CI remains red until that separate issue is fixed.
+`TestGraphOverviewExpandsAssociatedCompanyScope` failed with `task scope missing: <nil>` in both ScopeWeaver and untouched upstream source. The test expected detailed scope in the graph overview, which upstream commit `06a43f3` deliberately made compact. Commit `75a706d` replaced it with `TestGraphOverviewKeepsAssociatedCompanyScopeCompact`, which checks the compact overview and verifies the stored company scope directly. The complete backend CI has passed since then.
 
 `TestTaskMetadataPatchReturnsRenameAndPin` previously produced an intermittent temporary-directory cleanup failure in upstream verification. It passed in the final ScopeWeaver server run; no unrelated lifecycle change was made to hide it.
 
