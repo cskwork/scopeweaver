@@ -80,12 +80,22 @@ jobs:
       - name: Generate checksums
         working-directory: dist
         run: sha256sum *.zip > SHA256SUMS
+      # Changelog links are relative to log/ so they work in the repository; on the
+      # release page they would resolve against /tree/ and 404. Pin them to the tag,
+      # and take the release title from the changelog heading.
+      - name: Prepare release notes
+        id: notes
+        run: |
+          changelog="log/changelog-${GITHUB_REF_NAME}.md"
+          sed "s#](\.\./#](https://github.com/${GITHUB_REPOSITORY}/blob/${GITHUB_REF_NAME}/#g" "$changelog" > "$RUNNER_TEMP/notes.md"
+          echo "title=$(head -n 1 "$changelog" | sed -e 's/^# *//' -e 's/^ScopeWeaver *//')" >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
+          name: ${{ steps.notes.outputs.title }}
           files: |
             dist/*.zip
             dist/SHA256SUMS
-          body_path: log/changelog-${{ github.ref_name }}.md
+          body_path: ${{ runner.temp }}/notes.md
 
   docker:
     needs: binaries
