@@ -335,6 +335,8 @@ traffic-capture proxy). The start script passes flags straight through to `scope
 
 ## Development
 
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for requirements, checks, and how pull requests are reviewed and merged.
+
 ### Manual vulnerability retest
 
 The task-detail "Retest" tab paginates the task's vulnerabilities, shows each one's past
