@@ -26,7 +26,7 @@ Go 개수에는 상위 테스트와 하위 테스트가 모두 포함됩니다. 
 
 ## 기존 문제
 
-`TestGraphOverviewExpandsAssociatedCompanyScope`는 여전히 `task scope missing: <nil>`로 실패합니다. 수정하지 않은 원본에서도 같은 실패를 재현했습니다. 이 검사를 제외하거나 성공 처리하지 않았으므로 해당 별도 문제를 수정하기 전까지 전체 백엔드 CI는 실패 상태입니다.
+`TestGraphOverviewExpandsAssociatedCompanyScope`는 ScopeWeaver와 수정하지 않은 원본 모두에서 `task scope missing: <nil>`로 실패했습니다. 이 테스트는 그래프 개요에 상세 범위가 포함된다고 기대했지만, 원본 커밋 `06a43f3`에서 개요를 의도적으로 간결하게 바꿨습니다. 커밋 `75a706d`에서 `TestGraphOverviewKeepsAssociatedCompanyScopeCompact`로 교체해 간결한 개요를 확인하고 저장된 회사 범위를 직접 검증합니다. 이후 전체 백엔드 CI는 통과하고 있습니다.
 
 원본 검증에서는 `TestTaskMetadataPatchReturnsRenameAndPin`의 임시 디렉터리 정리가 간헐적으로 실패했습니다. 최종 ScopeWeaver 서버 검사에서는 통과했으며, 이를 숨기기 위한 별도 수명 주기 변경은 하지 않았습니다.
 
