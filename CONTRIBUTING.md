@@ -1,0 +1,65 @@
+# Contributing to ScopeWeaver
+
+[한국어](CONTRIBUTING.ko.md)
+
+Contributions are welcome: bug fixes, upstream ARTEX backports, dependency upgrades, documentation,
+and tests.
+
+## Before you start
+
+- Read the [usage restrictions](README.md#license-and-disclaimer). Contributions must not add
+  features that target real online systems or weaken those restrictions.
+- For larger changes, open an issue first so we can agree on the approach.
+- Keep each pull request focused on one topic. Smaller PRs are reviewed faster.
+
+## Requirements for a pull request
+
+- **English and Korean together.** User-facing text needs both languages:
+  - server messages: `locale.Register(key, en, ko)` in `locale/`
+  - web UI: the `en` and `ko` objects in `web/src/i18n/messages/`
+  - documentation: `README.md` with `README.ko.md`, and `docs/` with `docs/ko/`
+- **Tests for changed behavior.** Add or update tests that would fail without your change. Do not
+  disable, skip, or loosen existing checks to make them pass.
+- **Disposable databases only.** Tests that write to PostgreSQL must use a fresh database named
+  `scopeweaver_test_*` (or `scopeweaver_adapter_*` for the agent adapter E2E test).
+- **Credit upstream work.** For ARTEX backports, add `Upstream-commit: mhtsec/ARTEX@<sha>` and a
+  `Co-authored-by:` trailer for the original author, and update `docs/PROVENANCE.md` and
+  `docs/ko/PROVENANCE.md`.
+- **License.** Contributions are accepted under the repository's [AGPL-3.0](LICENSE) license.
+
+## Checks to run
+
+These match the CI jobs in [.github/workflows/ci.yml](.github/workflows/ci.yml):
+
+```bash
+# backend: every Go package (set ARTEX_PG_DSN to a disposable scopeweaver_test_* database)
+go test ./... -count=1
+
+# frontend
+cd web && npm ci && npm test && npm run build:static
+
+# agent adapter (and its real-backend E2E test against a scopeweaver_adapter_* database)
+cd adapters/agent && npm ci && npm test && npm run check
+SCOPEWEAVER_ADAPTER_E2E=1 go test ./server -run '^TestAgentAdapterE2E$' -count=1
+```
+
+The `e2e` workflow also runs an essential browser smoke test against the real binary on every PR and
+after merge. To run it locally against a running server and a fresh `scopeweaver_test_*` database
+(requires `psql`):
+
+```bash
+cd e2e && npm ci && npx playwright install chromium
+SCOPEWEAVER_URL=http://127.0.0.1:8787 ARTEX_PG_DSN=postgres://.../scopeweaver_test_e2e npm run smoke
+```
+
+Describe in the PR what you ran and anything you could not run.
+
+## Review and merging
+
+1. CI must pass: the `frontend`, `agent-adapter`, and `backend` checks and the `e2e` smoke test. For
+   first-time contributors, the maintainer approves the CI run.
+2. The PR is reviewed against its diff for correctness, security, and English/Korean parity.
+3. **The maintainer performs a final human check of every PR before merging.** Nothing is merged
+   without it.
+
+Releases are cut by the maintainer after a full end-to-end test before and after merging.
