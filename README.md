@@ -173,6 +173,9 @@ CGO_ENABLED=0 go build -tags embedui -o scopeweaver ./cmd/artex
 `build.sh` builds and embeds the frontend, strips debug info with the Go linker, and zips each
 release. Release mode builds Linux amd64/arm64, macOS amd64/arm64, and Windows amd64 by default:
 
+Archives include `THIRD_PARTY_NOTICES.txt`; container images retain the same notice at
+`/app/THIRD_PARTY_NOTICES.txt` for the vendored shadcn stylesheet.
+
 ```bash
 ./build.sh --release
 # output: dist/scopeweaver-0.3.3-*.zip
