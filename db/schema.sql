@@ -395,6 +395,12 @@ CREATE TABLE IF NOT EXISTS llm_profiles (
     -- Custom session header: when nonempty, send this HTTP header with the current run's session ID
     -- (chat conversation/worker intent), for gateway prompt caching or sticky routing. Empty omits it.
     session_header_key TEXT NOT NULL DEFAULT '',
+    -- OpenRouter provider routing (format='openrouter' only):
+    --   openrouter_order: comma-separated provider slugs sent as provider.order ('' = default routing).
+    --   openrouter_fallbacks: provider.allow_fallbacks; NULL omits the field (OpenRouter default true),
+    --     false pins the request to the listed providers only. Tri-state on purpose.
+    openrouter_order     TEXT NOT NULL DEFAULT '',
+    openrouter_fallbacks BOOLEAN,
     -- Retry overrides: attempts 0=global default/-1=disabled/>0=explicit; interval 0=default backoff/>0=fixed milliseconds.
     -- The groups cover connection, empty-response, and same-provider safety-window retries; see ALTER comments below.
     retry_connect_attempts    INTEGER NOT NULL DEFAULT 0,
@@ -415,11 +421,12 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS priority     INTEGER NOT NULL 
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS pool_exclude BOOLEAN NOT NULL DEFAULT false;
 -- Add streaming switch to older databases; default true preserves streaming transparently.
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS streaming    BOOLEAN NOT NULL DEFAULT true;
--- Expand format constraints to include openai-responses (OpenAI Responses API) for older databases.
--- Idempotent on every startup: drop the old CHECK and recreate with all three values.
+-- Expand format constraints to include openai-responses (OpenAI Responses API) and
+-- openrouter (OpenAI Chat Completions on OpenRouter) for older databases.
+-- Idempotent on every startup: drop the old CHECK and recreate with all values.
 ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
 ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_format_check
-    CHECK (format IN ('openai','anthropic','openai-responses'));
+    CHECK (format IN ('openai','anthropic','openai-responses','openrouter'));
 
 -- Add output cap and field name to older databases. Defaults 0/'' omit the cap and retain max_tokens,
 -- preserving existing profile behavior.
@@ -434,6 +441,12 @@ ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_max_tokens_check
     CHECK (max_tokens >= 0);
 -- Add custom session header name to older databases; default '' omits it and preserves behavior.
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS session_header_key TEXT NOT NULL DEFAULT '';
+
+-- Add OpenRouter provider routing to older databases. order defaults to '' (no routing object;
+-- OpenRouter load balancing) and fallbacks stays NULL (field omitted; OpenRouter default true),
+-- preserving existing behavior for existing profiles.
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS openrouter_order     TEXT NOT NULL DEFAULT '';
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS openrouter_fallbacks BOOLEAN;
 
 -- Per-profile retry overrides (see LLM retry design): three attempt/fixed-interval pairs.
 -- Attempts: 0=global default, -1=disable this layer, >0=explicit count. Interval: 0=the layer's

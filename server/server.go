@@ -335,6 +335,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	cfg.SetOpenRouterRouting(p.OpenRouterOrder, p.OpenRouterFallbacks)
 	s.applyProfileRetry(&cfg, p)
 	if cfg.APIKey == "" {
 		return cfg, false
@@ -347,19 +348,21 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 
 // saveLLMConfig persists the LLM config as the active "default" profile in PG.
 func (s *Server) saveLLMConfig(cfg agent.Config) error {
-	// cfg.Provider() already returns one of the three valid format strings
-	// (anthropic / openai / openai-responses), matching the DB CHECK constraint.
+	// cfg.Provider() already returns one of the valid format strings
+	// (anthropic / openai / openai-responses / openrouter), matching the DB CHECK constraint.
 	format := cfg.Provider()
 	var id int64
 	// This legacy endpoint omits failover, transport, and output-limit parameters, so preserve stored values.
-	// Otherwise saving would silently reset priority, pool_exclude, streaming, and output limits
-	// (max_tokens / max_tokens_field) to zero values.
+	// Otherwise saving would silently reset priority, pool_exclude, streaming, output limits
+	// (max_tokens / max_tokens_field), and OpenRouter routing to zero values.
 	var priority int
 	var poolExclude bool
 	streaming := true // Existing databases and new profiles default to streaming.
 	var maxTokens int
 	var maxTokensField string
 	var sessionHeaderKey string
+	var openRouterOrder string
+	var openRouterFallbacks *bool
 	var retry db.RetryOverride
 	if profs, _ := s.m.pg.ListProfiles(); profs != nil {
 		for _, p := range profs {
@@ -367,6 +370,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 				id, priority, poolExclude, streaming = p.ID, p.Priority, p.PoolExclude, p.Streaming
 				maxTokens, maxTokensField = p.MaxTokens, p.MaxTokensField
 				sessionHeaderKey = p.SessionHeaderKey
+				openRouterOrder, openRouterFallbacks = p.OpenRouterOrder, p.OpenRouterFallbacks
 				retry = p.Retry
 				break
 			}
@@ -378,6 +382,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey,
+		OpenRouterOrder: openRouterOrder, OpenRouterFallbacks: openRouterFallbacks,
 		Retry: retry,
 	})
 	if err != nil {
@@ -506,6 +511,7 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	cfg.SetOpenRouterRouting(p.OpenRouterOrder, p.OpenRouterFallbacks)
 	s.applyProfileRetry(&cfg, p)
 	if cfg.APIKey == "" {
 		return cfg, false
@@ -1367,16 +1373,18 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Provider         string `json:"provider"`
-		Model            string `json:"model"`
-		BaseURL          string `json:"base_url"`
-		Proxy            string `json:"proxy"`
-		APIKey           string `json:"api_key"`
-		ThinkingType     string `json:"thinking_type"`
-		ReasoningEffort  string `json:"reasoning_effort"`
-		ProfileID        *int64 `json:"profile_id"`         // Existing profile under test; an empty api_key uses its stored key.
-		Streaming        *bool  `json:"streaming"`          // Omitted means streaming, matching profile-save defaults.
-		SessionHeaderKey string `json:"session_header_key"` // Optional custom session header, also sent during testing with a fresh random session ID.
+		Provider            string `json:"provider"`
+		Model               string `json:"model"`
+		BaseURL             string `json:"base_url"`
+		Proxy               string `json:"proxy"`
+		APIKey              string `json:"api_key"`
+		ThinkingType        string `json:"thinking_type"`
+		ReasoningEffort     string `json:"reasoning_effort"`
+		ProfileID           *int64 `json:"profile_id"`           // Existing profile under test; an empty api_key uses its stored key.
+		Streaming           *bool  `json:"streaming"`            // Omitted means streaming, matching profile-save defaults.
+		SessionHeaderKey    string `json:"session_header_key"`   // Optional custom session header, also sent during testing with a fresh random session ID.
+		OpenRouterOrder     string `json:"openrouter_order"`     // OpenRouter provider.order slugs; tested like production sends them.
+		OpenRouterFallbacks *bool  `json:"openrouter_fallbacks"` // provider.allow_fallbacks; omitted means the field is not sent.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, 400, err)
@@ -1396,16 +1404,23 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// Endpoints such as opencode zen require x-opencode-session and otherwise return 400,
 	// so omitting the header would make successful conversations fail connection tests.
 	cfg.SessionHeaderKey = req.SessionHeaderKey
+	// Mirror production routing too: a "provider" object OpenRouter rejects must fail the
+	// test here, not in a real conversation. SetOpenRouterRouting ignores the input for
+	// non-openrouter formats.
+	cfg.SetOpenRouterRouting(req.OpenRouterOrder, req.OpenRouterFallbacks)
 	// API-key precedence: submitted form, specified profile's stored key, then global configuration.
 	// Stored keys never return to the browser; testing an existing profile may require reading its key from DB.
-	// Likewise, fall back to the stored custom session-header name when omitted by the form.
-	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+	// Likewise, fall back to the stored custom session-header name and stored routing when the form omits them.
+	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "" || (cfg.OpenRouter && req.OpenRouterOrder == "" && req.OpenRouterFallbacks == nil)) {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
 			if cfg.APIKey == "" {
 				cfg.APIKey = p.APIKey
 			}
 			if cfg.SessionHeaderKey == "" {
 				cfg.SessionHeaderKey = p.SessionHeaderKey
+			}
+			if cfg.OpenRouter && req.OpenRouterOrder == "" && req.OpenRouterFallbacks == nil {
+				cfg.SetOpenRouterRouting(p.OpenRouterOrder, p.OpenRouterFallbacks)
 			}
 		}
 	}

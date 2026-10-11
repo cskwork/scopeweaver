@@ -2872,7 +2872,13 @@ export const en = {
   "m2870": "Features",
   "m2871": "Dashboard",
   "m2872": "Chat",
-  "m2873": "Logs"
+  "m2873": "Logs",
+  "m2874": "Provider order · provider.order",
+  "m2875": "Comma-separated OpenRouter provider slugs tried in order, e.g. anthropic, google. Blank uses OpenRouter's default load balancing.",
+  "m2876": "Fallbacks · allow_fallbacks",
+  "m2877": "Allowed lets OpenRouter route to backup providers when the listed ones are unavailable. Disallowed pins each request to the listed providers only. Do not send keeps OpenRouter's default behavior.",
+  "m2878": "Allowed",
+  "m2879": "Disallowed (pin)"
 };
 export const ko: Record<keyof typeof en, string> = {
   "m0001": "백엔드 서비스에 연결할 수 없습니다",
@@ -5747,5 +5753,11 @@ export const ko: Record<keyof typeof en, string> = {
   "m2870": "기능",
   "m2871": "대시보드",
   "m2872": "대화",
-  "m2873": "로그"
+  "m2873": "로그",
+  "m2874": "공급자 순서 · provider.order",
+  "m2875": "쉼표로 구분된 OpenRouter 공급자 슬러그를 순서대로 시도합니다(예: anthropic, google). 비워 두면 OpenRouter의 기본 로드 밸런싱을 사용합니다.",
+  "m2876": "폴백 · allow_fallbacks",
+  "m2877": "허용은 나열된 공급자를 사용할 수 없을 때 OpenRouter가 백업 공급자로 라우팅하도록 합니다. 금지는 각 요청을 나열된 공급자로만 고정합니다. 보내지 않음은 필드를 생략하고 OpenRouter의 기본 동작을 유지합니다.",
+  "m2878": "허용",
+  "m2879": "금지(고정)"
 };

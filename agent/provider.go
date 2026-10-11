@@ -10,6 +10,7 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/Autumn-27/artex/locale"
 	"io"
@@ -18,8 +19,10 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/norma/agentcore"
@@ -69,6 +72,26 @@ type Config struct {
 	// OpenAI reasoning models reject max_tokens with unsupported_parameter, while
 	// many compatible gateways require it. Let users choose per endpoint; do not infer.
 	MaxTokensField string
+	// OpenRouter marks the "openrouter" profile format: OpenAI Chat Completions
+	// wire format against the OpenRouter gateway (default base
+	// https://openrouter.ai/api/v1, Bearer auth, model ids like
+	// anthropic/claude-sonnet-4.5). The flag exists because FormatOpenAI is shared
+	// with plain "openai"; without it Provider() and the routing injection below
+	// could not tell the two apart.
+	OpenRouter bool
+	// OpenRouter routing preferences, sent as the request body's "provider"
+	// object (https://openrouter.ai/docs/features/provider-routing):
+	// OpenRouterOrder is the canonical comma-separated provider-slug list sent as
+	// provider.order (empty omits it and keeps OpenRouter's price-based load
+	// balancing). OpenRouterFallbacks controls backup providers
+	// (provider.allow_fallbacks) as a string tri-state like ThinkingType: ""
+	// omits the field (OpenRouter default true), "true"/"false" send it — "false"
+	// pins the request to the listed providers only. Strings instead of a slice
+	// and a *bool keep Config comparable (applyLLM reuses cached providers via ==)
+	// and match how the profile row stores them. Applied only when OpenRouter is
+	// set. See SetOpenRouterRouting.
+	OpenRouterOrder     string
+	OpenRouterFallbacks string
 	// Nonempty SessionHeaderKey adds a custom HTTP header to each LLM request,
 	// carrying the current session ID (conv-<id>, exp<x>-worker-i<intent>, etc.;
 	// see WorkerSessionID). Some gateways use it for prompt caching/sticky routing.
@@ -138,15 +161,16 @@ func compactionConfig(windowTokens int) *compaction.Config {
 
 // FromEnv resolves the LLM provider config:
 //
-//	ARTEX_LLM_PROVIDER = anthropic|openai (default: inferred from keys)
+//	ARTEX_LLM_PROVIDER = anthropic|openai|openai-responses|openrouter (default: inferred from keys)
 //	ARTEX_LLM_MODEL    = model id        (default: per provider)
 //	ARTEX_LLM_BASE_URL = endpoint        (optional)
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
-//	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
+//	ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY = credentials
 func FromEnv() (Config, bool) {
 	prov := os.Getenv("ARTEX_LLM_PROVIDER")
 	anthKey := os.Getenv("ANTHROPIC_API_KEY")
 	oaiKey := os.Getenv("OPENAI_API_KEY")
+	orKey := os.Getenv("OPENROUTER_API_KEY")
 
 	if prov == "" {
 		switch {
@@ -154,6 +178,8 @@ func FromEnv() (Config, bool) {
 			prov = "anthropic"
 		case oaiKey != "":
 			prov = "openai"
+		case orKey != "":
+			prov = "openrouter"
 		default:
 			return Config{}, false
 		}
@@ -178,6 +204,18 @@ func FromEnv() (Config, bool) {
 		c.APIKey = oaiKey
 		if c.Model == "" {
 			c.Model = "gpt-5"
+		}
+	case "openrouter":
+		// OpenRouter speaks OpenAI Chat Completions with Bearer auth and its own key.
+		c.Format = llm.FormatOpenAI
+		c.OpenRouter = true
+		c.APIKey = orKey
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/chat/completions"), "/")
+		if c.BaseURL == "" {
+			c.BaseURL = OpenRouterBaseURL
+		}
+		if c.Model == "" {
+			c.Model = OpenRouterDefaultModel
 		}
 	default:
 		c.Format = llm.FormatAnthropic
@@ -212,6 +250,17 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		if c.Model == "" {
 			c.Model = "gpt-4o"
 		}
+	case "openrouter":
+		// Same Chat Completions wire format as openai, on OpenRouter's base URL.
+		c.Format = llm.FormatOpenAI
+		c.OpenRouter = true
+		c.BaseURL = strings.TrimRight(strings.TrimSuffix(c.BaseURL, "/chat/completions"), "/")
+		if c.BaseURL == "" {
+			c.BaseURL = OpenRouterBaseURL
+		}
+		if c.Model == "" {
+			c.Model = OpenRouterDefaultModel
+		}
 	case "openai-responses":
 		c.Format = llm.FormatOpenAIResponses
 		// provider appends "/responses"; tolerate a full endpoint URL.
@@ -240,8 +289,11 @@ func isFalsy(s string) bool {
 	return false
 }
 
-// Provider returns the short provider name ("anthropic"/"openai").
+// Provider returns the short provider name ("anthropic"/"openai"/"openrouter").
 func (c Config) Provider() string {
+	if c.OpenRouter {
+		return "openrouter"
+	}
 	switch c.Format {
 	case llm.FormatOpenAI:
 		return "openai"
@@ -255,7 +307,7 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
-	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey)
+	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey, c.openrouterRouting())
 	if err != nil {
 		return nil, err
 	}
@@ -289,6 +341,153 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		return glm53Provider{Provider: provider}, nil
 	}
 	return provider, nil
+}
+
+// OpenRouter profile defaults (see Config.OpenRouter). Exported: server-side
+// endpoint handlers reuse the base URL for model listing.
+const (
+	OpenRouterBaseURL      = "https://openrouter.ai/api/v1"
+	OpenRouterDefaultModel = "openai/gpt-4o-mini"
+)
+
+// openrouterRouting carries the OpenRouter provider-routing settings resolved
+// from a Config. Zero value sends no routing object.
+type openrouterRouting struct {
+	order     []string
+	fallbacks *bool
+}
+
+func (r openrouterRouting) active() bool { return len(r.order) > 0 || r.fallbacks != nil }
+
+// openrouterRouting collects the routing settings for the wire injector: only the
+// openrouter format routes, blank slugs are dropped, and an entirely empty set
+// avoids touching the body at all.
+func (c Config) openrouterRouting() openrouterRouting {
+	if !c.OpenRouter {
+		return openrouterRouting{}
+	}
+	order := SplitOpenRouterOrder(c.OpenRouterOrder)
+	var fallbacks *bool
+	switch c.OpenRouterFallbacks {
+	case "true":
+		v := true
+		fallbacks = &v
+	case "false":
+		v := false
+		fallbacks = &v
+	}
+	if len(order) == 0 && fallbacks == nil {
+		return openrouterRouting{}
+	}
+	return openrouterRouting{order: order, fallbacks: fallbacks}
+}
+
+// SetOpenRouterRouting applies profile storage values (a comma/semicolon/whitespace
+// separated provider-order string plus a tri-state fallbacks flag) to the config.
+// A nil fallbacks pointer omits the wire field. Non-openrouter configs ignore the
+// input so stray form data can never inject a routing object into another format.
+func (c *Config) SetOpenRouterRouting(order string, fallbacks *bool) {
+	if !c.OpenRouter {
+		return
+	}
+	c.OpenRouterOrder = NormalizeOpenRouterRouting(order)
+	if fallbacks != nil {
+		c.OpenRouterFallbacks = strconv.FormatBool(*fallbacks)
+	}
+}
+
+// SplitOpenRouterOrder splits a user- or profile-stored provider-order string into
+// slugs. Comma, semicolon, and whitespace all separate; duplicates are dropped in
+// first-seen order. Case is preserved: OpenRouter matches slugs case-insensitively
+// and users copy the spellings shown in its dashboard.
+func SplitOpenRouterOrder(order string) []string {
+	fields := strings.FieldsFunc(order, func(r rune) bool {
+		return r == ',' || r == ';' || unicode.IsSpace(r)
+	})
+	out := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, slug := range fields {
+		slug = strings.TrimSpace(slug)
+		if slug == "" {
+			continue
+		}
+		if _, dup := seen[slug]; dup {
+			continue
+		}
+		seen[slug] = struct{}{}
+		out = append(out, slug)
+	}
+	return out
+}
+
+// NormalizeOpenRouterRouting canonicalizes a provider-order string for storage:
+// the split slugs rejoined with commas. "" stays "".
+func NormalizeOpenRouterRouting(order string) string {
+	return strings.Join(SplitOpenRouterOrder(order), ",")
+}
+
+// inject merges the routing object into an OpenAI Chat Completions request body.
+// The merged body replaces req.Body AND req.GetBody: norma rebuilds every retry
+// from GetBody, so a retry would otherwise resend the un-routed body and could
+// land on a different provider than the pinned one.
+func (r openrouterRouting) inject(req *http.Request) error {
+	body, err := outgoingBody(req)
+	if err != nil {
+		return err
+	}
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return locale.Errorf("openrouter: request body is not a JSON object: %w", err)
+	}
+	routing := map[string]any{}
+	if len(r.order) > 0 {
+		routing["order"] = r.order
+	}
+	if r.fallbacks != nil {
+		routing["allow_fallbacks"] = *r.fallbacks
+	}
+	payload["provider"], err = json.Marshal(routing)
+	if err != nil {
+		return locale.Errorf("openrouter: encode routing object: %w", err)
+	}
+	merged, err := json.Marshal(payload)
+	if err != nil {
+		return locale.Errorf("openrouter: re-encode request body: %w", err)
+	}
+	req.Body = io.NopCloser(bytes.NewReader(merged))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(merged)), nil }
+	req.ContentLength = int64(len(merged))
+	return nil
+}
+
+// outgoingBody snapshots the request body without consuming the original: GetBody
+// when the client populated it (norma builds bodies from a *bytes.Reader), else
+// the raw body, which is then replayed in place.
+func outgoingBody(req *http.Request) ([]byte, error) {
+	if req.GetBody != nil {
+		rc, err := req.GetBody()
+		if err != nil {
+			return nil, locale.Errorf("openrouter: read request body: %w", err)
+		}
+		defer rc.Close()
+		return io.ReadAll(rc)
+	}
+	if req.Body == nil {
+		return nil, locale.Errorf("openrouter: request has no body to route")
+	}
+	body, err := io.ReadAll(req.Body)
+	if err != nil {
+		return nil, locale.Errorf("openrouter: read request body: %w", err)
+	}
+	_ = req.Body.Close()
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	return body, nil
+}
+
+// openRouterChatCompletions reports whether the request targets an OpenAI Chat
+// Completions endpoint — the only wire OpenRouter's provider object applies to.
+func openRouterChatCompletions(req *http.Request) bool {
+	return req.Method == http.MethodPost && strings.HasSuffix(req.URL.Path, "/chat/completions")
 }
 
 // IsQuotaExhaustedMessage deliberately recognizes only explicit balance,
@@ -341,9 +540,20 @@ type quotaAwareTransport struct {
 	// carries; its value is the session id read from the request context. Empty
 	// disables it. See Config.SessionHeaderKey.
 	sessionHeaderKey string
+	// routing holds OpenRouter provider-routing preferences; when active, the
+	// "provider" object is merged into each Chat Completions body before sending.
+	routing openrouterRouting
 }
 
 func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// OpenRouter routing merges BEFORE the capture below, so the recorder shows
+	// exactly what was sent. A merge failure is terminal: silently dropping a
+	// pinned route would send the request to an unlisted provider instead.
+	if t.routing.active() && openRouterChatCompletions(req) {
+		if err := t.routing.inject(req); err != nil {
+			return nil, err
+		}
+	}
 	// Custom session-id header: name is user-configured, value is THIS run's
 	// session id (norma stashes it on the context via transcript.WithSessionID).
 	// Stable across a session's turns and distinct across sessions — exactly what
@@ -405,7 +615,7 @@ func requestBodySnapshot(req *http.Request) string {
 	return string(b)
 }
 
-func quotaAwareHTTPClient(proxy, sessionHeaderKey string) (*http.Client, error) {
+func quotaAwareHTTPClient(proxy, sessionHeaderKey string, routing openrouterRouting) (*http.Client, error) {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	proxy = strings.TrimSpace(proxy)
 	if proxy == "" {
@@ -424,7 +634,7 @@ func quotaAwareHTTPClient(proxy, sessionHeaderKey string) (*http.Client, error) 
 		}
 		transport.Proxy = http.ProxyURL(proxyURL)
 	}
-	return &http.Client{Transport: quotaAwareTransport{base: transport, sessionHeaderKey: strings.TrimSpace(sessionHeaderKey)}}, nil
+	return &http.Client{Transport: quotaAwareTransport{base: transport, sessionHeaderKey: strings.TrimSpace(sessionHeaderKey), routing: routing}}, nil
 }
 
 // logTestConnection prints the raw HTTP status code(s) and response body of a

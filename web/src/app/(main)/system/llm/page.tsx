@@ -53,10 +53,12 @@ const MAX_TOKENS_FIELDS: { value: string; label: string }[] = [
   { value: "max_completion_tokens", label: "max_completion_tokens" },
 ];
 // The other formats have fixed field names; explain that this selection does not affect them.
+// openrouter is Chat Completions too, so the OpenAI key choice applies verbatim.
 const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   get openai() { return swt("interface.m1331"); },
   get anthropic() { return swt("interface.m1332"); },
   get "openai-responses"() { return swt("interface.m1333"); },
+  get openrouter() { return swt("interface.m1331"); },
 };
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, get label() { return swt("interface.m1329"); } },
@@ -72,6 +74,11 @@ function cooldownText(secs: number) {
   if (secs < 60) return `${secs}s`;
   return `${Math.ceil(secs / 60)}min`;
 }
+
+// Profile formats the editor accepts. openrouter is OpenAI Chat Completions on
+// OpenRouter's base URL plus its provider routing preferences.
+const FORMATS = ["anthropic", "openai", "openai-responses", "openrouter"] as const;
+type ProfileFormat = (typeof FORMATS)[number];
 
 // Profile health prioritizes missing API keys because requests cannot be sent at all;
 // other states come from rotation circuit records. With rotation off, Healthy means no known failures.
@@ -308,7 +315,7 @@ function ProfileSheet({
   const isNew = !profile;
   const [preset, setPreset] = React.useState<LLMProfilePresetId | "">("");
   const [name, setName] = React.useState("");
-  const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
+  const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -325,6 +332,8 @@ function ProfileSheet({
   const [maxTokens, setMaxTokens] = React.useState("0"); // Per-response output limit; 0 omits the field.
   const [maxTokensField, setMaxTokensField] = React.useState(NONE); // Output-limit field name; NONE means max_tokens.
   const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // Custom session header name; blank omits it.
+  const [orOrder, setOrOrder] = React.useState(""); // OpenRouter provider.order slugs; blank uses default routing.
+  const [orFallbacks, setOrFallbacks] = React.useState(NONE); // OpenRouter allow_fallbacks tri-state; NONE omits the field.
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // Profile retry overrides; all zeros follow global settings.
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
@@ -338,7 +347,7 @@ function ProfileSheet({
     if (!open) return;
     setPreset("");
     setName(profile?.name ?? "");
-    setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
+    setFormat(FORMATS.find((f) => f === profile?.format) ?? "anthropic");
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
     setProxy(profile?.proxy ?? "");
@@ -353,6 +362,10 @@ function ProfileSheet({
     setMaxTokens(String(profile?.max_tokens ?? 0));
     setMaxTokensField(fromStore(profile?.max_tokens_field));
     setSessionHeaderKey(profile?.session_header_key ?? "");
+    setOrOrder(profile?.openrouter_order ?? "");
+    if (profile?.openrouter_fallbacks === true) setOrFallbacks("true");
+    else if (profile?.openrouter_fallbacks === false) setOrFallbacks("false");
+    else setOrFallbacks(NONE);
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
@@ -404,6 +417,9 @@ function ProfileSheet({
     try {
       // Test using the profile's actual reasoning parameters so unsupported fields fail here,
       // not during tasks. Pass profile ID to use the stored key when the key input is blank.
+      // OpenRouter routing is tested exactly like production sends it; the fallbacks
+      // tri-state only carries a boolean when the openrouter format is selected.
+      const orFallbacksWire = format === "openrouter" && orFallbacks !== NONE ? orFallbacks === "true" : undefined;
       const r = await api.testLLM(
         format,
         model,
@@ -415,6 +431,8 @@ function ProfileSheet({
         profileId,
         streaming,
         sessionHeaderKey.trim(),
+        format === "openrouter" ? orOrder.trim() : "",
+        orFallbacksWire,
       );
       // Show response content to prove the model actually answered as it would in a conversation.
       if (r.ok)
@@ -454,10 +472,14 @@ function ProfileSheet({
         pool_exclude: poolExclude,
         streaming,
         max_tokens: Math.max(0, Number(maxTokens) || 0),
-        // Output-field selection affects only OpenAI Chat Completions; other formats use defaults.
+        // Output-field selection affects only OpenAI Chat Completions formats; other formats use defaults.
         // The backend normalizes again; this also prevents contradictory UI submissions.
-        max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
+        max_tokens_field: format === "openai" || format === "openrouter" ? toStore(maxTokensField) : "",
         session_header_key: sessionHeaderKey.trim(),
+        // OpenRouter provider routing: blank order keeps default load balancing; the
+        // fallbacks tri-state maps NONE → omitted (OpenRouter default true).
+        openrouter_order: format === "openrouter" ? orOrder.trim() : "",
+        openrouter_fallbacks: format === "openrouter" && orFallbacks !== NONE ? orFallbacks === "true" : undefined,
         retry,
       });
       if (isNew) toast.success(swt("interface.m1380", { p0: name.trim() }));
@@ -532,7 +554,7 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>{swt("interface.m1388")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
+              <Select value={format} onValueChange={(v) => setFormat(v as ProfileFormat)}>
                 <SelectTrigger>
                   <SelectValue placeholder={swt("interface.m1389")} />
                 </SelectTrigger>
@@ -540,6 +562,7 @@ function ProfileSheet({
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
+                  <SelectItem value="openrouter">OpenRouter</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -551,7 +574,7 @@ function ProfileSheet({
               <Input
                 id="p-model"
                 className="font-mono"
-                placeholder="claude-opus-4-8"
+                placeholder={format === "openrouter" ? "anthropic/claude-sonnet-4.5" : "claude-opus-4-8"}
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
               />
@@ -596,7 +619,7 @@ function ProfileSheet({
             <Input
               id="p-base-url"
               className="font-mono"
-              placeholder="https://api.openai.com/v1"
+              placeholder={format === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1"}
               value={baseUrl}
               onChange={(e) => setBaseUrl(e.target.value)}
             />
@@ -722,9 +745,9 @@ function ProfileSheet({
                 <p className="text-muted-foreground text-xs">{MAX_TOKENS_FIELD_HINTS[format]}</p>
               </div>
               <Select
-                value={format === "openai" ? maxTokensField : NONE}
+                value={format === "openai" || format === "openrouter" ? maxTokensField : NONE}
                 onValueChange={setMaxTokensField}
-                disabled={format !== "openai"}
+                disabled={format !== "openai" && format !== "openrouter"}
               >
                 <SelectTrigger className="w-56 shrink-0">
                   <SelectValue />
@@ -780,6 +803,46 @@ function ProfileSheet({
               </Select>
             </div>
           </div>
+
+          {/* OpenRouter provider routing: pin provider preference and control fallbacks.
+              Only the openrouter format carries the request body's "provider" object. */}
+          {format === "openrouter" && (
+            <div className="grid gap-3 rounded-lg border p-3">
+              <div className="grid gap-2">
+                <Label htmlFor="p-or-order">{swt("interface.m2874")}</Label>
+                <Input
+                  id="p-or-order"
+                  className="font-mono"
+                  placeholder="anthropic, google"
+                  value={orOrder}
+                  onChange={(e) => setOrOrder(e.target.value)}
+                />
+                <p className="text-muted-foreground text-xs">{swt("interface.m2875")}</p>
+              </div>
+              <div className="flex items-center justify-between gap-4 border-t pt-3">
+                <div className="grid gap-0.5">
+                  <Label className="text-sm">{swt("interface.m2876")}</Label>
+                  <p className="text-muted-foreground text-xs">{swt("interface.m2877")}</p>
+                </div>
+                <Select value={orFallbacks} onValueChange={setOrFallbacks}>
+                  <SelectTrigger className="w-40 shrink-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[
+                      { value: NONE, label: swt("interface.m1329") },
+                      { value: "true", label: swt("interface.m2878") },
+                      { value: "false", label: swt("interface.m2879") },
+                    ].map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
         </div>

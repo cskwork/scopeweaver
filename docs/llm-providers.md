@@ -30,4 +30,17 @@ Enter a profile name and your own API key. Applying either template preserves an
 
 Verified against official documentation on **2026-10-03**. Provider availability, account entitlement, and policies may change.
 
+## OpenRouter
+
+Format `openrouter` sends OpenAI Chat Completions requests to OpenRouter (`https://openrouter.ai/api/v1` by default) with Bearer auth and OpenRouter's own API key (`OPENROUTER_API_KEY` when configuring from the environment). Model ids are OpenRouter's `vendor/model` slugs, e.g. `anthropic/claude-sonnet-4.5`; **Load models** reads OpenRouter's model list. Output-limit and retry settings behave like the `openai` format.
+
+Two profile fields control OpenRouter provider routing — the request body's `provider` object. They apply only to the `openrouter` format; saving any other format clears them.
+
+| Field | Wire field | Meaning |
+| --- | --- | --- |
+| Provider order | `provider.order` | Comma-separated provider slugs tried in order (e.g. `anthropic, google`). Blank keeps OpenRouter's price-based load balancing. |
+| Fallbacks | `provider.allow_fallbacks` | Allowed (default) keeps backup providers; Disallowed pins each request to the listed providers only. "Do not send" omits the field and keeps OpenRouter's default. |
+
+The connection test sends the same routing object a real conversation would, so a rejected model/provider combination fails the test instead of a live run. Failover between ScopeWeaver profiles is a separate mechanism (rotation) and unaffected. See [OpenRouter provider routing](https://openrouter.ai/docs/features/provider-routing).
+
 [한국어 안내](ko/llm-providers.md)

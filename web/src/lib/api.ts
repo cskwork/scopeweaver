@@ -1,7 +1,5 @@
-
 import { localizedFetch as fetch } from "@/i18n/request";
-import { localizedUrl } from "@/i18n/runtime";
-import { translate as swt } from "@/i18n/runtime";
+import { localizedUrl, translate as swt } from "@/i18n/runtime";
 // Real backend client. /api/* is proxied to the Go backend (next.config rewrites).
 // Returns the domain types in lib/types.ts. Shapes match the backend handlers;
 // a few fields the backend serializes differently (e.g. created_at as a unix int)
@@ -811,8 +809,7 @@ export const api = {
   // Channels are multi-instance resources: multiple bots per type with independent filters,
   // so manage them separately rather than flattening them into settings.
   notifyMeta: () => get<NotificationMeta>(`/notify/meta`),
-  notifyChannels: () =>
-    get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
+  notifyChannels: () => get<{ channels: NotificationChannel[] }>(`/notify/channels`).then((r) => arr(r.channels)),
   notifyCreateChannel: (payload: {
     name: string;
     kind: string;
@@ -927,6 +924,8 @@ export const api = {
     profile_id?: number,
     streaming = true, // Test the profile's actual transport mode so nonstreaming failures are caught before conversations.
     session_header_key = "", // Nonempty sends this custom header on test requests with a one-time session ID.
+    openrouter_order = "", // OpenRouter provider.order slugs; tested exactly like production sends them.
+    openrouter_fallbacks?: boolean, // provider.allow_fallbacks; omitted means the field is not sent.
   ) =>
     // reply contains truncated actual model output; an entirely empty response fails the backend test.
     post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
@@ -940,6 +939,8 @@ export const api = {
       profile_id,
       streaming,
       session_header_key,
+      openrouter_order,
+      openrouter_fallbacks,
     }),
   llmProfiles: () => get<{ profiles: LLMProfile[] }>("/llm/profiles").then((r) => arr(r.profiles)),
   saveLLMProfile: (p: {
@@ -961,6 +962,8 @@ export const api = {
     max_tokens?: number; // Per-response output limit; 0 omits the field and uses the server default.
     max_tokens_field?: string; // Empty string defaults to max_tokens; max_completion_tokens applies only to OpenAI format.
     session_header_key?: string; // Nonempty header names send the current session ID on each request; empty omits the header.
+    openrouter_order?: string; // OpenRouter provider.order slugs (comma-separated); empty uses default routing.
+    openrouter_fallbacks?: boolean; // provider.allow_fallbacks; omitted means the field is not sent.
     retry?: LLMRetryOverride; // Per-profile retry overrides; zeros inherit global retry policy.
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),

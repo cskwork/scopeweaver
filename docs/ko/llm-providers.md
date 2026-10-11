@@ -30,4 +30,17 @@ GLM-5.3은 텍스트 입력과 100만 토큰의 문맥 창을 지원하며 추�
 
 공식 문서 확인일: **2026-10-03**. 모델 제공 여부, 계정 권한 및 정책은 바뀔 수 있습니다.
 
+## OpenRouter
+
+`openrouter` 형식은 OpenAI Chat Completions 요청을 OpenRouter로 보냅니다(기본 URL `https://openrouter.ai/api/v1`, Bearer 인증). 환경 변수로 설정할 때는 OpenRouter 전용 키인 `OPENROUTER_API_KEY`를 사용합니다. 모델 이름은 OpenRouter의 `vendor/model` 슬러그(예: `anthropic/claude-sonnet-4.5`)이며, **모델 불러오기**는 OpenRouter의 모델 목록을 읽습니다. 출력 한도와 재시도 설정은 `openai` 형식과 동일하게 동작합니다.
+
+두 프로필 필드가 OpenRouter 공급자 라우팅(요청 본문의 `provider` 객체)을 제어합니다. 이 필드는 `openrouter` 형식에만 적용되며, 다른 형식으로 저장하면 삭제됩니다.
+
+| 필드 | 전송 필드 | 의미 |
+| --- | --- | --- |
+| 공급자 순서 | `provider.order` | 순서대로 시도할 공급자 슬러그 목록(예: `anthropic, google`). 비우면 OpenRouter의 기본 로드 밸런싱을 사용합니다. |
+| 폴백 | `provider.allow_fallbacks` | 허용(기본값)은 백업 공급자를 유지하고, 금지는 각 요청을 나열된 공급자로만 고정합니다. 보내지 않음은 필드를 생략하고 OpenRouter의 기본 동작을 유지합니다. |
+
+연결 테스트는 실제 대화와 동일한 라우팅 객체를 보내므로, 거부되는 모델·공급자 조합은 실행 중이 아니라 테스트에서 실패합니다. ScopeWeaver 프로필 간 페일오버(로테이션)는 별개의 메커니즘으로 영향을 받지 않습니다. [OpenRouter 공급자 라우팅](https://openrouter.ai/docs/features/provider-routing)을 참고하세요.
+
 [English guide](../llm-providers.md)

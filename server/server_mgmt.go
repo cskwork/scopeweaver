@@ -1828,13 +1828,22 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	p.APIKey = body.APIKey
 	p.Streaming = body.Streaming == nil || *body.Streaming
 	// Negative output limits are meaningless; normalize to zero, omitting the request field. Field-name selection
-	// applies only to Chat Completions; Anthropic and OpenAI Responses fix their field names, so storing it misleads readers.
-	// Clear it for non-OpenAI formats and unknown values, avoiding a user-facing DB CHECK error.
+	// applies only to Chat Completions (openai and openrouter); Anthropic and OpenAI Responses fix their field names,
+	// so storing it misleads readers. Clear it for other formats and unknown values, avoiding a user-facing DB CHECK error.
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
-	if p.Format != "openai" || p.MaxTokensField != llm.MaxTokensFieldCompletion {
+	if (p.Format != "openai" && p.Format != "openrouter") || p.MaxTokensField != llm.MaxTokensFieldCompletion {
 		p.MaxTokensField = ""
+	}
+	// OpenRouter provider routing is stored only for the openrouter format: any other
+	// format would inject a "provider" object into an incompatible request. The order
+	// string is canonicalized (slugs split on comma/semicolon/whitespace, deduped,
+	// rejoined); fallbacks stays a tri-state boolean.
+	if p.Format == "openrouter" {
+		p.OpenRouterOrder = agent.NormalizeOpenRouterRouting(p.OpenRouterOrder)
+	} else {
+		p.OpenRouterOrder, p.OpenRouterFallbacks = "", nil
 	}
 	id, err := pg.SaveProfile(&p)
 	if err != nil {
@@ -2043,11 +2052,16 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 
 	var candidates []candidate
 	switch provider {
-	case "openai", "openai-responses":
+	case "openai", "openai-responses", "openrouter":
 		// Responses API shares the OpenAI model list at /v1/models; tolerate a full
-		// endpoint URL of either format.
+		// endpoint URL of either format. OpenRouter exposes the same /models list
+		// on its OpenAI base (GET https://openrouter.ai/api/v1/models, Bearer auth).
 		if baseURL == "" {
-			baseURL = "https://api.openai.com/v1"
+			if provider == "openrouter" {
+				baseURL = agent.OpenRouterBaseURL
+			} else {
+				baseURL = "https://api.openai.com/v1"
+			}
 		}
 		b := strings.TrimRight(strings.TrimSuffix(strings.TrimSuffix(baseURL, "/chat/completions"), "/responses"), "/")
 		candidates = append(candidates, candidate{b + "/models", bearerHdr()})

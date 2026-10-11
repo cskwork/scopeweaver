@@ -618,6 +618,11 @@ type LLMProfileDTO struct {
 	// Optional custom HTTP header sent with the current conversation/intent session ID on each request.
 	// Empty omits the header. Supports gateways using session IDs for prompt caching/sticky routing.
 	SessionHeaderKey string `json:"session_header_key"`
+	// OpenRouter provider routing (format "openrouter" only): openrouter_order is the
+	// comma-separated provider slug list sent as provider.order; openrouter_fallbacks
+	// sets provider.allow_fallbacks, nil omits the field (OpenRouter default true).
+	OpenRouterOrder     string `json:"openrouter_order,omitempty"`
+	OpenRouterFallbacks *bool  `json:"openrouter_fallbacks,omitempty"`
 	// Per-profile retry overrides for connection, empty response, and same-provider safe-window retries.
 	// attempts: 0=inherit, -1=disable this layer, positive=attempt count. interval_ms: 0=default exponential backoff;
 	// positive=fixed interval in milliseconds. All zeros fully inherit the historical global behavior.
@@ -626,26 +631,28 @@ type LLMProfileDTO struct {
 
 func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 	return LLMProfileDTO{
-		ID:               i64s(p.ID),
-		Name:             p.Name,
-		Format:           p.Format,
-		BaseURL:          p.BaseURL,
-		Proxy:            p.Proxy,
-		Model:            p.Model,
-		APIKeyHint:       p.APIKeyHint,
-		RatePerSecond:    p.RatePerSecond,
-		RatePerMinute:    p.RatePerMinute,
-		ContextWindowK:   p.ContextWindowK,
-		ThinkingType:     p.ThinkingType,
-		ReasoningEffort:  p.ReasoningEffort,
-		IsDefault:        p.IsDefault,
-		Priority:         p.Priority,
-		PoolExclude:      p.PoolExclude,
-		Streaming:        p.Streaming,
-		MaxTokens:        p.MaxTokens,
-		MaxTokensField:   p.MaxTokensField,
-		SessionHeaderKey: p.SessionHeaderKey,
-		Retry:            p.Retry,
+		ID:                  i64s(p.ID),
+		Name:                p.Name,
+		Format:              p.Format,
+		BaseURL:             p.BaseURL,
+		Proxy:               p.Proxy,
+		Model:               p.Model,
+		APIKeyHint:          p.APIKeyHint,
+		RatePerSecond:       p.RatePerSecond,
+		RatePerMinute:       p.RatePerMinute,
+		ContextWindowK:      p.ContextWindowK,
+		ThinkingType:        p.ThinkingType,
+		ReasoningEffort:     p.ReasoningEffort,
+		IsDefault:           p.IsDefault,
+		Priority:            p.Priority,
+		PoolExclude:         p.PoolExclude,
+		Streaming:           p.Streaming,
+		MaxTokens:           p.MaxTokens,
+		MaxTokensField:      p.MaxTokensField,
+		SessionHeaderKey:    p.SessionHeaderKey,
+		OpenRouterOrder:     p.OpenRouterOrder,
+		OpenRouterFallbacks: p.OpenRouterFallbacks,
+		Retry:               p.Retry,
 	}
 }
 

@@ -1026,7 +1026,7 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses";
+  format: "openai" | "anthropic" | "openai-responses" | "openrouter";
   base_url?: string;
   proxy?: string;
   model: string;
@@ -1054,6 +1054,11 @@ export interface LLMProfile {
   // Custom HTTP header name; nonempty sends the current conversation/intent session ID on every request.
   // Empty omits it. Used by gateways with session-based prompt caching or sticky routing.
   session_header_key?: string;
+  // OpenRouter provider routing (format=openrouter only): openrouter_order is the comma-separated
+  // provider slug list sent as provider.order; openrouter_fallbacks sets provider.allow_fallbacks
+  // (undefined omits the field, keeping OpenRouter's default of allowing fallback providers).
+  openrouter_order?: string;
+  openrouter_fallbacks?: boolean;
   // Profile overrides for connection/empty-response/safe-window retries; blank/all zeros inherit global policy.
   retry?: LLMRetryOverride;
 }
