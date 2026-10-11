@@ -89,17 +89,39 @@ test("date and number formatters follow the selected locale", () => {
   assert.equal(ko.number(12345),new Intl.NumberFormat("ko-KR").format(12345));
 });
 
+const legacyWire=new Set(["漏洞","资产","企业","接口","应用","域名","子域名","服务"]);
+function isLegacyHanLiteral(rel, text) {
+  rel=rel.replaceAll("\\","/");
+  return (rel==="lib/chat-mentions.ts" && legacyWire.has(text)) ||
+    (rel==="components/approval-records.tsx" && text==="/^\\[(?:模型|Model|모델)\\]\\s*/") ||
+    (rel==="components/transcript.tsx" && text==="/(?:工具|Tool|도구)\\s+(\\S+)\\s+(?:请求|requests?|요청)/i") ||
+    (rel==="lib/company-scope.ts" && text==="/icp|备案/i");
+}
+
+test("legacy Han exceptions are exact and equivalent for POSIX and Windows paths", () => {
+  const exceptions=[
+    ...[...legacyWire].map(text=>["lib/chat-mentions.ts",text]),
+    ["components/approval-records.tsx","/^\\[(?:模型|Model|모델)\\]\\s*/"],
+    ["components/transcript.tsx","/(?:工具|Tool|도구)\\s+(\\S+)\\s+(?:请求|requests?|요청)/i"],
+    ["lib/company-scope.ts","/icp|备案/i"],
+  ];
+  for(const [file,text] of exceptions) {
+    for(const rel of [file,file.replaceAll("/","\\")]) {
+      assert.equal(isLegacyHanLiteral(rel,text),true,rel);
+      assert.equal(isLegacyHanLiteral(rel,"未翻译"),false,rel);
+      assert.equal(isLegacyHanLiteral(rel,`${text}新增`),false,rel);
+    }
+    assert.equal(isLegacyHanLiteral("lib/other.ts",text),false);
+  }
+});
+
 test("authored UI contains no untranslated Han literals; legacy parsers are explicit exceptions", () => {
-  const legacyWire=new Set(["漏洞","资产","企业","接口","应用","域名","子域名","服务"]);
   const failures=[];
   for(const file of sourceFiles()) {
     const rel=path.relative(SRC_ROOT,file);
     if(rel.endsWith(".test.mjs"))continue; // Tests intentionally preserve multilingual user input.
     for(const hit of scanFile(file)) {
-      if(rel==="lib/chat-mentions.ts" && legacyWire.has(hit.text))continue;
-      if(rel==="components/approval-records.tsx" && hit.text==="/^\\[(?:模型|Model|모델)\\]\\s*/")continue;
-      if(rel==="components/transcript.tsx" && hit.text==="/(?:工具|Tool|도구)\\s+(\\S+)\\s+(?:请求|requests?|요청)/i")continue;
-      if(rel==="lib/company-scope.ts" && hit.text==="/icp|备案/i")continue;
+      if(isLegacyHanLiteral(rel,hit.text))continue;
       failures.push(`${rel}:${hit.line} ${hit.text}`);
     }
   }

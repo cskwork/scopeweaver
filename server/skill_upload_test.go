@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -54,13 +55,47 @@ func TestSkillRelPath(t *testing.T) {
 	bad := []string{
 		"", "../etc/passwd", "a/../../b", "/abs/path", "a//b", `..\..\x`,
 		"%2e%2e/x", "a\x00b", "中文 名.md", "中‮文.md", "a#b.md", "a?b.md",
-		"a:b.md", string([]byte{0xd6, 0xd0}) + ".md", // Raw GBK bytes are not valid UTF-8.
+		"a:b.md", "C:/absolute.md", "C:relative.md", "//server/share/file.md", `\\server\share\file.md`,
+		string([]byte{0xd6, 0xd0}) + ".md", // Raw GBK bytes are not valid UTF-8.
 		strings.Repeat("a", maxSkillPathLen+1),
 	}
 	for _, in := range bad {
 		if got, msg := skillRelPath(in); msg == "" {
 			t.Errorf("skillRelPath(%q) = (%q, \"\"), want rejection", in, got)
 		}
+	}
+}
+
+func TestSkillFilePathsUseForwardSlashes(t *testing.T) {
+	s := &Server{skillDir: t.TempDir()}
+	root := filepath.Join(s.skillDir, "path-fixture")
+	if err := os.MkdirAll(filepath.Join(root, "references", "参考"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const file = "references/参考/中文说明.md"
+	if err := os.WriteFile(filepath.Join(root, file), []byte("fixture content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files, err := walkSkillFiles(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"references/", "references/参考/", file} {
+		if !slices.Contains(files, want) {
+			t.Errorf("skill file list %q is missing wire path %q", files, want)
+		}
+	}
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.SetPathValue("name", "path-fixture")
+	r.SetPathValue("file", file)
+	w := httptest.NewRecorder()
+	s.fsReadFile(w, r)
+	var response struct{ File, Content string }
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != http.StatusOK || response.File != file || response.Content != "fixture content" {
+		t.Fatalf("skill read changed wire path or content: %d %s", w.Code, w.Body)
 	}
 }
 

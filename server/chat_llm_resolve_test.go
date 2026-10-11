@@ -1,24 +1,31 @@
 package server
 
 import (
-	"context"
 	"strings"
 	"testing"
 
 	"github.com/Autumn-27/artex/db"
 )
 
+func TestChatUnavailableFixtureCleansProfiles(t *testing.T) {
+	m := backportTestManager(t)
+	t.Run("completed profile fixture", TestChatUnavailableReasonDistinguishesStates)
+	var count int
+	if err := m.pg.QueryRow(`SELECT count(*) FROM llm_profiles WHERE name='p1'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("completed profile fixture left %d profiles for later tests", count)
+	}
+}
+
 // TestChatUnavailableReasonDistinguishesStates pins the operator-facing message
 // to the actual configuration state: nothing configured vs. configured-but-not-
 // activated must read differently so the user knows what to do.
 func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
-	m, err := NewManager(t.TempDir(), "")
-	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
-	}
-	defer m.Close()
+	m := backportTestManager(t)
 	td := t.TempDir()
-	s := New(context.Background(), m, td, td, td)
+	s := New(t.Context(), m, td, td, td)
 
 	// Start from a clean profile table; other tests in the shared DB may have left rows.
 	existing, _ := m.pg.ListProfiles()
@@ -39,8 +46,12 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_, _ = m.pg.Exec(`UPDATE llm_profiles SET is_default=false WHERE id=$1`, id)
-		_ = m.pg.DeleteProfile(id)
+		if _, err := m.pg.Exec(`UPDATE llm_profiles SET is_default=false WHERE id=$1`, id); err != nil {
+			t.Errorf("clear active test profile: %v", err)
+		}
+		if err := m.pg.DeleteProfile(id); err != nil {
+			t.Errorf("delete test profile: %v", err)
+		}
 	})
 
 	// Profile exists but is not activated.
@@ -62,13 +73,9 @@ func TestChatUnavailableReasonDistinguishesStates(t *testing.T) {
 // agent even when NO global profile is active, so the send precheck stops
 // rejecting it with an unconfigured-LLM error.
 func TestResolveChatAgentHonoursConversationProfile(t *testing.T) {
-	m, err := NewManager(t.TempDir(), "")
-	if err != nil {
-		t.Skipf("postgres unavailable (%v) — skipping", err)
-	}
-	defer m.Close()
+	m := backportTestManager(t)
 	td := t.TempDir()
-	s := New(context.Background(), m, td, td, td)
+	s := New(t.Context(), m, td, td, td)
 
 	// Force the global fallback to nil so a non-nil result can ONLY come from the
 	// conversation's own profile — this is exactly the situation the user hit
@@ -81,7 +88,11 @@ func TestResolveChatAgentHonoursConversationProfile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = m.pg.DeleteProfile(id) })
+	t.Cleanup(func() {
+		if err := m.pg.DeleteProfile(id); err != nil {
+			t.Errorf("delete conversation test profile: %v", err)
+		}
+	})
 
 	// A conversation that pinned this profile resolves a chat agent despite the
 	// nil global fallback; without the fix the send precheck rejected it outright.
