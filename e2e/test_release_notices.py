@@ -1,6 +1,9 @@
 import copy
+from contextlib import nullcontext
+import hashlib
 import importlib.util
 import io
+import json
 from pathlib import Path
 import tarfile
 import tempfile
@@ -90,6 +93,61 @@ class ReleaseNoticeTests(unittest.TestCase):
                     bad_config["rootfs"]["diff_ids"][0] = "changed"
                 with self.assertRaises(ValueError):
                     repair.verify_image_config(before, bad_manifest, config, bad_config)
+
+    def test_image_verification_reads_raw_child_manifests_instead_of_descriptors(self):
+        layer = io.BytesIO()
+        with tarfile.open(fileobj=layer, mode="w:gz") as archive:
+            member = tarfile.TarInfo(f"app/{repair.NOTICE}")
+            member.size = len(NOTICE)
+            archive.addfile(member, io.BytesIO(NOTICE))
+        layer_bytes = layer.getvalue()
+        layer_digest = "sha256:" + hashlib.sha256(layer_bytes).hexdigest()
+        base_digest, fixed_digest = "sha256:" + "a" * 64, "sha256:" + "b" * 64
+        candidate = f"{repair.IMAGE}:notice-repair-fixture"
+        indexes, children = {}, {}
+        for fixed, digest in ((False, base_digest), (True, fixed_digest)):
+            index = {"schemaVersion": 2, "digest": digest, "manifests": []}
+            for number, arch in enumerate(("amd64", "arm64")):
+                child_digest = "sha256:" + str(number + (3 if fixed else 1)) * 64
+                descriptor = {"mediaType": "application/vnd.oci.image.manifest.v1+json", "digest": child_digest, "size": 2579}
+                index["manifests"].append({**descriptor, "platform": {"os": "linux", "architecture": arch}})
+                raw = {"schemaVersion": 2, "mediaType": descriptor["mediaType"],
+                       "config": {"digest": "sha256:" + "c" * 64}, "layers": [{"digest": "original-layer", "size": 100}]}
+                config = {"os": "linux", "architecture": arch, "config": {"Cmd": ["unchanged"]},
+                          "rootfs": {"diff_ids": ["original-diff"]}}
+                if fixed:
+                    raw["layers"].append({"digest": layer_digest, "size": len(layer_bytes)})
+                    config["rootfs"]["diff_ids"].append("notice-diff")
+                children[f"{repair.IMAGE}@{child_digest}"] = (descriptor, raw, config)
+            indexes[candidate if fixed else f"{repair.IMAGE}@{digest}"] = index
+
+        def docker_response(command, **kwargs):
+            reference, options = command[4], command[5:]
+            if reference in indexes:
+                self.assertEqual(options, ["--format", "{{json .Manifest}}"])
+                return json.dumps(indexes[reference])
+            descriptor, raw, config = children[reference]
+            if options == ["--raw"]:
+                return json.dumps(raw)
+            if options == ["--format", "{{json .Image}}"]:
+                return json.dumps(config)
+            # Docker's actual .Manifest child response lacks layers; the old caller fails here.
+            self.assertEqual(options, ["--format", "{{json .Manifest}}"])
+            return json.dumps(descriptor)
+
+        def registry_response(request, **kwargs):
+            body = b'{"token":"fixture-read-only-token"}' if "/token?" in request.full_url else layer_bytes
+            return nullcontext(io.BytesIO(body))
+
+        with tempfile.TemporaryDirectory() as temp, \
+                patch.object(repair.subprocess, "check_output", side_effect=docker_response) as docker, \
+                patch.object(repair.urllib.request, "urlopen", side_effect=registry_response), \
+                patch.dict(repair.os.environ, {"GITHUB_ACTOR": "fixture", "GH_TOKEN": "fixture"}):
+            repair.verify_images(base_digest, candidate, temp, NOTICE)
+            self.assertEqual(sum(call.args[0][-1] == "--raw" for call in docker.call_args_list), 4)
+            report = json.loads(Path(temp, "image-verification.json").read_text())
+            self.assertEqual(set(report["platforms"]), {"linux/amd64", "linux/arm64"})
+            self.assertEqual(report["corrected_image_digest"], fixed_digest)
 
     def test_notice_layer_rejects_modified_notice_or_application_file(self):
         for name, body, valid in ((f"app/{repair.NOTICE}", NOTICE, True),

@@ -91,9 +91,11 @@ def repair_archives(source, destination, notice):
     (destination / "archive-verification.json").write_text(json.dumps(report, indent=2) + "\n")
 
 
-def inspect(reference, field):
+def inspect(reference, field=None):
+    # .Manifest on a single-platform image is only a descriptor, without layers.
+    options = ["--raw"] if field is None else ["--format", "{{json ." + field + "}}"]
     return json.loads(subprocess.check_output([
-        "docker", "buildx", "imagetools", "inspect", reference, "--format", "{{json ." + field + "}}",
+        "docker", "buildx", "imagetools", "inspect", reference, *options,
     ], text=True))
 
 
@@ -152,7 +154,7 @@ def verify_images(base_digest, candidate, destination, notice):
     for platform in base_platforms:
         base_ref = f"{IMAGE}@{base_platforms[platform]}"
         fixed_ref = f"{IMAGE}@{fixed_platforms[platform]}"
-        before, after = inspect(base_ref, "Manifest"), inspect(fixed_ref, "Manifest")
+        before, after = inspect(base_ref), inspect(fixed_ref)
         before_config, after_config = inspect(base_ref, "Image"), inspect(fixed_ref, "Image")
         verify_image_config(before, after, before_config, after_config)
         added = after["layers"][-1]
