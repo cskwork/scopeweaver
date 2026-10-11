@@ -272,6 +272,11 @@ const (
 	// Task concurrency switch and limit. Disabled by default; enabling uses a default limit of 5.
 	settingConcurrencyOn    = "task_concurrency_enabled"
 	settingConcurrencyLimit = "task_concurrency_limit"
+	// llm_max_concurrent caps simultaneous in-flight LLM requests per provider
+	// (0/unset = unlimited). Each provider instance gets its own semaphore, shared
+	// across all agents on the active profile. For self-hosted backends with a hard
+	// per-access concurrency limit; the rate limiter only smooths rate, not concurrency.
+	settingLLMMaxConcurrent = "llm_max_concurrent"
 	// Experimental noa model-driven context compaction (norma v0.4.0), disabled by default. When enabled,
 	// noa replaces built-in compaction for planner, worker, main, and conversation agents.
 	// Read once per run; changes affect only subsequent runs.
@@ -335,6 +340,29 @@ func (m *Manager) SetWorkers(n int) error {
 		return locale.Errorf("workers must be greater than zero")
 	}
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
+}
+
+// LLMMaxConcurrent returns the per-provider cap on simultaneous in-flight LLM
+// requests (0 = unlimited). Each provider instance gets its own semaphore, shared
+// across all agents bound to that profile. Invalid stored values fall back to unlimited.
+func (m *Manager) LLMMaxConcurrent() int {
+	v, ok, err := m.pg.GetSetting(settingLLMMaxConcurrent)
+	if err != nil || !ok {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(v))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// SetLLMMaxConcurrent persists the cap. Values <0 are rejected; 0 means unlimited.
+func (m *Manager) SetLLMMaxConcurrent(n int) error {
+	if n < 0 {
+		return locale.Errorf("llm_max_concurrent must be zero (unlimited) or greater")
+	}
+	return m.pg.SetSetting(settingLLMMaxConcurrent, strconv.Itoa(n))
 }
 
 // Enrich returns the asset auto-completion engine (may be nil if init failed).
