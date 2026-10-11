@@ -38,6 +38,7 @@ COPY start.sh /app/start.sh
 RUN chmod +x /app/scopeweaver /app/start.sh
 COPY skills/ /app/skills/
 COPY LICENSE /app/LICENSE
+COPY THIRD_PARTY_NOTICES.txt /app/THIRD_PARTY_NOTICES.txt
 VOLUME ["/app/data"]
 EXPOSE 8787 8788
 ENTRYPOINT ["/app/start.sh"]

@@ -193,7 +193,7 @@ package_binary() {
   fi
   cp -R skills "$package_root/"
   cp config.example.json "$package_root/"
-  cp README.md README.ko.md LICENSE CHANGELOG.md "$package_root/"
+  cp README.md README.ko.md LICENSE THIRD_PARTY_NOTICES.txt CHANGELOG.md "$package_root/"
   if [ -d docs ]; then cp -R docs "$package_root/"; fi
   # Ship the adapter sources without local dependencies, credentials or runtime state.
   mkdir -p "$package_root/adapters/agent"
