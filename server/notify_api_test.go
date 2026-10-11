@@ -215,6 +215,51 @@ WHERE channel_id=$1 AND state=$2`, chID, db.NotifyStatePending); err != nil {
 	}
 }
 
+// A completed management fixture must not keep consuming later tests' deliveries.
+// Invoke the stale notifier's channel-specific callback directly to force the
+// competing-consumer interleaving without waiting for its three-second ticker.
+func TestMgmtFixtureStopsNotifierBeforeNextTest(t *testing.T) {
+	var expired *Server
+	t.Run("completed management fixture", func(t *testing.T) {
+		expired = newMgmtFixture(t)
+	})
+	if expired == nil {
+		t.Fatal("management fixture was not created")
+	}
+	// Also close it on the regression's failing path, where fixture cleanup is missing.
+	t.Cleanup(func() { expired.m.Close() })
+	if expired.ctx.Err() == nil {
+		t.Error("completed management fixture left its background context active")
+	}
+	if err := expired.m.pg.Ping(); err == nil {
+		t.Error("completed management fixture left its database connection open")
+	}
+
+	f := newNotifyFixture(t)
+	hook := newFakeWebhook(t)
+	chID := f.createChannel(t, map[string]any{
+		"name":   "fixture isolation",
+		"kind":   notify.KindWeCom,
+		"mode":   db.NotifyModeDigest,
+		"config": map[string]any{"webhook": hook.URL},
+	})
+	f.record(t, "later fixture finding", "high")
+	if _, _, err := f.pg.FanOutPendingEvents(context.Background(), 500); err != nil {
+		t.Fatal(err)
+	}
+	f.agePendingBatch(t, chID)
+	ch := f.channel(t, chID)
+
+	newNotifier(expired).stepDigest(expired.ctx, ch, 50, "")
+	if got := hook.count(); got != 0 {
+		t.Fatalf("completed management fixture consumed a later test's digest: got %d messages", got)
+	}
+	f.n.stepDigest(context.Background(), ch, 50, "")
+	if got := hook.count(); got != 1 {
+		t.Fatalf("live notification fixture must deliver exactly once, got %d messages", got)
+	}
+}
+
 func TestNotifyEndToEndRealtimeDelivery(t *testing.T) {
 	f := newNotifyFixture(t)
 	hook := newFakeWebhook(t)

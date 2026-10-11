@@ -50,10 +50,36 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - run: npm ci
         working-directory: web
+      - run: npm audit --audit-level=low
+        working-directory: web
       - run: npm test
         working-directory: web
       - run: npm run build:static
         working-directory: web
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - run: npm ci
+        working-directory: web
+      - run: npm test
+        working-directory: web
+      - name: Test native evidence file commits
+        run: go test ./evidence -run '^Test(WriteBody|CommitBodyFile)' -count=1 -v
+      - name: Test native Python and skill paths
+        run: go test ./server -run '^Test(ExecPython|DetectPython.*|SkillRelPath|SkillFilePathsUseForwardSlashes)$' -count=1 -v
   backend:
     runs-on: ubuntu-latest
     services:
