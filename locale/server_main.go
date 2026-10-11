@@ -33,7 +33,7 @@ func init() {
 	Register("asset_id is required", "asset_id is required", "asset_id가 필요합니다")
 	Register("[notify] Status-change event not recorded for finding=%d %s→%s (status was updated)", "[notify] Status-change event not recorded for finding=%d %s→%s (status was updated)", "[notify] 취약점=%d %s→%s 상태 변경 이벤트가 기록되지 않았습니다(상태는 갱신됨)")
 	Register("[traffic] Blob download %s interrupted: %v", "[traffic] Blob download %s interrupted: %v", "[traffic] blob %s 다운로드 중단: %v")
-	Register("Python was not detected (neither python3 nor python is on PATH)", "Python was not detected (neither python3 nor python is on PATH)", "Python을 찾지 못했습니다(python3/python 모두 PATH에 없음)")
+	Register("Python was not detected (neither python3 nor python is on PATH)", "No runnable Python interpreter was found on PATH (python3 or python)", "PATH에서 실행 가능한 Python 인터프리터를 찾지 못했습니다(python3 또는 python)")
 	Register("Return-link URL must start with http:// or https://", "Return-link URL must start with http:// or https://", "돌아가기 URL은 http:// 또는 https://로 시작해야 합니다")
 	Register("Digest interval must be between 1 and 1440 minutes", "Digest interval must be between 1 and 1440 minutes", "요약 주기는 1~1440분이어야 합니다")
 	Register("Search returned no results (possibly rate-limited or proxy unavailable)", "Search returned no results (possibly rate-limited or proxy unavailable)", "검색 결과가 없습니다(호출 제한 또는 프록시 연결 문제 가능)")

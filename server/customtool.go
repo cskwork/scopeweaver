@@ -187,7 +187,14 @@ const settingPythonInterp = "python_interpreter"
 func detectPython() string {
 	for _, c := range []string{"python3", "python"} {
 		if p, err := exec.LookPath(c); err == nil {
-			return p
+			// PATH can contain an unavailable app-execution alias or a broken
+			// interpreter. Verify it before persisting it as the default.
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			err := exec.CommandContext(ctx, p, "-c", "import sys; sys.exit(0)").Run()
+			cancel()
+			if err == nil {
+				return p
+			}
 		}
 	}
 	return ""

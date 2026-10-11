@@ -16,14 +16,14 @@ fs.mkdirSync(out, { recursive: true });
 
 const PASSWORD = "e2e-pass-1234";
 const TEXT = {
-  en: { unavailable: "Cannot confirm setup status", dataError: "Data source is temporarily unavailable; please try again later", usage: "Approval token usage" },
-  ko: { unavailable: "초기 설정 상태를 확인할 수 없습니다", dataError: "데이터 소스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요", usage: "승인 토큰 사용량" },
+  en: { unavailable: "Cannot confirm setup status", dataError: "Data source is temporarily unavailable; please try again later", usage: "Approval token usage", fallback: "Within interception scope and no interception rule matches commands receive model-based semantic review (allow / ask user / deny)" },
+  ko: { unavailable: "초기 설정 상태를 확인할 수 없습니다", dataError: "데이터 소스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요", usage: "승인 토큰 사용량", fallback: "다음 범위 내:차단 대상 범위이며일치하는 차단 규칙이 없는명령만 모델이 의미를 판단합니다(허용 / 사용자 승인 / 거부)" },
 };
 
 function sql(query, database = "postgres") {
   const admin = new URL(dsn);
   admin.pathname = `/${database}`;
-  return execFileSync("psql", [admin.href, "-tAc", query], { encoding: "utf8" }).trim();
+  return execFileSync("psql", ["-tAc", query, admin.href], { encoding: "utf8" }).trim();
 }
 function setDatabaseAvailable(on) {
   sql(`ALTER DATABASE ${dbName} WITH ALLOW_CONNECTIONS ${on}`);
@@ -130,6 +130,7 @@ for (const locale of ["en", "ko"]) {
     await p.goto(`${base}/system/intercept`);
     await p.getByRole("tab").nth(1).click();
     await p.getByText(TEXT[locale].usage).waitFor();
+    await p.getByText(TEXT[locale].fallback, { exact: true }).waitFor();
     const bars = p.locator("div.flex.h-16 > div");
     check((await bars.count()) === 30, `${await bars.count()} daily bars`);
     check((await p.locator("div.flex.h-16 > div.bg-violet-500\\/60").count()) === 2, "expected 2 days with usage");
