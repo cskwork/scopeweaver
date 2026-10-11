@@ -170,6 +170,9 @@ CGO_ENABLED=0 go build -tags embedui -o scopeweaver ./cmd/artex
 압축합니다. 릴리스 모드는 기본으로 Linux amd64/arm64, macOS amd64/arm64, Windows amd64를
 빌드합니다.
 
+아카이브에는 보존한 shadcn 스타일시트의 `THIRD_PARTY_NOTICES.txt`를 포함하며, 컨테이너
+이미지에도 같은 고지를 `/app/THIRD_PARTY_NOTICES.txt`에 보존합니다.
+
 ```bash
 ./build.sh --release
 # 산출물: dist/scopeweaver-0.3.3-*.zip
