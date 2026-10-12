@@ -931,6 +931,9 @@ export interface Settings {
   // Task concurrency cap: disabled means unlimited; excess new tasks queue and start when slots open.
   task_concurrency_enabled?: boolean; // Defaults to false.
   task_concurrency_limit?: number; // Defaults to 5 when enabled.
+  // Per-profile cap on simultaneous in-flight LLM requests; 0 = unlimited.
+  // Each profile's provider gets its own semaphore, shared across its agents.
+  llm_max_concurrent?: number;
   // LLM failover rotation defaults off. Unbound Agents switch to the next profile when the current one fails
   // due to insufficient balance, invalid key, rate limiting, or service errors.
   llm_pool_enabled?: boolean; // Defaults to false.
