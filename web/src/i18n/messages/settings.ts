@@ -27,6 +27,8 @@ export const en = {
   python: "Custom <b>script</b> tools use this Python interpreter. It is detected at startup, preferring python3. Enter an absolute path to a virtual environment or specific version, or leave blank for automatic runtime detection.",
   workers: "Number of Worker Agents running concurrently per task (default: 3). More Workers increase parallel exploration and cost. Changes <b>apply to tasks started afterward</b>; running tasks are unaffected.",
   sendPreference: "This preference is stored <b>only in this browser</b> and does not sync with your account. Set it again after changing browsers or clearing site data.",
+  maxConcurrentTitle: "Max concurrent LLM requests",
+  maxConcurrentDesc: "Caps simultaneous in-flight LLM requests per profile (default: 0 = unlimited). Each profile's provider gets its own semaphore, shared across all agents on that profile. Use this when your backend enforces a hard per-access concurrency limit (e.g. <code>at most 2 concurrent requests per access</code>) — the per-second/per-minute rate limit only smooths rate and still lets bursts overlap. Changes rebuild providers and take effect on the next request.",
   updateLauncher: "One-click updates rely on the supervisor script to restart the application. Start with <code>start.sh</code> (Windows: <code>start.bat</code>). Running the binary directly does not restart it automatically after exit.",
   pagination: "{from}–{to} / {total} records",
 };
@@ -58,6 +60,8 @@ export const ko: Record<keyof typeof en, string> = {
   python: "사용자 지정 <b>script</b> 도구에서 사용할 Python 인터프리터입니다. 시작 시 python3를 우선하여 자동으로 찾습니다. 가상 환경 또는 특정 버전의 절대 경로를 입력하거나, 실행 시 자동으로 찾으려면 비워 두세요.",
   workers: "작업마다 동시에 실행할 워커 에이전트 수입니다(기본값: 3). 늘리면 병렬 탐색과 비용이 증가합니다. 변경 사항은 <b>이후 시작하는 작업에 적용</b>하며 실행 중인 작업에는 영향을 주지 않습니다.",
   sendPreference: "이 환경설정은 <b>현재 브라우저에만 저장</b>되며 계정과 동기화되지 않습니다. 브라우저를 바꾸거나 사이트 데이터를 지우면 다시 설정해야 합니다.",
+  maxConcurrentTitle: "최대 동시 LLM 요청 수",
+  maxConcurrentDesc: "프로필마다 동시에 진행 중인 LLM 요청 수를 제한합니다(기본값: 0 = 무제한). 각 프로필의 프로바이더는 자체 세마포어를 가지며, 해당 프로필의 모든 에이전트가 공유합니다. 백엔드가 접근당 동시 실행 상한(예: <code>at most 2 concurrent requests per access</code>)을 강제할 때 사용하세요. 초/분당 속도 제한은 요청 속도만 부드럽게 할 뿐 버스트가 겹치는 것은 막지 못합니다. 변경 시 프로바이더를 재구성하며 다음 요청부터 적용됩니다.",
   updateLauncher: "원클릭 업데이트는 관리 스크립트로 애플리케이션을 재시작합니다. <code>start.sh</code>(Windows: <code>start.bat</code>)로 시작하세요. 실행 파일을 직접 실행하면 종료 후 자동으로 다시 시작되지 않습니다.",
   pagination: "{from}–{to} / 총 {total}건",
 };

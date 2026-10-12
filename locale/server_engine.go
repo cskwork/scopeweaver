@@ -83,6 +83,7 @@ func init() {
 	Register("Inherited intents are read-only and cannot receive worker messages", "Inherited intents are read-only and cannot receive worker messages", "상속된 의도는 읽기 전용이며 worker 메시지를 보낼 수 없습니다")
 	Register("Only paused workers can receive messages; pause the worker first", "Only paused workers can receive messages; pause the worker first", "일시정지된 worker에게만 메시지를 보낼 수 있습니다. 먼저 정지하세요")
 	Register("workers must be greater than zero", "workers must be greater than zero", "workers는 0보다 커야 합니다")
+	Register("llm_max_concurrent must be zero (unlimited) or greater", "llm_max_concurrent must be zero (unlimited) or greater", "llm_max_concurrent는 0(무제한) 이상이어야 합니다")
 	Register("[pg] Database configuration source: %s", "[pg] Database configuration source: %s", "[pg] 데이터베이스 설정 출처: %s")
 	Register("Archived traffic staging journal is missing a task ID", "Archived traffic staging journal is missing a task ID", "보관 트래픽 준비 기록에 작업 ID가 없습니다")
 	Register("[proxy] Invalid global proxy %q ignored: %v", "[proxy] Invalid global proxy %q ignored: %v", "[proxy] 잘못된 전역 프록시 %q 무시: %v")

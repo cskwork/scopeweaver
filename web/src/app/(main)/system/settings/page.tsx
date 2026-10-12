@@ -4,7 +4,7 @@ import { translate as swt } from "@/i18n/runtime";
 import { useI18n } from "@/i18n";
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon } from "lucide-react";
+import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon, ZapIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -43,6 +43,8 @@ export default function SystemSettingsPage() {
   const [pyInterp, setPyInterp] = React.useState("");
   const [workers, setWorkers] = React.useState("3");
   const [savingWorkers, setSavingWorkers] = React.useState(false);
+  const [maxConcurrent, setMaxConcurrent] = React.useState("0");
+  const [savingMaxConcurrent, setSavingMaxConcurrent] = React.useState(false);
   // Operational constraint injection targets; both enabled by default.
   const [injectPlanner, setInjectPlanner] = React.useState(true);
   const [injectWorker, setInjectWorker] = React.useState(true);
@@ -62,6 +64,7 @@ export default function SystemSettingsPage() {
     setGlobalProxyInput(s.global_proxy ?? "");
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
+    setMaxConcurrent(String(s.llm_max_concurrent ?? 0));
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
@@ -82,6 +85,27 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
       .finally(() => setSavingWorkers(false));
+  };
+
+  const saveMaxConcurrent = () => {
+    if (maxConcurrent.trim() === "") {
+      toast.error(swt("interface.m2874"));
+      return;
+    }
+    const n = Number(maxConcurrent);
+    if (!Number.isInteger(n) || n < 0) {
+      toast.error(swt("interface.m2874"));
+      return;
+    }
+    setSavingMaxConcurrent(true);
+    api
+      .setSettings({ llm_max_concurrent: n })
+      .then((s) => {
+        apply(s);
+        toast.success(swt("interface.m2875"));
+      })
+      .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
+      .finally(() => setSavingMaxConcurrent(false));
   };
 
   const savePython = () => {
@@ -610,6 +634,31 @@ export default function SystemSettingsPage() {
                 onChange={(e) => setWorkers(e.target.value)}
               />
               <Button onClick={saveWorkers} disabled={!loaded || savingWorkers}>
+                {swt("interface.m0273")}</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ZapIcon className="size-4" />
+              {swt("settings.maxConcurrentTitle")}</CardTitle>
+            <CardDescription>
+              {rich("settings.maxConcurrentDesc", {}, { b: (text) => <b>{text}</b>, code: (text) => <code>{text}</code> })}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                min={0}
+                className="w-32 font-mono text-sm"
+                placeholder="0"
+                value={maxConcurrent}
+                disabled={!loaded || savingMaxConcurrent}
+                onChange={(e) => setMaxConcurrent(e.target.value)}
+              />
+              <Button onClick={saveMaxConcurrent} disabled={!loaded || savingMaxConcurrent}>
                 {swt("interface.m0273")}</Button>
             </div>
           </CardContent>

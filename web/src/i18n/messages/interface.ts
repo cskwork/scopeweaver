@@ -2872,7 +2872,9 @@ export const en = {
   "m2870": "Features",
   "m2871": "Dashboard",
   "m2872": "Chat",
-  "m2873": "Logs"
+  "m2873": "Logs",
+  "m2874": "Max concurrent LLM requests must be a non-negative integer",
+  "m2875": "Max concurrent LLM requests saved"
 };
 export const ko: Record<keyof typeof en, string> = {
   "m0001": "백엔드 서비스에 연결할 수 없습니다",
@@ -5747,5 +5749,7 @@ export const ko: Record<keyof typeof en, string> = {
   "m2870": "기능",
   "m2871": "대시보드",
   "m2872": "대화",
-  "m2873": "로그"
+  "m2873": "로그",
+  "m2874": "최대 동시 LLM 요청 수는 0 이상의 정수여야 합니다",
+  "m2875": "최대 동시 LLM 요청 수를 저장했습니다"
 };
