@@ -88,9 +88,13 @@ export default function SystemSettingsPage() {
   };
 
   const saveMaxConcurrent = () => {
+    if (maxConcurrent.trim() === "") {
+      toast.error(swt("interface.m2874"));
+      return;
+    }
     const n = Number(maxConcurrent);
     if (!Number.isInteger(n) || n < 0) {
-      toast.error(swt("interface.m1627"));
+      toast.error(swt("interface.m2874"));
       return;
     }
     setSavingMaxConcurrent(true);
@@ -98,7 +102,7 @@ export default function SystemSettingsPage() {
       .setSettings({ llm_max_concurrent: n })
       .then((s) => {
         apply(s);
-        toast.success(swt("interface.m1628"));
+        toast.success(swt("interface.m2875"));
       })
       .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
       .finally(() => setSavingMaxConcurrent(false));

@@ -272,10 +272,10 @@ const (
 	// Task concurrency switch and limit. Disabled by default; enabling uses a default limit of 5.
 	settingConcurrencyOn    = "task_concurrency_enabled"
 	settingConcurrencyLimit = "task_concurrency_limit"
-	// llm_max_concurrent caps simultaneous in-flight LLM requests per provider
-	// (0/unset = unlimited). Each provider instance gets its own semaphore, shared
-	// across all agents on the active profile. For self-hosted backends with a hard
-	// per-access concurrency limit; the rate limiter only smooths rate, not concurrency.
+	// llm_max_concurrent caps simultaneous in-flight LLM requests per profile
+	// (0/unset = unlimited). Each profile's provider gets its own semaphore, shared
+	// across its agents. For self-hosted backends with a hard per-access concurrency
+	// limit; the rate limiter only smooths rate, not concurrency.
 	settingLLMMaxConcurrent = "llm_max_concurrent"
 	// Experimental noa model-driven context compaction (norma v0.4.0), disabled by default. When enabled,
 	// noa replaces built-in compaction for planner, worker, main, and conversation agents.
@@ -342,9 +342,9 @@ func (m *Manager) SetWorkers(n int) error {
 	return m.pg.SetSetting(settingWorkers, strconv.Itoa(n))
 }
 
-// LLMMaxConcurrent returns the per-provider cap on simultaneous in-flight LLM
-// requests (0 = unlimited). Each provider instance gets its own semaphore, shared
-// across all agents bound to that profile. Invalid stored values fall back to unlimited.
+// LLMMaxConcurrent returns the per-profile cap on simultaneous in-flight LLM
+// requests (0 = unlimited). Each profile's provider gets its own semaphore, shared
+// across its agents. Invalid stored values fall back to unlimited.
 func (m *Manager) LLMMaxConcurrent() int {
 	v, ok, err := m.pg.GetSetting(settingLLMMaxConcurrent)
 	if err != nil || !ok {

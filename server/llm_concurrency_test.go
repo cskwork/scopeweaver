@@ -108,12 +108,10 @@ func TestConcurrencyProviderHonorsContextCancel(t *testing.T) {
 	fake := &fakeProvider{hold: 2 * time.Second}
 	p := &concurrencyProvider{inner: fake, sem: make(chan struct{}, 1)}
 
-	// Occupy the only slot with a long stream.
-	go func() {
-		for range p.Stream(context.Background(), llm.CompletionRequest{}) {
-		}
-	}()
-	time.Sleep(50 * time.Millisecond) // let the first stream acquire
+	// Occupy the only slot deterministically: acquire directly, then release only
+	// when the test signals, so the waiter is guaranteed to contend.
+	p.sem <- struct{}{}
+	t.Cleanup(func() { <-p.sem })
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -134,5 +132,73 @@ func TestConcurrencyProviderHonorsContextCancel(t *testing.T) {
 	}
 	if time.Since(start) > 1*time.Second {
 		t.Errorf("cancel took too long: %v", time.Since(start))
+	}
+}
+
+// TestLLMMaxConcurrentRoundtrip verifies the settings accessors persist and read back
+// the cap, including the unlimited (0) default and invalid-value fallback.
+func TestLLMMaxConcurrentRoundtrip(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("no database available: %v", err)
+	}
+	t.Cleanup(func() { _ = m.PG().Close() })
+
+	// Reset to unlimited first so the test is independent of prior DB state.
+	if err := m.SetLLMMaxConcurrent(0); err != nil {
+		t.Fatalf("SetLLMMaxConcurrent(0) reset: %v", err)
+	}
+	if got := m.LLMMaxConcurrent(); got != 0 {
+		t.Errorf("LLMMaxConcurrent after reset = %d, want 0", got)
+	}
+
+	// Persist and read back a real cap.
+	if err := m.SetLLMMaxConcurrent(3); err != nil {
+		t.Fatalf("SetLLMMaxConcurrent(3): %v", err)
+	}
+	if got := m.LLMMaxConcurrent(); got != 3 {
+		t.Errorf("LLMMaxConcurrent after set = %d, want 3", got)
+	}
+
+	// Back to unlimited.
+	if err := m.SetLLMMaxConcurrent(0); err != nil {
+		t.Fatalf("SetLLMMaxConcurrent(0): %v", err)
+	}
+	if got := m.LLMMaxConcurrent(); got != 0 {
+		t.Errorf("LLMMaxConcurrent after reset = %d, want 0", got)
+	}
+
+	// Negative is rejected.
+	if err := m.SetLLMMaxConcurrent(-1); err == nil {
+		t.Error("SetLLMMaxConcurrent(-1) = nil, want error")
+	}
+}
+
+// TestNewConcurrencyProviderPassthrough verifies newConcurrencyProvider returns the
+// inner provider unchanged when the cap is 0 (unlimited), and wraps it when > 0.
+func TestNewConcurrencyProviderPassthrough(t *testing.T) {
+	m, err := NewManager(t.TempDir(), "")
+	if err != nil {
+		t.Skipf("no database available: %v", err)
+	}
+	t.Cleanup(func() { _ = m.PG().Close() })
+
+	fake := &fakeProvider{hold: time.Millisecond}
+
+	// Unlimited: same instance, no wrapper.
+	if err := m.SetLLMMaxConcurrent(0); err != nil {
+		t.Fatalf("SetLLMMaxConcurrent(0): %v", err)
+	}
+	if got := newConcurrencyProvider(fake, m); got != llm.Provider(fake) {
+		t.Errorf("cap 0: newConcurrencyProvider returned a wrapper, want pass-through")
+	}
+
+	// Capped: wrapped in concurrencyProvider.
+	if err := m.SetLLMMaxConcurrent(2); err != nil {
+		t.Fatalf("SetLLMMaxConcurrent(2): %v", err)
+	}
+	got := newConcurrencyProvider(fake, m)
+	if _, ok := got.(*concurrencyProvider); !ok {
+		t.Errorf("cap 2: newConcurrencyProvider returned %T, want *concurrencyProvider", got)
 	}
 }

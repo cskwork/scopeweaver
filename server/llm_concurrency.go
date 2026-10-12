@@ -17,10 +17,9 @@ import (
 // those overlaps with 429. This wrapper serializes admission with a weighted
 // semaphore sized from the llm_max_concurrent setting.
 //
-// Each provider instance gets its own semaphore, shared across all agents bound
-// to that profile. The cap is read at construction (applyLLM / providerForProfile),
-// so a settings change takes effect when the provider is rebuilt — the same
-// lifecycle as rate-limit changes.
+// Each profile's provider gets its own semaphore, shared across its agents. The cap
+// is read at construction (applyLLM / providerForProfile), so a settings change takes
+// effect when the provider is rebuilt — the same lifecycle as rate-limit changes.
 type concurrencyProvider struct {
 	inner llm.Provider
 	sem   chan struct{} // weighted semaphore; len==0 means unlimited

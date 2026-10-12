@@ -3313,8 +3313,8 @@ func (s *Server) settingsPayload() map[string]any {
 		"workers":                  s.m.Workers(),               // Concurrent worker agents, default 3; applies to subsequently started tasks.
 		"task_concurrency_enabled": concOn,                      // Task concurrency-limit switch, disabled by default.
 		"task_concurrency_limit":   concLimit,                   // Maximum simultaneous tasks, default 5 when enabled.
-		// Per-provider in-flight LLM request cap; 0 = unlimited. Each provider
-		// instance gets its own semaphore, shared across agents on the active profile.
+		// Per-profile in-flight LLM request cap; 0 = unlimited. Each profile's
+		// provider gets its own semaphore, shared across its agents.
 		"llm_max_concurrent": s.m.LLMMaxConcurrent(),
 		// LLM failover is off by default. Enabled global-active agents switch profiles when unavailable.
 		// bind_fallback matters only with failover enabled and is also off by default.
@@ -3390,7 +3390,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		// Task concurrency caps running tasks. Disabled means unlimited; enabled queues overflow and admits it when slots open.
 		ConcurrencyEnabled *bool `json:"task_concurrency_enabled"`
 		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`
-		// LLMMaxConcurrent caps simultaneous in-flight LLM requests per provider
+		// LLMMaxConcurrent caps simultaneous in-flight LLM requests per profile
 		// (0 = unlimited). Changing it rebuilds providers so the new cap takes hold.
 		LLMMaxConcurrent *int `json:"llm_max_concurrent"`
 		// LLM failover and bound-profile fallback switches both require rebuilding provider chains;
@@ -3533,9 +3533,10 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err)
 			return
 		}
-		// Providers embed the semaphore at build time; drop the caches so the
-		// new cap takes effect on the next provider resolution.
+		// Providers embed the semaphore at build time: drop the per-profile caches and
+		// mark changed so applyLLM also rebuilds the global provider (llmProv/llmDirect).
 		s.invalidateProfileAgents()
+		changed = true
 	}
 	if req.LLMPoolEnabled != nil || req.LLMPoolBindFallback != nil {
 		// Pinned tasks' planner/worker and per-profile chat agents hold providers
