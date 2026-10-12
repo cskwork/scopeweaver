@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 // ── chart constants ───────────────────────────────────────────────────────────
 
 const dailyTrendConfig = {
-  input: { get label() { return swt("interface.m0135"); }, color: "hsl(217 91% 60%)" },
+  inputCacheMiss: { get label() { return swt("interface.m0135"); }, color: "hsl(217 91% 60%)" },
   output: { get label() { return swt("interface.m0136"); }, color: "hsl(263 70% 60%)" },
   cacheRead: { get label() { return swt("interface.m0137"); }, color: "hsl(160 60% 45%)" },
 } satisfies ChartConfig;
@@ -438,11 +438,11 @@ export default function DashboardPage() {
     const now = new Date();
     now.setDate(now.getDate() - tokenDays);
     const cutoff = now.toISOString().slice(0, 10);
-    const m = new Map<string, { input: number; output: number; cacheRead: number }>();
+    const m = new Map<string, { inputCacheMiss: number; output: number; cacheRead: number }>();
     const fold = (date: string, inp: number, out: number, cr: number) => {
       if (date < cutoff) return;
-      const prev = m.get(date) ?? { input: 0, output: 0, cacheRead: 0 };
-      m.set(date, { input: prev.input + inp, output: prev.output + out, cacheRead: prev.cacheRead + cr });
+      const prev = m.get(date) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
+      m.set(date, { inputCacheMiss: prev.inputCacheMiss + (inp - cr), output: prev.output + out, cacheRead: prev.cacheRead + cr });
     };
     for (const t of tasks) {
       if (tokenTab !== "all" && (t.llm_profile_id ?? defaultProfileId) !== tokenTab) continue;
@@ -465,13 +465,13 @@ export default function DashboardPage() {
     const now = new Date();
     now.setDate(now.getDate() - tokenDays);
     const cutoff = now.toISOString().slice(0, 10);
-    const m = new Map<string, { input: number; output: number; cacheRead: number }>();
+    const m = new Map<string, { inputCacheMiss: number; output: number; cacheRead: number }>();
     for (const d of usageStats?.daily ?? []) {
       if (d.date < cutoff) continue;
       if (tokenTab !== "all" && (profileIdByName.get(d.profile_name) ?? defaultProfileId) !== tokenTab) continue;
-      const prev = m.get(d.date) ?? { input: 0, output: 0, cacheRead: 0 };
+      const prev = m.get(d.date) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
       m.set(d.date, {
-        input: prev.input + d.input_tokens,
+        inputCacheMiss: prev.inputCacheMiss + (d.input_tokens - d.cache_read_tokens),
         output: prev.output + d.output_tokens,
         cacheRead: prev.cacheRead + d.cache_read_tokens,
       });
@@ -699,7 +699,7 @@ export default function DashboardPage() {
                   {
                     label: swt("interface.m0175"),
                     value: displayedTokens.input - displayedTokens.cacheRead,
-                    barColor: dailyTrendConfig.input.color!,
+                    barColor: dailyTrendConfig.inputCacheMiss.color!,
                     text: "text-blue-400",
                   },
                   {
@@ -756,7 +756,7 @@ export default function DashboardPage() {
           <div className="flex min-h-0 flex-col">
             <div className="mb-2 flex items-center justify-between">
               <div className="flex gap-3 text-[9px] text-muted-foreground">
-                {(["input", "output", "cacheRead"] as const).map((k) => (
+                {(["inputCacheMiss", "output", "cacheRead"] as const).map((k) => (
                   <span key={k} className="flex items-center gap-1">
                     <span
                       className="inline-block size-2 rounded-sm"
@@ -835,7 +835,8 @@ export default function DashboardPage() {
                       />
                     }
                   />
-                  <Bar dataKey="input" stackId="1" fill="var(--color-input)" radius={[0, 0, 0, 0]} />
+                  {/* Input includes cache reads; stack disjoint uncached input + cache + output so the bar sums to the panel total. */}
+                  <Bar dataKey="inputCacheMiss" stackId="1" fill="var(--color-input)" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="output" stackId="1" fill="var(--color-output)" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="cacheRead" stackId="1" fill="var(--color-cacheRead)" radius={[4, 4, 0, 0]} />
                 </BarChart>
