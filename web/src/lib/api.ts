@@ -484,6 +484,39 @@ export const api = {
     get<{ count: number; total: number; assets: Asset[] }>(
       `/assets?task_id=${encodeURIComponent(taskId)}&dsl=${encodeURIComponent(dsl)}&type=${encodeURIComponent(type)}&limit=${limit}&offset=${offset}`,
     ).then((r) => ({ assets: r?.assets ?? [], total: r?.total ?? r?.count ?? 0 })),
+  // exportAssets downloads assets. Selected scope passes asset IDs; filtered
+  // scope passes the current view's filters (type/dsl/company_id/task_id); all
+  // scope ignores filters. Mirrors exportFindings' download mechanism.
+  exportAssets: async (opts: {
+    format: "csv" | "json";
+    scope: "filtered" | "all" | "selected";
+    filters?: { type?: string; dsl?: string; company_id?: string; task_id?: string };
+    ids?: number[];
+  }) => {
+    const p = new URLSearchParams({ format: opts.format, scope: opts.scope });
+    if (opts.scope === "selected") {
+      p.set("ids", (opts.ids ?? []).join(","));
+    } else if (opts.scope === "filtered" && opts.filters) {
+      for (const [k, v] of Object.entries(opts.filters)) if (v) p.set(k, v);
+    }
+    const token = getToken();
+    const r = await fetch(`/api/assets/export?${p.toString()}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!r.ok) throw new Error(`export: ${r.status}`);
+    const blob = await r.blob();
+    const disp = r.headers.get("Content-Disposition") ?? "";
+    const m = disp.match(/filename="?([^"]+)"?/);
+    const filename = m?.[1] ?? `assets-export`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  },
   attachTaskAssets: (taskId: string, assetIds: number[], sourceSummary: string) =>
     post<TaskAssetMutation>(`/tasks/${taskId}/assets`, {
       asset_ids: assetIds,
