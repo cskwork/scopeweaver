@@ -8,6 +8,7 @@ import {
   BuildingIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  DownloadIcon,
   GlobeIcon,
   KeyRoundIcon,
   LayoutTemplateIcon,
@@ -211,6 +212,28 @@ export default function AssetsPage() {
     }
   };
 
+  const [exporting, setExporting] = React.useState(false);
+  const doExport = async (format: "csv" | "json") => {
+    setExporting(true);
+    try {
+      if (selected.size > 0) {
+        await api.exportAssets({ format, scope: "selected", ids: Array.from(selected) });
+      } else {
+        const dsl = query.trim();
+        await api.exportAssets({
+          format,
+          scope: "filtered",
+          filters: { type: tab !== "company" ? tab : "", dsl },
+        });
+      }
+      toast.success(swt("interface.m0372"));
+    } catch (e) {
+      toast.error(swt("interface.m0373", { p0: (e as Error).message }));
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const confirmDeleteCompany = async () => {
     if (!companyDeleteTarget) return;
     setCompanyDeleting(true);
@@ -334,6 +357,10 @@ export default function AssetsPage() {
               <Trash2Icon className="size-3.5" /> {swt("interface.m0224")}{selected.size})
             </Button>
           )}
+          <Button variant="outline" size="sm" onClick={() => doExport("csv")} disabled={exporting || tab === "company"}>
+            <DownloadIcon className="size-3.5" /> CSV</Button>
+          <Button variant="outline" size="sm" onClick={() => doExport("json")} disabled={exporting || tab === "company"}>
+            <DownloadIcon className="size-3.5" /> JSON</Button>
           <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
             <RefreshCwIcon className={cn("size-4", loading && "animate-spin")} /> {swt("interface.m0225")}</Button>
           <CompanyDialog onSaved={refresh} />
