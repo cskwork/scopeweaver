@@ -5,6 +5,7 @@ WORKDIR /src/web
 COPY web/package*.json ./
 RUN npm ci
 COPY web/ ./
+COPY locale/definitions.json /src/locale/definitions.json
 RUN npm run build:static
 
 FROM --platform=$BUILDPLATFORM golang:1.26.3-bookworm AS backend
