@@ -59,6 +59,8 @@ jobs:
           cat server.log; exit 1
       - name: Smoke test
         working-directory: e2e
+        env:
+          SCOPEWEAVER_BINARY: ${{ runner.temp }}/scopeweaver
         run: npm run smoke
       - if: failure()
         run: cat "$RUNNER_TEMP/server.log" || true

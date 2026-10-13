@@ -45,12 +45,18 @@ SCOPEWEAVER_ADAPTER_E2E=1 go test ./server -run '^TestAgentAdapterE2E$' -count=1
 
 The `e2e` workflow also runs an essential browser smoke test against the real binary on every PR and
 after merge. To run it locally against a running server and a fresh `scopeweaver_test_*` database
-(requires `psql`):
+(requires `psql` and the embedded binary built from the same checkout):
 
 ```bash
 cd e2e && npm ci && npx playwright install chromium
-SCOPEWEAVER_URL=http://127.0.0.1:8787 ARTEX_PG_DSN=postgres://.../scopeweaver_test_e2e npm run smoke
+SCOPEWEAVER_URL=http://127.0.0.1:8787 ARTEX_PG_DSN=postgres://.../scopeweaver_test_e2e \
+  SCOPEWEAVER_BINARY=/absolute/path/to/scopeweaver npm run smoke
 ```
+
+After the existing smoke checks initialize the password, the dashboard regression starts its own
+isolated copy of that binary on a free loopback port against the same test database. It checks
+English/Korean Legacy/New token stacks and profile filters, then stops its server and removes its
+fixtures. Dashboard evidence and the child server log are saved in `e2e/e2e-results/dashboard-token-chart/`.
 
 Describe in the PR what you ran and anything you could not run.
 
