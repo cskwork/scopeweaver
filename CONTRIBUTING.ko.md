@@ -43,12 +43,19 @@ SCOPEWEAVER_ADAPTER_E2E=1 go test ./server -run '^TestAgentAdapterE2E$' -count=1
 ```
 
 `e2e` 워크플로는 모든 PR과 머지 후에 실제 바이너리를 대상으로 핵심 브라우저 스모크 테스트도 실행합니다.
-실행 중인 서버와 새 `scopeweaver_test_*` 데이터베이스로 로컬에서 실행하려면(`psql` 필요):
+실행 중인 서버와 새 `scopeweaver_test_*` 데이터베이스로 로컬에서 실행하려면
+`psql`과 같은 체크아웃에서 빌드한 임베디드 바이너리가 필요합니다.
 
 ```bash
 cd e2e && npm ci && npx playwright install chromium
-SCOPEWEAVER_URL=http://127.0.0.1:8787 ARTEX_PG_DSN=postgres://.../scopeweaver_test_e2e npm run smoke
+SCOPEWEAVER_URL=http://127.0.0.1:8787 ARTEX_PG_DSN=postgres://.../scopeweaver_test_e2e \
+  SCOPEWEAVER_BINARY=/absolute/path/to/scopeweaver npm run smoke
 ```
+
+기존 스모크 검사에서 비밀번호를 초기화한 뒤, 대시보드 회귀 검사는 같은 시험 DB를 사용하는
+격리된 바이너리 복사본을 빈 루프백 포트에서 실행합니다. 영어·한국어의 기존·신규 토큰 누적과
+프로필 필터를 검사하고, 시험 서버를 종료한 뒤 자신이 만든 데이터를 삭제합니다. 대시보드 증적과
+시험 서버 로그는 `e2e/e2e-results/dashboard-token-chart/`에 저장됩니다.
 
 PR 설명에 실행한 검사와 실행하지 못한 검사를 적어 주세요.
 
