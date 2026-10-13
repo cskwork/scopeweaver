@@ -103,8 +103,9 @@ func nz(s, d string) string {
 
 // severityLabel and statusLabel are display-only; export machine fields remain unchanged.
 func severityLabel(lang locale.Lang, value string) string {
-	if _, ok := sevRank[value]; ok {
-		return locale.T(lang, "report.severity."+value)
+	key := "report.severity." + value
+	if locale.Has(key) {
+		return locale.T(lang, key)
 	}
 	return strings.ToUpper(value)
 }
