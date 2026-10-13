@@ -1402,6 +1402,90 @@ func (s *AssetStore) DeleteByCompanyID(companyID int64) (int64, error) {
 // and their services/endpoints (they carry root_domain = that host); passing a
 // subdomain/IP removes only that host's own assets. Referencing exploration_anchors
 // rows are cleaned by ON DELETE CASCADE. Returns rows deleted, grouped by type.
+
+// AssetExportFilter carries the optional filtered-scope conditions for
+// ListAssetsForExport. Only one of DSL / CompanyID / TaskID drives the query,
+// mirroring the branch selection in the listAssets handler: DSL wins, then
+// company_id, then task_id, then the default root_domain view.
+type AssetExportFilter struct {
+	Type      string
+	TaskID    int64
+	CompanyID int64
+	DSL       string
+}
+
+// ListAssetsForExport exports assets without pagination, mirroring
+// ListFindingsForExport. Nonempty ids exports precisely the selected assets and
+// ignores filter; empty ids exports by filter (current filters/all). One
+// unpaginated query per scope; no row cap (findings has none either).
+func (s *AssetStore) ListAssetsForExport(f AssetExportFilter, ids []int64) ([]*Asset, error) {
+	if len(ids) > 0 {
+		return s.GetByIDs(ids)
+	}
+	if f.DSL != "" {
+		return s.queryDSLForExport(f)
+	}
+	return s.queryPlainForExport(f)
+}
+
+// queryDSLForExport is QueryDSL without LIMIT/OFFSET: same WHERE builder, same
+// type/task scoping, same per-task source hydration.
+func (s *AssetStore) queryDSLForExport(f AssetExportFilter) ([]*Asset, error) {
+	node, err := ParseDSL(f.DSL)
+	if err != nil {
+		return nil, err
+	}
+	where, args, err := buildDSLWhere(node)
+	if err != nil {
+		return nil, err
+	}
+	if f.Type != "" {
+		args = append(args, f.Type)
+		where += fmt.Sprintf(" AND type = $%d", len(args))
+	}
+	if f.TaskID > 0 {
+		args = append(args, f.TaskID)
+		where += fmt.Sprintf(" AND $%d = ANY(task_ids)", len(args))
+	}
+	q := assetSelectCols + " WHERE " + where + " ORDER BY last_seen DESC, id DESC"
+	rows, err := s.db.Query(q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	assets, err := scanAssets(rows)
+	if err != nil {
+		return nil, err
+	}
+	if f.TaskID > 0 {
+		if err := s.hydrateTaskAssetSources(f.TaskID, assets); err != nil {
+			return nil, err
+		}
+	}
+	return assets, nil
+}
+
+// queryPlainForExport mirrors the non-DSL branch of listAssets: company_id wins,
+// then task_id, then the default root_domain view. limit<=0 means no limit.
+func (s *AssetStore) queryPlainForExport(f AssetExportFilter) ([]*Asset, error) {
+	switch {
+	case f.CompanyID > 0:
+		return s.QueryByCompany(f.CompanyID, f.Type, 0, 0)
+	case f.TaskID > 0:
+		return s.QueryByTask(f.TaskID, f.Type, 0, 0)
+	default:
+		typ := f.Type
+		if typ == "" {
+			typ = "root_domain"
+		}
+		return s.QueryByType(typ, 0, 0)
+	}
+}
+
+// so matching is exact, not fuzzy. Passing a root domain also removes its subdomains
+// and their services/endpoints (they carry root_domain = that host); passing a
+// subdomain/IP removes only that host's own assets. Referencing exploration_anchors
+// rows are cleaned by ON DELETE CASCADE. Returns rows deleted, grouped by type.
 func (s *AssetStore) DeleteByHost(host string) (map[string]int64, error) {
 	h := DomainKey(host)
 	if h == "" {

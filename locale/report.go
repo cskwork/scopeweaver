@@ -48,4 +48,11 @@ func init() {
 	Register("- **Total findings**: %d\n\n", "- **Total findings**: %d\n\n", "- **총 발견 수**: %d건\n\n")
 	Register("- **Generated at**: %s\n", "- **Generated at**: %s\n", "- **생성 시간**: %s\n")
 	Register("# Vulnerability findings report\n\n", "# Vulnerability findings report\n\n", "# 취약점 발견 보고서\n\n")
+	Register("Type", "Type", "유형")
+	Register("Value", "Value", "값")
+	Register("Root domain", "Root domain", "루트 도메인")
+	Register("Task IDs", "Task IDs", "작업 ID")
+	Register("Last seen", "Last seen", "마지막 관측")
+	Register("Source", "Source", "출처")
+	Register("Details", "Details", "세부 정보")
 }
