@@ -3416,7 +3416,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if req.Language != nil {
 		lang := locale.Lang(*req.Language)
 		if !locale.Supported(lang) {
-			writeErr(w, 400, "language must be en or ko")
+			writeError(w, 400, locale.Errorf("language must be one of %s", locale.SupportedLanguageNames()))
 			return
 		}
 		if err := s.m.pg.SetSetting(settingLanguage, string(lang)); err != nil {

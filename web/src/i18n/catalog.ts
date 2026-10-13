@@ -1,7 +1,10 @@
-// Assembles the per-namespace message modules into flat en/ko catalogs.
+// Assemble every shipped locale from English-authoritative namespaces.
 // Keys are "<namespace>.<key>". Every namespace module types its Korean table
 // as Record<keyof typeof en, string>, so a missing or extra Korean entry is a
 // compile error; i18n.test.mjs additionally checks placeholder/tag parity.
+
+import { LOCALES, type Locale } from "./config.ts";
+import * as zhHans from "./messages/zh-Hans.ts";
 
 import * as providers from "./messages/providers.ts";
 import * as app from "./messages/app.ts";
@@ -28,14 +31,29 @@ export type MessageKey = {
 
 export type Catalog = Record<MessageKey, string>;
 
-function flatten(locale: "en" | "ko"): Catalog {
+type NamespaceCatalogs = { [N in NamespaceName]: Record<keyof Namespaces[N]["en"], string> };
+
+function namespaceTables(locale: "en" | "ko"): NamespaceCatalogs {
+  return Object.fromEntries(Object.entries(namespaces).map(([ns, mod]) => [ns, mod[locale]])) as NamespaceCatalogs;
+}
+
+// Each new catalog is registered here; runtime support comes from definitions.
+const resources = {
+  en: namespaceTables("en"),
+  ko: namespaceTables("ko"),
+  "zh-Hans": zhHans,
+} satisfies Record<Locale, NamespaceCatalogs>;
+
+export const catalogLocales = Object.keys(resources);
+
+function flatten(locale: Locale): Catalog {
   const out: Record<string, string> = {};
-  for (const [ns, mod] of Object.entries(namespaces)) {
-    for (const [key, value] of Object.entries(mod[locale] as Record<string, string>)) out[`${ns}.${key}`] = value;
+  for (const [ns, table] of Object.entries(resources[locale])) {
+    for (const [key, value] of Object.entries(table)) out[`${ns}.${key}`] = value;
   }
   return out as Catalog;
 }
 
-export const catalogs = { en: flatten("en"), ko: flatten("ko") } as const;
+export const catalogs = Object.fromEntries(LOCALES.map((locale) => [locale, flatten(locale)])) as Record<Locale, Catalog>;
 
 export const namespaceNames = Object.keys(namespaces);

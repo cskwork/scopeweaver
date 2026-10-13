@@ -21,7 +21,11 @@ export function placeholders(message: string): string[] {
 }
 
 export function tags(message: string): string[] {
-  return Array.from(new Set(Array.from(message.matchAll(TAG), (m) => m[1] ?? `/${m[2]}`))).sort();
+  // The rich renderer consumes paired tags; unpaired URL metavariables such
+  // as <host> are plain display text and may have translated names.
+  const matches = Array.from(message.matchAll(TAG));
+  const paired = new Set(matches.filter((m) => m[2]).map((m) => m[2]));
+  return matches.filter((m) => paired.has(m[1] ?? m[2])).map((m) => m[1] ?? `/${m[2]}`).sort();
 }
 
 export type DateInput = Date | number | string | null | undefined;

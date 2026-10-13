@@ -21,7 +21,7 @@ func TestNormalize(t *testing.T) {
 		"KO":    {Ko, true},
 		"fr":    {Default, false},
 		"":      {Default, false},
-		"zh-CN": {Default, false},
+		"zh-CN": {ZhHans, true},
 	}
 	for in, want := range cases {
 		got, ok := Normalize(in)

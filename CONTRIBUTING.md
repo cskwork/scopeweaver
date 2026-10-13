@@ -14,9 +14,9 @@ and tests.
 
 ## Requirements for a pull request
 
-- **English and Korean together.** User-facing text needs both languages:
-  - server messages: `locale.Register(key, en, ko)` in `locale/`
-  - web UI: the `en` and `ko` objects in `web/src/i18n/messages/`
+- **Complete shipped languages, paired English/Korean docs.** User-facing text needs English, Korean and Simplified Chinese (`zh-Hans`):
+  - server messages: keep `locale.Register(key, en, ko)` compatible and include additional shipped languages through `locale.RegisterAll` and the language-keyed resources in `locale/`
+  - web UI: all current English keys in the EN/KO tables and `messages/zh-Hans.ts`
   - documentation: `README.md` with `README.ko.md`, and `docs/` with `docs/ko/`
 - **Tests for changed behavior.** Add or update tests that would fail without your change. Do not
   disable, skip, or loosen existing checks to make them pass.
@@ -26,6 +26,18 @@ and tests.
   `Co-authored-by:` trailer for the original author, and update `docs/PROVENANCE.md` and
   `docs/ko/PROVENANCE.md`.
 - **License.** Contributions are accepted under the repository's [AGPL-3.0](LICENSE) license.
+
+## Adding or changing a locale
+
+Follow the [locale guide](web/src/i18n/README.md): update the shared `locale/definitions.json`
+(canonical ID, native name, Intl mapping and aliases), matching vectors, complete frontend/backend
+catalogs, date-fns mapping, focused tests and browser smoke. Bare `zh`, `zh-CN` and `zh-SG` map to
+`zh-Hans`; explicit Hans wins a conflicting region, while undeclared Traditional tags stay unsupported.
+Keep English as the source for keys, meaning, placeholders and rich tags. Backend runtime English/key
+fallback is a compatibility safeguard, not proof that a language is ready to ship. Do not translate
+user content, drafts, raw evidence, identifiers or historical data. Review translations and record
+concerns; do not claim native-speaker approval without evidence. Keep feature guidance in both
+English and Korean, even when adding another language.
 
 ## Checks to run
 
@@ -58,13 +70,16 @@ isolated copy of that binary on a free loopback port against the same test datab
 English/Korean Legacy/New token stacks and profile filters, then stops its server and removes its
 fixtures. Dashboard evidence and the child server log are saved in `e2e/e2e-results/dashboard-token-chart/`.
 
+The essential smoke also covers Chinese preference restore, setup/login/task/settings/chat drafts,
+first API language and SSE reconnect/filter preservation.
+
 Describe in the PR what you ran and anything you could not run.
 
 ## Review and merging
 
 1. CI must pass: the `frontend`, `agent-adapter`, and `backend` checks and the `e2e` smoke test. For
    first-time contributors, the maintainer approves the CI run.
-2. The PR is reviewed against its diff for correctness, security, and English/Korean parity.
+2. The PR is reviewed against its diff for correctness, security, complete shipped translations, and English/Korean documentation parity.
 3. **The maintainer performs a final human check of every PR before merging.** Nothing is merged
    without it.
 

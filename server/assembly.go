@@ -210,8 +210,8 @@ func seedPrompts(pg *db.DB) {
 // tool-assembly time each built-in tool is filtered by its agent binding / enabled
 // flag and, if kept, wrapped so the model sees the DB-overridden description/schema
 // and default arguments are injected. MCP/skill/host tools have no row and pass through.
-func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, metadata ...map[string][2]actool.CoreTool) {
-	var localized map[string][2]actool.CoreTool
+func wireTools(pg *db.DB, domainReg map[string]actool.CoreTool, metadata ...map[string]map[locale.Lang]actool.CoreTool) {
+	var localized map[string]map[locale.Lang]actool.CoreTool
 	if len(metadata) > 0 {
 		localized = metadata[0]
 	}
