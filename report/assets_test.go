@@ -1,6 +1,7 @@
 package report
 
 import (
+	"encoding/csv"
 	"strings"
 	"testing"
 
@@ -66,6 +67,10 @@ func TestAssetValueFallbackChain(t *testing.T) {
 		{db.Asset{Type: "root_domain", Domain: "a.com", IP: "1.2.3.4"}, "a.com"},
 		{db.Asset{Type: "ip", IP: "1.2.3.4", URL: "http://x"}, "1.2.3.4"},
 		{db.Asset{Type: "service", URL: "http://x"}, "http://x"},
+		{db.Asset{Type: "service", Domain: "x", IP: "1.2.3.4", URL: "http://x"}, "http://x"},
+		{db.Asset{Type: "endpoint", Domain: "x", IP: "1.2.3.4", URL: "http://x/users"}, "http://x/users"},
+		{db.Asset{Type: "service", Domain: "x"}, "x"},
+		{db.Asset{Type: "endpoint", IP: "1.2.3.4"}, "1.2.3.4"},
 		{db.Asset{Type: "app", BundleID: "com.x"}, "com.x"},
 		{db.Asset{Type: "unknown"}, ""},
 	}
@@ -83,5 +88,24 @@ func TestAssetDetailsJSONOmitsEmpty(t *testing.T) {
 	got := assetDetailsJSON(&db.Asset{Type: "service", URL: "http://x", StatusCode: new(404)})
 	if got != `{"status_code":404}` {
 		t.Fatalf("details = %q", got)
+	}
+}
+
+func TestAssetsCSVPreservesStoredHTTPURLs(t *testing.T) {
+	assets := []*db.Asset{
+		{ID: 1, Type: "service", Domain: "api.example.com", IP: "203.0.113.10", URL: "https://api.example.com", ServiceType: "http"},
+		{ID: 2, Type: "endpoint", Domain: "api.example.com", IP: "203.0.113.10", URL: "https://api.example.com/v1/users", Method: "GET"},
+	}
+	rows, err := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(AssetsCSV(assets)), "\xEF\xBB\xBF"))).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(assets)+1 {
+		t.Fatalf("CSV rows = %d, want %d", len(rows), len(assets)+1)
+	}
+	for i, asset := range assets {
+		if got := rows[i+1][2]; got != asset.URL {
+			t.Errorf("%s Value = %q, want full URL %q", asset.Type, got, asset.URL)
+		}
 	}
 }
