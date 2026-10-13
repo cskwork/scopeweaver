@@ -80,7 +80,7 @@ export function hasMessage(key: string): key is MessageKey {
   return Object.hasOwn(catalogs.en, key);
 }
 
-// translateIn never falls back to another language: both catalogs are
+// translateIn never falls back to another language: shipped catalogs are
 // complete by construction (see catalog.ts); an unknown key renders as itself.
 export function translateIn(locale: Locale, key: MessageKey, params?: MessageParams): string {
   const message = catalogs[locale][key];

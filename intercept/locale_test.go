@@ -29,7 +29,7 @@ func TestVerdictLanguageContractsRemainStrict(t *testing.T) {
 }
 
 func TestJudgePromptLanguagesPreservePolicyAndCustomText(t *testing.T) {
-	for _, lang := range []locale.Lang{locale.En, locale.Ko} {
+	for _, lang := range locale.Languages() {
 		p := EffectiveJudgePrompt(DefaultJudgePrompt, lang)
 		for _, rule := range []string{"D1", "D2", "D3", "D4", "D5", "D6", "A1", "A2", "A3", "A4", "A5", "A6", "ASK", "DEFAULT", "tool_name", "arguments"} {
 			if !strings.Contains(p, rule) {
@@ -44,5 +44,26 @@ func TestJudgePromptLanguagesPreservePolicyAndCustomText(t *testing.T) {
 		if got := EffectiveJudgePrompt(custom, lang); !strings.HasPrefix(got, custom) {
 			t.Fatal("custom policy rewritten")
 		}
+	}
+}
+
+func TestChineseJudgeRegistrationAndStockRecognition(t *testing.T) {
+	if err := locale.ValidateTextTranslations([]string{DefaultJudgePrompt, JudgeContextBoundary, JudgeOutputContract}); err != nil {
+		t.Fatal(err)
+	}
+	zh := locale.Text(locale.ZhHans, DefaultJudgePrompt)
+	if !IsDefaultJudgePrompt(zh) {
+		t.Fatal("Chinese stock judge not recognized")
+	}
+	for _, reason := range []string{"实际操作：读取测试文件；成功后的后果：返回内容；命中规则：A5", "实际操作：删除未知文件；成功后的后果：文件丢失；命中规则：ASK"} {
+		if !strings.Contains(zh, "实际操作：") {
+			t.Fatal("Chinese contract missing parser-compatible labels")
+		}
+		if got := ParseVerdict(`{"decision":"allow","comment":"` + reason + `"}`); got.Action != "allow" {
+			t.Fatal("Chinese verdict rejected")
+		}
+	}
+	if IsDefaultJudgePrompt(zh + " custom edit") {
+		t.Fatal("edited Chinese policy treated as stock")
 	}
 }

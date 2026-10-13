@@ -8,8 +8,9 @@ const isMock = process.env.NEXT_PUBLIC_MOCK === "1";
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  // Avoid parent lockfiles affecting root inference and generated asset paths.
-  turbopack: { root: fileURLToPath(new URL(".", import.meta.url)) },
+  // Pin the repository root so the shared locale declaration is resolvable
+  // without letting unrelated parent lockfiles affect root inference.
+  turbopack: { root: fileURLToPath(new URL("..", import.meta.url)) },
   reactCompiler: true,
   // Allow development HMR resources from LAN IPs; adjust as needed.
   // Permit IPv4 origins for /_next/* and HMR in development, even as LAN addresses change.

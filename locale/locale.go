@@ -25,6 +25,8 @@ const (
 	En Lang = "en"
 	// Ko is Korean, the selectable alternative.
 	Ko Lang = "ko"
+	// ZhHans is Simplified Chinese. Traditional Chinese is not shipped.
+	ZhHans Lang = "zh-Hans"
 )
 
 // Default is the fallback language when nothing else is negotiated.
@@ -38,28 +40,88 @@ const CookieName = "scopeweaver_locale"
 const QueryParam = "lang"
 
 // Supported reports whether l is a language ScopeWeaver ships translations for.
-func Supported(l Lang) bool { return l == En || l == Ko }
+func Supported(l Lang) bool {
+	for _, d := range definitions {
+		if d.ID == l {
+			return true
+		}
+	}
+	return false
+}
 
-// Normalize parses a raw locale token (e.g. "en", "EN", "en-US", "ko_KR") into a
-// supported Lang. ok is false when the token does not map to a supported
-// language, so callers can fall through to the next negotiation source.
+// Normalize preserves the historical permissive EN/KO primary-subtag behavior.
+// Chinese matching keeps scripts: explicit Hans wins the region; Hant is never
+// mapped to Hans, and unscripted TW/HK/MO are unsupported. Bare zh follows the
+// Unicode likely-subtag default zh-Hans-CN. Unsupported tags permit fallback.
 func Normalize(s string) (Lang, bool) {
-	s = strings.TrimSpace(strings.ToLower(s))
+	s = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(s)), "_", "-")
 	if s == "" {
 		return Default, false
 	}
-	// Keep only the primary subtag: "en-us" / "en_us" -> "en".
-	if i := strings.IndexAny(s, "-_;"); i >= 0 {
-		s = s[:i]
+	primary := s
+	if i := strings.IndexAny(primary, "-;"); i >= 0 {
+		primary = primary[:i]
 	}
-	switch Lang(s) {
-	case En:
-		return En, true
-	case Ko:
-		return Ko, true
-	default:
+	// Preserve old callers that accept arbitrary EN/KO suffixes and semicolons.
+	if primary == string(En) || primary == string(Ko) {
+		return Lang(primary), true
+	}
+	parts := strings.Split(s, "-")
+	for _, part := range parts {
+		if part == "" || strings.ContainsAny(part, " ;") {
+			return Default, false
+		}
+	}
+	return matchDefinitions(s, parts, definitions)
+}
+
+// matchDefinitions uses declared aliases for additional languages too. Chinese
+// explicit script matching precedes region aliases: Hans-TW stays Hans; Hant-CN
+// stays Hant if a future reviewed Hant definition ships, never Hans today.
+func matchDefinitions(s string, parts []string, defs []Definition) (Lang, bool) {
+	exact := func(token string) (Lang, bool) {
+		for _, d := range defs {
+			if strings.ToLower(string(d.ID)) == token {
+				return d.ID, true
+			}
+			for _, alias := range d.Aliases {
+				if strings.ToLower(alias) == token {
+					return d.ID, true
+				}
+			}
+		}
 		return Default, false
 	}
+	if parts[0] == "zh" {
+		script := ""
+		for _, part := range parts[1:] {
+			if len(part) == 4 {
+				if script != "" && script != part {
+					return Default, false
+				}
+				script = part
+			}
+		}
+		if script != "" {
+			return exact("zh-" + script)
+		}
+		if lang, ok := exact(s); ok {
+			return lang, true
+		}
+		// No undeclared Chinese region may silently pick a script.
+		return Default, false
+	}
+	if lang, ok := exact(s); ok {
+		return lang, true
+	}
+	// Longest registered canonical/alias prefix, with subtag boundaries, handles
+	// future language/script/region declarations without a per-language switch.
+	for n := len(parts) - 1; n >= 1; n-- {
+		if lang, ok := exact(strings.Join(parts[:n], "-")); ok {
+			return lang, true
+		}
+	}
+	return Default, false
 }
 
 // serverDefault holds the configured server-wide default language. It is set once

@@ -17,6 +17,7 @@ fs.mkdirSync(out, { recursive: true });
 const PASSWORD = "e2e-pass-1234";
 const TEXT = {
   en: { unavailable: "Cannot confirm setup status", dataError: "Data source is temporarily unavailable; please try again later", usage: "Approval token usage", fallback: "Within interception scope and no interception rule matches commands receive model-based semantic review (allow / ask user / deny)" },
+  "zh-Hans": { unavailable: "无法确认初始化状态", dataError: "数据源暂时不可用；请稍后重试", usage: "审批令牌用量", fallback: "在拦截范围内、且没有任何拦截规则命中的命令，才由模型做语义判断（放行 / 转人工 / 拦截）" },
   ko: { unavailable: "초기 설정 상태를 확인할 수 없습니다", dataError: "데이터 소스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요", usage: "승인 토큰 사용량", fallback: "다음 범위 내:차단 대상 범위이며일치하는 차단 규칙이 없는명령만 모델이 의미를 판단합니다(허용 / 사용자 승인 / 거부)" },
 };
 
@@ -57,8 +58,25 @@ async function openPage(locale, token) {
   return page;
 }
 
+const localeSelector = (p) => p.locator('select:has(option[value="zh-Hans"])');
+async function switchLocale(p, locale) {
+  await localeSelector(p).selectOption(locale);
+  await p.waitForFunction((l) => document.documentElement.lang === l, locale);
+  const preference = await p.evaluate(() => ({stored:localStorage.getItem("scopeweaver.locale"),cookie:document.cookie}));
+  check(preference.stored === locale && preference.cookie.includes(`scopeweaver_locale=${locale}`), "preference stores disagree");
+}
+async function checkDraftSwitches(p, selector, draft) {
+  await p.locator(selector).fill(draft);
+  await p.locator(selector).evaluate((node) => {window.__i18nDraftNode=node;});
+  for (const locale of ["en", "ko", "zh-Hans"]) {
+    await switchLocale(p, locale);
+    check(await p.locator(selector).inputValue() === draft, `${locale} lost draft`);
+    check(await p.locator(selector).evaluate((node) => node === window.__i18nDraftNode), `${locale} remounted draft control`);
+  }
+}
+
 // 1. A database outage must not expose the first-time setup form.
-for (const locale of ["en", "ko"]) {
+for (const locale of ["en", "ko", "zh-Hans"]) {
   await step(`[${locale}] setup fails closed while the database is unavailable`, async () => {
     const page = await openPage(locale);
     setDatabaseAvailable(false);
@@ -78,6 +96,16 @@ for (const locale of ["en", "ko"]) {
 // 2. First-time setup, then login with the same password.
 const page = await openPage("en");
 let token = "";
+await step("[zh-Hans] setup password drafts survive EN/KO/Chinese switches", async () => {
+  await page.goto(`${base}/setup`);
+  await page.fill("#confirm", "confirmation 原文");
+  await checkDraftSwitches(page, "#password", "unsaved-password 原文");
+  check(await page.locator("#confirm").inputValue() === "confirmation 原文", "confirmation draft lost");
+  await page.getByRole("button", {name:"设置密码并登录", exact:true}).waitFor();
+  await page.screenshot({path:`${out}/i18n-setup-draft-zh-Hans.png`});
+  await switchLocale(page,"en");
+});
+
 await step("[en] setup creates the password and login accepts it", async () => {
   await page.goto(`${base}/setup`);
   await page.fill("#password", PASSWORD);
@@ -95,6 +123,96 @@ await step("[en] setup creates the password and login accepts it", async () => {
   await page.waitForURL(/\/function\/tasks/);
   token = await page.evaluate(() => localStorage.getItem("artex_token"));
   check(token, "login stored no token");
+});
+
+await step("[zh-Hans] login draft and persisted reload preserve preference", async () => {
+  const p=await openPage("en");
+  try {
+    await p.goto(`${base}/login`);
+    await checkDraftSwitches(p,"#password","unsaved-login 原文");
+    await p.getByRole("button", {name:"登录",exact:true}).waitFor();
+    // Remove the per-navigation initializer so reload reads the stores itself.
+    const context=await browser.newContext({storageState:await p.context().storageState()});
+    const restored=await context.newPage();
+    restored.on("pageerror",err=>pageErrors.push(`restore: ${err.message}`));
+    await restored.goto(`${base}/login`);
+    await restored.waitForFunction(()=>document.documentElement.lang==="zh-Hans");
+    check(await localeSelector(restored).inputValue()==="zh-Hans","stored Chinese did not restore");
+    await restored.screenshot({path:`${out}/i18n-login-restored-zh-Hans.png`});
+    await context.close();
+  } finally {await p.context().close();}
+});
+
+await step("[zh-Hans] cookie-only and locale-storage privacy fallback restore Chinese", async () => {
+  for (const privacy of [false,true]) {
+    const context=await browser.newContext();
+    await context.addCookies([{name:"scopeweaver_locale",value:"zh-Hans",url:base}]);
+    if (privacy) await context.addInitScript(() => {
+      const get=Storage.prototype.getItem, set=Storage.prototype.setItem;
+      Storage.prototype.getItem=function(key) {if(key==="scopeweaver.locale")throw new Error("blocked locale storage");return get.call(this,key);};
+      Storage.prototype.setItem=function(key,value) {if(key==="scopeweaver.locale")throw new Error("blocked locale storage");return set.call(this,key,value);};
+    });
+    const p=await context.newPage();
+    p.on("pageerror",err=>pageErrors.push(`cookie/privacy: ${err.message}`));
+    try {
+      await p.goto(`${base}/login`);
+      await p.waitForFunction(()=>document.documentElement.lang==="zh-Hans");
+      check(await localeSelector(p).inputValue()==="zh-Hans","cookie preference failed");
+      await p.getByRole("button",{name:"登录",exact:true}).waitFor();
+    } finally {await context.close();}
+  }
+});
+
+await step("[zh-Hans] task, settings and chat drafts survive language switches", async () => {
+  const p=await openPage("en",token);
+  try {
+    await p.goto(`${base}/function/tasks`);
+    await p.getByRole("button", {name:"New task",exact:true}).click();
+    await p.fill("#name","custom task 原文");
+    await p.fill("#goal","local-only goal {raw}");
+    await checkDraftSwitches(p,"#description","unsaved task description 原文 <b>{raw}</b>");
+    check(await p.locator("#name").inputValue()==="custom task 原文","task name lost");
+    check(await p.locator("#goal").inputValue()==="local-only goal {raw}","task goal lost");
+    await p.screenshot({path:`${out}/i18n-task-draft-zh-Hans.png`});
+    await p.goto(`${base}/system/settings`);
+    await p.locator("#global-proxy:not([disabled])").waitFor();
+    await checkDraftSwitches(p,"#global-proxy","http://unsaved.example.invalid:8123");
+    await p.goto(`${base}/chat`);
+    await p.locator("textarea:not([disabled])").first().waitFor();
+    await checkDraftSwitches(p,"textarea:not([disabled])","unsaved chat 原文 {raw}");
+    await p.screenshot({path:`${out}/i18n-chat-draft-zh-Hans.png`});
+  } finally {await p.context().close();}
+});
+
+await step("[zh-Hans] first API and SSE transport carry Chinese while reconnect preserves log filter", async () => {
+  const p=await openPage("zh-Hans",token);
+  try {
+    const firstApi=p.waitForRequest(r=>new URL(r.url()).pathname.startsWith("/api/") && r.method()==="GET");
+    const stream=p.waitForResponse(r=>r.url().includes("/api/logs/stream") && new URL(r.url()).searchParams.get("lang")==="zh-Hans");
+    await p.goto(`${base}/system/logs`);
+    const first=await firstApi;
+    check(first.headers()["accept-language"]==="zh-Hans","first API did not use stored Chinese");
+    const response=await stream, url=new URL(response.url());
+    check(url.origin===new URL(base).origin && url.searchParams.get("since")==="0","SSE origin or cursor changed");
+    check(!!url.searchParams.get("token"),"SSE auth missing");
+    check(response.headers()["content-language"]==="zh-Hans","SSE Content-Language missing");
+    check((response.headers()["content-type"]||"").includes("text/event-stream"),"not SSE");
+    const filter=p.getByRole("main").getByRole("textbox");
+    await filter.fill("raw-log-filter 原文");
+    const reconnect=p.waitForResponse(r=>r.url().includes("/api/logs/stream") && new URL(r.url()).searchParams.get("lang")==="ko");
+    await switchLocale(p,"ko"); await reconnect;
+    check(await filter.inputValue()==="raw-log-filter 原文","reconnect lost log filter");
+    const chineseAgain=p.waitForResponse(r=>r.url().includes("/api/logs/stream") && new URL(r.url()).searchParams.get("lang")==="zh-Hans");
+    await switchLocale(p,"zh-Hans"); await chineseAgain;
+    const anonymous=await request.newContext();
+    try {
+      const denied=await anonymous.get(`${base}/api/intercept/judge/usage?lang=zh-Hans`);
+      check(denied.status()===401 && denied.headers()["content-language"]==="zh-Hans","localized API error transport failed");
+      const body=await denied.json();
+      check(JSON.stringify(body).includes("未授权"),"API error not translated");
+    } finally {await anonymous.dispose();}
+    await p.screenshot({path:`${out}/i18n-sse-zh-Hans.png`});
+  } finally {await p.context().close();}
 });
 
 // 3. Live events use the UI origin, so a reverse proxy only needs one public port.
@@ -124,7 +242,7 @@ await step("[api] approval usage excludes other agents and fills 30 days", async
   await anonymous.dispose();
 });
 
-for (const locale of ["en", "ko"]) {
+for (const locale of ["en", "ko", "zh-Hans"]) {
   await step(`[${locale}] approval usage card shows past spend while the judge is disabled`, async () => {
     const p = await openPage(locale, token);
     await p.goto(`${base}/system/intercept`);
