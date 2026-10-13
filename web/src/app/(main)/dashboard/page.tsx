@@ -46,7 +46,7 @@ import { cn } from "@/lib/utils";
 // ── chart constants ───────────────────────────────────────────────────────────
 
 const dailyTrendConfig = {
-  inputCacheMiss: { get label() { return swt("interface.m0135"); }, color: "hsl(217 91% 60%)" },
+  inputCacheMiss: { get label() { return swt("interface.m0175"); }, color: "hsl(217 91% 60%)" },
   output: { get label() { return swt("interface.m0136"); }, color: "hsl(263 70% 60%)" },
   cacheRead: { get label() { return swt("interface.m0137"); }, color: "hsl(160 60% 45%)" },
 } satisfies ChartConfig;
@@ -442,7 +442,7 @@ export default function DashboardPage() {
     const fold = (date: string, inp: number, out: number, cr: number) => {
       if (date < cutoff) return;
       const prev = m.get(date) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
-      m.set(date, { inputCacheMiss: prev.inputCacheMiss + (inp - cr), output: prev.output + out, cacheRead: prev.cacheRead + cr });
+      m.set(date, { inputCacheMiss: prev.inputCacheMiss + Math.max(0, inp - cr), output: prev.output + out, cacheRead: prev.cacheRead + cr });
     };
     for (const t of tasks) {
       if (tokenTab !== "all" && (t.llm_profile_id ?? defaultProfileId) !== tokenTab) continue;
@@ -471,7 +471,7 @@ export default function DashboardPage() {
       if (tokenTab !== "all" && (profileIdByName.get(d.profile_name) ?? defaultProfileId) !== tokenTab) continue;
       const prev = m.get(d.date) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
       m.set(d.date, {
-        inputCacheMiss: prev.inputCacheMiss + (d.input_tokens - d.cache_read_tokens),
+        inputCacheMiss: prev.inputCacheMiss + Math.max(0, d.input_tokens - d.cache_read_tokens),
         output: prev.output + d.output_tokens,
         cacheRead: prev.cacheRead + d.cache_read_tokens,
       });
@@ -836,7 +836,7 @@ export default function DashboardPage() {
                     }
                   />
                   {/* Input includes cache reads; stack disjoint uncached input + cache + output so the bar sums to the panel total. */}
-                  <Bar dataKey="inputCacheMiss" stackId="1" fill="var(--color-input)" radius={[0, 0, 0, 0]} />
+                  <Bar dataKey="inputCacheMiss" stackId="1" fill="var(--color-inputCacheMiss)" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="output" stackId="1" fill="var(--color-output)" radius={[0, 0, 0, 0]} />
                   <Bar dataKey="cacheRead" stackId="1" fill="var(--color-cacheRead)" radius={[4, 4, 0, 0]} />
                 </BarChart>
