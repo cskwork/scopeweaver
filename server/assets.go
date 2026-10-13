@@ -424,7 +424,7 @@ func (s *Server) assetsExport(w http.ResponseWriter, r *http.Request) {
 			}
 			id, err := strconv.ParseInt(part, 10, 64)
 			if err != nil || id <= 0 {
-				writeErr(w, 400, locale.Text(responseLanguage(w), "bad asset id: ")+part)
+				writeErr(w, 400, locale.Text(responseLanguage(w), "bad asset id")+": "+part)
 				return
 			}
 			ids = append(ids, id)
