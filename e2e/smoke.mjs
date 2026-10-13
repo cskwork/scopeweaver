@@ -197,7 +197,7 @@ await step("[zh-Hans] first API and SSE transport carry Chinese while reconnect 
     check(!!url.searchParams.get("token"),"SSE auth missing");
     check(response.headers()["content-language"]==="zh-Hans","SSE Content-Language missing");
     check((response.headers()["content-type"]||"").includes("text/event-stream"),"not SSE");
-    const filter=p.locator('input[type="text"]').first();
+    const filter=p.getByRole("main").getByRole("textbox");
     await filter.fill("raw-log-filter 原文");
     const reconnect=p.waitForResponse(r=>r.url().includes("/api/logs/stream") && new URL(r.url()).searchParams.get("lang")==="ko");
     await switchLocale(p,"ko"); await reconnect;
