@@ -14,9 +14,20 @@ import (
 
 // Assets export renders CSV. The server serializes JSON directly from db.Asset.
 
-// assetValue returns the type-appropriate primary value: Domain → IP → URL → BundleID.
+// assetValue prefers the type's primary value, then falls back to populated fields.
 func assetValue(a *db.Asset) string {
-	for _, v := range []string{a.Domain, a.IP, a.URL, a.BundleID} {
+	var primary string
+	switch a.Type {
+	case "root_domain", "subdomain":
+		primary = a.Domain
+	case "ip":
+		primary = a.IP
+	case "service", "endpoint":
+		primary = a.URL
+	case "app":
+		primary = a.BundleID
+	}
+	for _, v := range []string{primary, a.Domain, a.IP, a.URL, a.BundleID} {
 		if strings.TrimSpace(v) != "" {
 			return v
 		}

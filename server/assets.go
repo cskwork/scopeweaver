@@ -411,10 +411,7 @@ func (s *Server) assetsExport(w http.ResponseWriter, r *http.Request) {
 	format := q.Get("format")
 
 	var ids []int64
-	filter := db.AssetExportFilter{
-		Type: q.Get("type"),
-		DSL:  q.Get("dsl"),
-	}
+	var filter db.AssetExportFilter
 	switch scope {
 	case "selected":
 		for _, part := range strings.Split(q.Get("ids"), ",") {
@@ -436,6 +433,8 @@ func (s *Server) assetsExport(w http.ResponseWriter, r *http.Request) {
 	case "all":
 		// An empty filter applies no conditions.
 	case "filtered", "":
+		filter.Type = q.Get("type")
+		filter.DSL = q.Get("dsl")
 		if filter.DSL != "" {
 			if err := db.ValidateDSL(filter.DSL); err != nil {
 				writeError(w, http.StatusBadRequest, err)
@@ -444,6 +443,9 @@ func (s *Server) assetsExport(w http.ResponseWriter, r *http.Request) {
 		}
 		filter.TaskID, _ = strconv.ParseInt(q.Get("task_id"), 10, 64)
 		filter.CompanyID, _ = strconv.ParseInt(q.Get("company_id"), 10, 64)
+		if filter.Type == "" && filter.DSL == "" && filter.CompanyID <= 0 && filter.TaskID <= 0 {
+			filter.Type = "root_domain"
+		}
 	default:
 		writeErr(w, 400, locale.Text(responseLanguage(w), "bad scope: ")+scope)
 		return

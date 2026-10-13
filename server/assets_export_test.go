@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -152,4 +153,124 @@ func countLines(s string) int {
 		}
 	}
 	return n
+}
+
+func TestAssetsExportAllIgnoresFilters(t *testing.T) {
+	s, ids, _ := exportHTTPFixture(t)
+	for _, filters := range []string{
+		"type=subdomain",
+		"dsl=" + url.QueryEscape("domain=missing-export.example"),
+		"dsl=" + url.QueryEscape(`nope_field = "x"`),
+		"task_id=999999999",
+		"company_id=999999999",
+		"ids=" + fmt.Sprint(ids[0]),
+		"type=subdomain&dsl=" + url.QueryEscape(`nope_field = "x"`) + "&task_id=999999999&company_id=999999999&ids=bad",
+	} {
+		t.Run(filters, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.assetsExport(rec, httptest.NewRequest(http.MethodGet, "/api/assets/export?scope=all&format=json&"+filters, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("all with irrelevant filters: status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var assets []db.Asset
+			if err := json.Unmarshal(rec.Body.Bytes(), &assets); err != nil {
+				t.Fatal(err)
+			}
+			got := map[int64]bool{}
+			for _, asset := range assets {
+				got[asset.ID] = true
+			}
+			for _, id := range ids {
+				if !got[id] {
+					t.Errorf("all export omitted fixture asset %d", id)
+				}
+			}
+		})
+	}
+}
+
+func TestAssetsExportFilteredMatchesListDefault(t *testing.T) {
+	s, _, _ := exportHTTPFixture(t)
+	listRec := httptest.NewRecorder()
+	s.listAssets(listRec, httptest.NewRequest(http.MethodGet, "/api/assets?limit=200", nil))
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
+	}
+	var list struct {
+		Total  int        `json:"total"`
+		Assets []db.Asset `json:"assets"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{"", "filtered"} {
+		t.Run("scope="+scope, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			s.assetsExport(rec, httptest.NewRequest(http.MethodGet, "/api/assets/export?format=json&scope="+scope, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var assets []db.Asset
+			if err := json.Unmarshal(rec.Body.Bytes(), &assets); err != nil {
+				t.Fatal(err)
+			}
+			if len(assets) != list.Total {
+				t.Errorf("default export rows=%d, list full match total=%d", len(assets), list.Total)
+			}
+			for _, asset := range assets {
+				if asset.Type != "root_domain" {
+					t.Errorf("default export includes asset %d type=%s", asset.ID, asset.Type)
+				}
+			}
+		})
+	}
+}
+
+func TestAssetsExportFilteredUntypedScopesPreserved(t *testing.T) {
+	s, ids, companyID := exportHTTPFixture(t)
+	fixture, err := s.assetStore().GetByIDs(ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	taskID := fixture[0].TaskIDs[0]
+	for _, filters := range []string{
+		"dsl=" + url.QueryEscape("domain=export-http.example"),
+		fmt.Sprintf("company_id=%d", companyID),
+		fmt.Sprintf("task_id=%d", taskID),
+	} {
+		t.Run(filters, func(t *testing.T) {
+			listRec := httptest.NewRecorder()
+			s.listAssets(listRec, httptest.NewRequest(http.MethodGet, "/api/assets?limit=200&"+filters, nil))
+			if listRec.Code != http.StatusOK {
+				t.Fatalf("list status=%d body=%s", listRec.Code, listRec.Body.String())
+			}
+			var list struct {
+				Total int `json:"total"`
+			}
+			if err := json.Unmarshal(listRec.Body.Bytes(), &list); err != nil {
+				t.Fatal(err)
+			}
+			rec := httptest.NewRecorder()
+			s.assetsExport(rec, httptest.NewRequest(http.MethodGet, "/api/assets/export?scope=filtered&format=json&"+filters, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("export status=%d body=%s", rec.Code, rec.Body.String())
+			}
+			var assets []db.Asset
+			if err := json.Unmarshal(rec.Body.Bytes(), &assets); err != nil {
+				t.Fatal(err)
+			}
+			if len(assets) != list.Total {
+				t.Errorf("filtered export rows=%d, list full match total=%d", len(assets), list.Total)
+			}
+			got := map[int64]bool{}
+			for _, asset := range assets {
+				got[asset.ID] = true
+			}
+			for _, id := range ids {
+				if !got[id] {
+					t.Errorf("untyped filtered export omitted fixture asset %d", id)
+				}
+			}
+		})
+	}
 }

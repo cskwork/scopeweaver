@@ -1394,15 +1394,6 @@ func (s *AssetStore) DeleteByCompanyID(companyID int64) (int64, error) {
 	return res.RowsAffected()
 }
 
-// DeleteByHost hard-deletes every asset whose host exactly matches the given value:
-// root_domain / subdomain / service / endpoint (they carry the host in domain or
-// root_domain) plus an ip asset and its services/endpoints (ip column). The host is
-// normalized the same way it is stored (DomainKey: lowercase/trim/strip trailing dot)
-// so matching is exact, not fuzzy. Passing a root domain also removes its subdomains
-// and their services/endpoints (they carry root_domain = that host); passing a
-// subdomain/IP removes only that host's own assets. Referencing exploration_anchors
-// rows are cleaned by ON DELETE CASCADE. Returns rows deleted, grouped by type.
-
 // AssetExportFilter carries the optional filtered-scope conditions for
 // ListAssetsForExport. Only one of DSL / CompanyID / TaskID drives the query,
 // mirroring the branch selection in the listAssets handler: DSL wins, then
@@ -1493,6 +1484,10 @@ func (s *AssetStore) queryPlainForExport(f AssetExportFilter) ([]*Asset, error) 
 	}
 }
 
+// DeleteByHost hard-deletes every asset whose host exactly matches the given value:
+// root_domain / subdomain / service / endpoint (they carry the host in domain or
+// root_domain) plus an ip asset and its services/endpoints (ip column). The host is
+// normalized the same way it is stored (DomainKey: lowercase/trim/strip trailing dot)
 // so matching is exact, not fuzzy. Passing a root domain also removes its subdomains
 // and their services/endpoints (they carry root_domain = that host); passing a
 // subdomain/IP removes only that host's own assets. Referencing exploration_anchors
