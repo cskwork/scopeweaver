@@ -2,10 +2,14 @@
 // and the node tests. Keep this module free of DOM access and path aliases so
 // `node --test` can import it directly.
 
-export const LOCALES = ["en", "ko"] as const;
-export type Locale = (typeof LOCALES)[number];
+import definition from "../../../locale/definitions.json" with { type: "json" };
 
-export const DEFAULT_LOCALE: Locale = "en";
+// The union provides compile-time catalog coverage; the shared declaration
+// controls runtime support, labels, Intl mappings and aliases.
+export type Locale = "en" | "ko" | "zh-Hans";
+export const LOCALE_DEFINITIONS = definition.locales;
+export const LOCALES = definition.locales.map(({ id }) => id as Locale);
+export const DEFAULT_LOCALE = definition.default as Locale;
 
 // Persistence contract shared with the backend (see status notes):
 // localStorage for the UI, a cookie so the server can negotiate too.
@@ -17,15 +21,13 @@ export const LOCALE_COOKIE_MAX_AGE = 365 * 24 * 60 * 60;
 export const LOCALE_QUERY_PARAM = "lang";
 
 // Native names are shown in the language selector regardless of UI locale.
-export const LOCALE_NATIVE_NAMES: Record<Locale, string> = {
-  en: "English",
-  ko: "한국어",
-};
+export const LOCALE_NATIVE_NAMES = Object.fromEntries(
+  LOCALE_DEFINITIONS.map(({ id, nativeName }) => [id, nativeName]),
+) as Record<Locale, string>;
 
-const INTL_LOCALES: Record<Locale, string> = {
-  en: "en-US",
-  ko: "ko-KR",
-};
+const INTL_LOCALES = Object.fromEntries(
+  LOCALE_DEFINITIONS.map(({ id, intlLocale }) => [id, intlLocale]),
+) as Record<Locale, string>;
 
 export function isLocale(value: unknown): value is Locale {
   return typeof value === "string" && (LOCALES as readonly string[]).includes(value);
@@ -35,8 +37,32 @@ export function isLocale(value: unknown): value is Locale {
 // and maps them onto a supported locale; anything else yields null.
 export function normalizeLocale(value: unknown): Locale | null {
   if (typeof value !== "string") return null;
-  const base = value.trim().toLowerCase().split(/[-_]/)[0];
-  return isLocale(base) ? base : null;
+  const tag = value.trim().toLowerCase().replaceAll("_", "-");
+  const [base, ...parts] = tag.split("-");
+  // Preserve the existing permissive EN/KO regional-tag behavior.
+  if (base === "en" || base === "ko") return isLocale(base) ? base : null;
+  if ([base, ...parts].some((part) => !part || /[ ;]/.test(part))) return null;
+  const declared = (candidate: string): Locale | null => {
+    const found = LOCALE_DEFINITIONS.find(({ id, aliases }) =>
+      [id, ...aliases].some((alias) => alias.toLowerCase() === candidate));
+    return found && isLocale(found.id) ? found.id : null;
+  };
+  if (base === "zh") {
+    const scripts = [...new Set(parts.filter((part) => part.length === 4))];
+    if (scripts.length > 1) return null;
+    // Script-specific content wins a conflicting region, only when declared.
+    if (scripts.length) return declared(`${base}-${scripts[0]}`);
+    // Bare zh and regional aliases are explicit policy in the declaration.
+    return declared(tag);
+  }
+  const exact = declared(tag);
+  if (exact) return exact;
+  const prefixes = LOCALE_DEFINITIONS.flatMap(({ id, aliases }) => [id, ...aliases])
+    .sort((a, b) => b.length - a.length);
+  for (const prefix of prefixes) {
+    if (tag.startsWith(`${prefix.toLowerCase()}-`)) return declared(prefix.toLowerCase());
+  }
+  return null;
 }
 
 export function intlLocale(locale: Locale): string {

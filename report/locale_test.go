@@ -39,3 +39,24 @@ func TestEmptyReportLanguages(t *testing.T) {
 		}
 	}
 }
+
+func TestChineseReportsLocalizeLabelsAndPreserveEvidence(t *testing.T) {
+	raw := "用户原文 한국어 <raw> 100%"
+	f := &db.DBFinding{ID: 7, Name: raw, Summary: raw, Evidence: raw, Report: raw, Severity: "high", Status: "pending"}
+	text := FindingsMarkdown([]*db.DBFinding{f}, time.Unix(0, 0), locale.ZhHans)
+	for _, want := range []string{raw, "漏洞", "高", "待确认"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("Chinese report missing %q", want)
+		}
+	}
+	if strings.Contains(text, "%!") {
+		t.Fatal("invalid Chinese report interpolation")
+	}
+	csv := string(FindingsCSV([]*db.DBFinding{f}, locale.ZhHans))
+	if !strings.Contains(csv, "high") || !strings.Contains(csv, "pending") || !strings.Contains(csv, raw) {
+		t.Fatal("CSV machine values/raw evidence changed")
+	}
+	if severityLabel(locale.ZhHans, "custom") != "CUSTOM" || statusLabel(locale.ZhHans, "custom") != "custom" {
+		t.Fatal("unknown report fallback changed")
+	}
+}

@@ -29,7 +29,11 @@ Modification date: **2026-10-02**. See [provenance and changes](docs/PROVENANCE.
 
 ## Language
 
-English is the default. Select English or Korean in the interface. The server's durable default is
+English is the default. Select English, Korean or Simplified Chinese (`zh-Hans`) in the interface.
+Bare `zh`, `zh-CN` and `zh-SG` resolve to Simplified Chinese; explicit Hans tags keep their script even
+with a Traditional region. Undeclared Traditional tags (`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`) fall
+through to the next preference rather than select Simplified Chinese. See the
+[contributor locale guide](web/src/i18n/README.md). The server's durable default is
 `language` in system settings; `SCOPEWEAVER_LANGUAGE` (or `ARTEX_LANGUAGE`) supplies the environment
 fallback. Operating-system `LANG` does not select the application language.
 

@@ -66,3 +66,43 @@ func TestTaskLanguageSavedAndRemovedWithTask(t *testing.T) {
 		t.Fatalf("language remained after task deletion: %v %v", ok, err)
 	}
 }
+
+func TestChineseTaskLanguagePersistenceAndCanonicalValidation(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	raw := "用户原文 한국어"
+	task, err := d.CreateTaskWithOptions(raw, raw, TaskCreateOptions{Language: locale.ZhHans})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.DeleteTask(task.ID)
+	value, ok, err := d.GetSetting("task_language." + strconv.FormatInt(task.ID, 10))
+	if err != nil || !ok || value != string(locale.ZhHans) {
+		t.Fatalf("Chinese persistence: %q %v %v", value, ok, err)
+	}
+	if task.Description != raw || task.Goal != raw {
+		t.Fatal("user task fields modified")
+	}
+	for _, input := range []locale.Lang{"zh-CN", "zh-Hant", ""} {
+		created, err := d.CreateTaskWithOptions("canonical language fixture", raw, TaskCreateOptions{Language: input})
+		if input == "" {
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer d.DeleteTask(created.ID)
+			if _, exists, err := d.GetSetting("task_language." + strconv.FormatInt(created.ID, 10)); err != nil || exists {
+				t.Fatal("legacy missing language field changed")
+			}
+			continue
+		}
+		if err == nil || created != nil {
+			t.Fatalf("noncanonical %q accepted", input)
+		}
+		if got := locale.ErrorMessage(locale.ZhHans, err); !strings.Contains(got, "语言必须为 en, ko, zh-Hans 之一") {
+			t.Fatalf("validation stale/English: %s", got)
+		}
+	}
+}

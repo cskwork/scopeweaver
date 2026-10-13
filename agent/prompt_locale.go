@@ -27,11 +27,13 @@ var legacyPromptDefaults = map[string]string{
 }
 
 // CanonicalBuiltinPrompt returns canonical English only for an exact stock
-// English/Korean/legacy template. All other text is returned byte-for-byte.
+// shipped-language/legacy template. All other text is returned byte-for-byte.
 func CanonicalBuiltinPrompt(text string) string {
-	for _, builtin := range []string{goalsDefaultTmpl, plannerDefaultTmpl, workerDefaultTmpl, mainAgentDefaultTmpl, autoDefaultTmpl, pentestDefaultTmpl, DefaultAssistantPrompt, ReporterDefaultPrompt, RetesterDefaultPrompt, settleWrapUpPrompt, plannerWrapUpDefault, mainAgentWrapUpDefault, genericWrapUpDefault, workerTaskTimeoutDefault, plannerTaskTimeoutDefault} {
-		if text == builtin || text == locale.Text(locale.Ko, builtin) {
-			return builtin
+	for _, builtin := range []string{goalsDefaultTmpl, goalsScopeTail, plannerDefaultTmpl, workerDefaultTmpl, mainAgentDefaultTmpl, autoDefaultTmpl, pentestDefaultTmpl, DefaultAssistantPrompt, ReporterDefaultPrompt, RetesterDefaultPrompt, settleWrapUpPrompt, plannerWrapUpDefault, mainAgentWrapUpDefault, genericWrapUpDefault, workerTaskTimeoutDefault, plannerTaskTimeoutDefault} {
+		for _, lang := range locale.Languages() {
+			if text == locale.Text(lang, builtin) {
+				return builtin
+			}
 		}
 	}
 	digest := sha256.Sum256([]byte(text))
@@ -43,7 +45,7 @@ func CanonicalBuiltinPrompt(text string) string {
 
 func BuiltinPromptText(text string, lang locale.Lang) string {
 	canonical := CanonicalBuiltinPrompt(text)
-	for _, builtin := range []string{goalsDefaultTmpl, plannerDefaultTmpl, workerDefaultTmpl, mainAgentDefaultTmpl, autoDefaultTmpl, pentestDefaultTmpl, DefaultAssistantPrompt, ReporterDefaultPrompt, RetesterDefaultPrompt, settleWrapUpPrompt, plannerWrapUpDefault, mainAgentWrapUpDefault, genericWrapUpDefault, workerTaskTimeoutDefault, plannerTaskTimeoutDefault} {
+	for _, builtin := range []string{goalsDefaultTmpl, goalsScopeTail, plannerDefaultTmpl, workerDefaultTmpl, mainAgentDefaultTmpl, autoDefaultTmpl, pentestDefaultTmpl, DefaultAssistantPrompt, ReporterDefaultPrompt, RetesterDefaultPrompt, settleWrapUpPrompt, plannerWrapUpDefault, mainAgentWrapUpDefault, genericWrapUpDefault, workerTaskTimeoutDefault, plannerTaskTimeoutDefault} {
 		if canonical == builtin {
 			return locale.Text(lang, builtin)
 		}

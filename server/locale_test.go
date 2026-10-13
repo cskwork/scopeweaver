@@ -78,3 +78,66 @@ func TestUpdateProgressRendersPerSubscriber(t *testing.T) {
 		t.Fatal("subscriber mutated shared event")
 	}
 }
+
+func TestAllProductionPackagesHaveRawShippedTranslations(t *testing.T) {
+	keys := locale.Keys()
+	var production []string
+	for _, key := range keys {
+		// This deliberate bilingual dynamic-error fixture is added by another test.
+		if key == "Asset %s is outside the authorized scope (task %d)" {
+			continue
+		}
+		production = append(production, key)
+	}
+	if len(production) != 1908 {
+		t.Fatalf("production key count %d, want 1908 (1888 base + 20 external)", len(production))
+	}
+	if err := locale.ValidateTextTranslations(production); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("raw completeness: %d production keys × %d locales", len(production), len(locale.Languages()))
+	if err := locale.ValidateTextTranslations([]string{reporterToolCallMessage}); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range locale.Languages() {
+		trigger, _ := locale.Raw(lang, reporterToolCallMessage)
+		if reporterTriggerText(trigger, locale.En) != reporterToolCallMessage {
+			t.Fatal("stock reporter trigger not reversed")
+		}
+		if reporterTriggerText(trigger+" user edit", locale.En) != trigger+" user edit" {
+			t.Fatal("edited trigger changed")
+		}
+		if !isDefaultConversationTitle(locale.Text(lang, "New conversation")) {
+			t.Fatal("stock conversation title not recognized")
+		}
+	}
+}
+
+func TestChineseLocaleMiddlewarePrecedenceAndFallback(t *testing.T) {
+	old := locale.ServerDefault()
+	locale.SetServerDefault(locale.En)
+	defer locale.SetServerDefault(old)
+	h := withLocale(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeError(w, 400, locale.Errorf("language must be one of %s", locale.SupportedLanguageNames()))
+	}))
+	for _, tc := range []struct{ query, header, cookie, want string }{
+		{"zh-Hans", "ko", "en", "zh-Hans"}, {"", "zh-Hant;q=1,zh-CN;q=0.7,ko;q=0.2", "en", "zh-Hans"},
+		{"zh-TW", "ko;q=0,zh-SG;q=0.6", "en", "zh-Hans"}, {"", "zh-Hant-CN", "zh-Hans", "zh-Hans"},
+		{"zh-Hant", "zh-HK", "zh-Hant", "en"},
+	} {
+		r := httptest.NewRequest("GET", "/api/settings?lang="+tc.query, nil)
+		r.Header.Set("Accept-Language", tc.header)
+		r.AddCookie(&http.Cookie{Name: locale.CookieName, Value: tc.cookie})
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Header().Get("Content-Language") != tc.want {
+			t.Fatalf("wrong negotiated language: %s", w.Header().Get("Content-Language"))
+		}
+		if !strings.Contains(w.Body.String(), "en, ko, zh-Hans") {
+			t.Fatalf("canonical identifiers altered: %s", w.Body)
+		}
+		if tc.want == "zh-Hans" && !strings.Contains(w.Body.String(), "语言必须") {
+			t.Fatal("Chinese error not rendered")
+		}
+	}
+}
