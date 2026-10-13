@@ -9,7 +9,7 @@
 1. 검토된 표준 ID, 원어 이름, Intl 언어 태그, 별칭을 `locale/definitions.json`에 추가합니다. 프런트엔드는 이 선언을 가져오고 Go는 임베딩합니다. `locale/matching-vectors.json`에 허용·거부 사례를 추가합니다. 필요한 프런트엔드 `Locale` 타입과 백엔드 상수를 확장하고 완전성 검사가 선언과 일치하도록 합니다. 기존 EN/KO 별칭은 보존합니다.
 2. 여섯 namespace의 현재 영어 키를 모두 번역합니다. 영어가 `MessageKey` 타입과 의미의 기준입니다. `catalog.ts`에 새 타입 검사 대상 테이블을 등록합니다. 영어 복사본이나 런타임 대체로 누락을 숨긴 카탈로그는 제공하지 않습니다. `messages/zh-Hans.ts`처럼 영어 namespace와 키를 대조합니다. 보간 필드 이름과 반복을 포함한 짝지어진 rich 태그를 보존합니다. 기술 식별자, 코드, 프로토콜 값은 바꾸지 않습니다.
 3. `calendar.ts`에 date-fns 객체를 추가합니다. 선택기의 원어 이름과 Intl 형식은 공통 선언을 따르며 달력과 날짜 범위 표시는 공통 date-fns 매핑을 사용합니다. 호출자가 지정한 달력 언어나 formatter가 우선합니다.
-4. 백엔드의 언어별 카탈로그와 외부 production 등록을 모두 추가합니다. `locale.Register(key, en, ko)`는 호환성을 유지하며 추가 언어는 `locale.RegisterAll(key, map[locale.Lang]string{...})`로 등록합니다. `Lookup` 대신 원시 등록을 검사합니다. `Lookup`의 영어/키 대체는 알 수 없거나 불완전한 호출자의 호환성을 위한 것이며 **출시 완전성을 충족하지 않습니다**.
+4. 백엔드의 언어별 카탈로그와 외부 production 등록을 모두 추가합니다. `locale.Register(key, en, ko)`는 호환성을 유지하며 추가 언어는 `locale.RegisterAll(map[string]map[locale.Lang]string{key: {locale.En: en, locale.Ko: ko, locale.ZhHans: zh}})`로 등록합니다. `Lookup` 대신 원시 등록을 검사합니다. `Lookup`의 영어/키 대체는 알 수 없거나 불완전한 호출자의 호환성을 위한 것이며 **출시 완전성을 충족하지 않습니다**.
 5. 정규화, 무결성, 상태 보존, 브라우저 시나리오를 추가합니다. 프런트엔드 테스트·타입 검사·정적 출력, 백엔드 카탈로그/등록 테스트와 [CONTRIBUTING.ko.md](../../../CONTRIBUTING.ko.md)의 필수 검사를 실행합니다. 번역 리뷰의 우려와 해결을 기록합니다. 확인되지 않은 독립 리뷰를 원어민 승인으로 표현하지 않습니다. 기능 문서는 영어/한국어를 함께 갱신하며 다른 언어 문서는 이를 대신하지 않습니다.
 
 언어 일치는 대소문자를 구분하지 않고 지역 태그의 밑줄 표기도 허용합니다. `zh`, `zh-CN`, `zh-SG`는 명시적으로 `zh-Hans`에 매핑되며 `zh-Hans` 뒤에 지역을 붙여도 일치합니다. 명시된 문자가 지역보다 우선하므로 `zh-Hans-TW`는 간체 중국어입니다. 번체 입력(`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`, `zh-Hant-CN` 포함)은 지원하지 않아 다음 설정 또는 기본값을 사용하며 간체로 정규화하지 않습니다. 검토된 다른 문자 카탈로그를 등록해도 이 안전 정책을 보존합니다.

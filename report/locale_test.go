@@ -60,3 +60,37 @@ func TestChineseReportsLocalizeLabelsAndPreserveEvidence(t *testing.T) {
 		t.Fatal("unknown report fallback changed")
 	}
 }
+
+func TestFindingReportInfoAndEmptySeverityLocalization(t *testing.T) {
+	for _, lang := range []struct {
+		id   locale.Lang
+		info string
+	}{{locale.En, "INFO"}, {locale.Ko, "정보"}, {locale.ZhHans, "信息"}} {
+		for _, severity := range []string{"info", "", "custom"} {
+			t.Run(string(lang.id)+"/"+severity, func(t *testing.T) {
+				raw := "原始证据 / 원문"
+				finding := &db.DBFinding{ID: 23, Name: raw, Summary: raw, Evidence: raw, Severity: severity, Status: "pending"}
+				want := lang.info
+				if severity == "custom" {
+					want = "CUSTOM"
+				}
+				for name, text := range map[string]string{
+					"findings": FindingsMarkdown([]*db.DBFinding{finding}, time.Unix(0, 0), lang.id),
+					"finding":  SingleFindingMarkdown(finding, time.Unix(0, 0), lang.id),
+				} {
+					if !strings.Contains(text, "["+want+"] "+raw) {
+						t.Errorf("%s report heading lacks [%s]: %s", name, want, text)
+					}
+					if !strings.Contains(text, raw) || finding.Severity != severity {
+						t.Fatal("raw finding content/severity changed")
+					}
+				}
+			})
+		}
+		// Raw helper callers historically retain the empty/unknown fallback; report
+		// renderers choose info for an empty stored severity before asking for a label.
+		if severityLabel(lang.id, "") != "" || severityLabel(lang.id, "custom") != "CUSTOM" {
+			t.Errorf("%s raw fallback changed", lang.id)
+		}
+	}
+}
