@@ -1466,7 +1466,10 @@ func (s *AssetStore) queryDSLForExport(f AssetExportFilter) ([]*Asset, error) {
 }
 
 // queryPlainForExport mirrors the non-DSL branch of listAssets: company_id wins,
-// then task_id, then the default root_domain view. limit<=0 means no limit.
+// then task_id, then the type-or-all view. Unlike QueryByType (a UI-paging
+// helper that clamps limit<=0 to 50 and forces a type), the final branch is a
+// genuinely unbounded export query: optional type filter only, no LIMIT, and no
+// root_domain default — an empty Type means every type (scope=all).
 func (s *AssetStore) queryPlainForExport(f AssetExportFilter) ([]*Asset, error) {
 	switch {
 	case f.CompanyID > 0:
@@ -1474,11 +1477,19 @@ func (s *AssetStore) queryPlainForExport(f AssetExportFilter) ([]*Asset, error) 
 	case f.TaskID > 0:
 		return s.QueryByTask(f.TaskID, f.Type, 0, 0)
 	default:
-		typ := f.Type
-		if typ == "" {
-			typ = "root_domain"
+		q := assetSelectCols
+		var args []any
+		if f.Type != "" {
+			args = append(args, f.Type)
+			q += fmt.Sprintf(" WHERE type = $%d", len(args))
 		}
-		return s.QueryByType(typ, 0, 0)
+		q += " ORDER BY last_seen DESC, id DESC"
+		rows, err := s.db.Query(q, args...)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+		return scanAssets(rows)
 	}
 }
 
