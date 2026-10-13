@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"strconv"
 	"testing"
 	"time"
@@ -31,6 +32,104 @@ func exportFixture(t *testing.T, d *DB, as *AssetStore, stamp int64) (taskID int
 		}
 	})
 	return taskID, ids
+}
+
+// bulkSubdomains inserts n unique subdomains under a throwaway root and returns
+// their ids with a cleanup. Used to pin the no-cap export guarantee.
+func bulkSubdomains(t *testing.T, d *DB, as *AssetStore, stamp int64, n int) []int64 {
+	t.Helper()
+	root := fmt.Sprintf("bulk%d.example", stamp)
+	ids := make([]int64, 0, n)
+	for i := 0; i < n; i++ {
+		id, err := as.UpsertSubdomain(UpsertSubdomainReq{
+			Domain:      fmt.Sprintf("h%d.%s", i, root),
+			RecordType:  "A",
+			RecordValue: []string{fmt.Sprintf("203.0.%d.%d", stamp%256, i%256)},
+			TaskID:      700000 + stamp%100000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	t.Cleanup(func() {
+		for _, id := range ids {
+			d.Exec(`DELETE FROM assets WHERE id = $1`, id)
+		}
+	})
+	return ids
+}
+
+// TestListAssetsForExportTypeNoCap pins the no-cap guarantee: more than 50
+// assets of one type, exported with only Type set (the plain path that must not
+// reuse QueryByType's UI paging), must return every row.
+func TestListAssetsForExportTypeNoCap(t *testing.T) {
+	d, as, _ := testSetup(t)
+	defer d.Close()
+	stamp := time.Now().UnixNano() % 100000
+	want := bulkSubdomains(t, d, as, stamp, 55)
+
+	got, err := as.ListAssetsForExport(AssetExportFilter{Type: "subdomain"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSet := map[int64]bool{}
+	for _, a := range got {
+		if a.Type != "subdomain" {
+			t.Fatalf("non-subdomain row %d type=%s", a.ID, a.Type)
+		}
+		gotSet[a.ID] = true
+	}
+	for _, id := range want {
+		if !gotSet[id] {
+			t.Fatalf("subdomain %d missing: export returned %d rows, want at least %d (QueryByType cap regression?)", id, len(got), len(want))
+		}
+	}
+}
+
+// TestListAssetsForExportAllTypesPresent pins that the bare filter (scope=all)
+// returns every type, not the old root_domain-only default.
+func TestListAssetsForExportAllTypesPresent(t *testing.T) {
+	d, as, _ := testSetup(t)
+	defer d.Close()
+	stamp := time.Now().UnixNano() % 100000
+	taskID := int64(600000 + stamp%100000)
+	// Mix: root_domain + subdomain + ip + service + endpoint + app.
+	if _, err := as.UpsertRootDomain(UpsertRootDomainReq{Domain: fmt.Sprintf("mix%d.example", stamp), TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := as.UpsertSubdomain(UpsertSubdomainReq{Domain: fmt.Sprintf("a.mix%d.example", stamp), RecordType: "A", RecordValue: []string{fmt.Sprintf("198.51.100.%d", stamp%256)}, TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := as.UpsertIP(UpsertIPReq{IP: fmt.Sprintf("198.51.100.%d", stamp%256), TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := as.UpsertHTTPService(UpsertHTTPServiceReq{URL: fmt.Sprintf("https://a.mix%d.example", stamp), TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := as.UpsertEndpoint(UpsertEndpointReq{URL: fmt.Sprintf("https://a.mix%d.example/api", stamp), Method: "GET", TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := as.UpsertApp(UpsertAppReq{Name: "Mix", BundleID: fmt.Sprintf("com.mix%d.app", stamp), TaskID: taskID}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		d.Exec(`DELETE FROM assets WHERE $1 = ANY(task_ids)`, taskID)
+	})
+
+	got, err := as.ListAssetsForExport(AssetExportFilter{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	types := map[string]bool{}
+	for _, a := range got {
+		types[a.Type] = true
+	}
+	for _, want := range []string{"root_domain", "subdomain", "ip", "service", "endpoint", "app"} {
+		if !types[want] {
+			t.Fatalf("scope=all missing type %q; got types: %v", want, keysOf(types))
+		}
+	}
 }
 
 func TestListAssetsForExportSelected(t *testing.T) {
