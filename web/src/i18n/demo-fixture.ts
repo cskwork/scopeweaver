@@ -5,8 +5,9 @@ import { catalogs, type MessageKey } from "./catalog.ts";
 import { translate } from "./runtime.ts";
 
 const authoredKeys = new Map<string, MessageKey>();
-for (const [key, value] of Object.entries(catalogs.en)) authoredKeys.set(value, key as MessageKey);
-for (const [key, value] of Object.entries(catalogs.ko)) authoredKeys.set(value, key as MessageKey);
+for (const catalog of Object.values(catalogs)) {
+  for (const [key, value] of Object.entries(catalog)) authoredKeys.set(value, key as MessageKey);
+}
 
 export function cloneDemoFixture<T>(value: T, authored = false): T {
   if (value === null || typeof value !== "object") return value;

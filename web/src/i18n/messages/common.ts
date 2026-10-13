@@ -1,6 +1,7 @@
 // common messages. English is the source catalog; Korean must define every key.
 
 export const en = {
+  selectDate: "Select date",
   cancel: "Cancel",
   save: "Save",
   saving: "Saving…",
@@ -62,6 +63,7 @@ export const en = {
 };
 
 export const ko: Record<keyof typeof en, string> = {
+  selectDate: "날짜 선택",
   cancel: "취소",
   save: "저장",
   saving: "저장 중…",

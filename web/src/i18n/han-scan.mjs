@@ -25,7 +25,10 @@ export function sourceFiles(root = SRC_ROOT) {
 }
 
 export function scanFile(file) {
-  const text = fs.readFileSync(file, "utf8");
+  return scanText(fs.readFileSync(file, "utf8"), file);
+}
+
+export function scanText(text, file = path.join(SRC_ROOT, "ordinary.tsx")) {
   const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : file.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS;
   const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, kind);
   const hits = [];
@@ -40,6 +43,14 @@ export function scanFile(file) {
     ) {
       const value = ts.isRegularExpressionLiteral(node) ? node.text : node.text ?? node.getText(sf);
       if (HAN.test(value)) {
+        // Only direct string values of the six typed Chinese catalog objects
+        // are translation resources. Other code in this file remains scanned.
+        const property = node.parent;
+        const declaration = property?.parent?.parent;
+        if (path.resolve(file) === path.join(SRC_ROOT, "i18n/messages/zh-Hans.ts") &&
+            ts.isStringLiteral(node) && property && ts.isPropertyAssignment(property) && property.initializer === node &&
+            declaration && ts.isVariableDeclaration(declaration) &&
+            ["app", "common", "english", "interfaceMessages", "providers", "settings"].includes(declaration.name.getText(sf))) return;
         const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
         hits.push({ line: line + 1, text: value.trim().slice(0, 120) });
       }

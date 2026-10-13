@@ -52,3 +52,17 @@ test("explicit SSE overrides include an empty same-origin base", () => {
   }
   assert.equal(client({ NODE_ENV: "production" }, null, false).sseUrl("/api/activity"), "/api/activity?lang=en");
 });
+
+test("Chinese SSE keeps same-origin auth, cursor and explicit language overrides", () => {
+  __resetLocaleForTests();
+  setLocale("zh-Hans");
+  try {
+    const { sseUrl } = client({ NODE_ENV: "production" }, "a+b/= token");
+    assert.equal(sseUrl("/api/logs/stream?since=7"), "/api/logs/stream?since=7&token=a%2Bb%2F%3D%20token&lang=zh-Hans");
+    const override = new URL(sseUrl("/api/logs/stream?since=7&lang=ko"), "https://scope.example:8797");
+    assert.equal(override.origin, "https://scope.example:8797");
+    assert.equal(override.searchParams.get("since"), "7");
+    assert.equal(override.searchParams.get("lang"), "ko");
+    assert.equal(override.searchParams.get("token"), "a+b/= token");
+  } finally { __resetLocaleForTests(); }
+});

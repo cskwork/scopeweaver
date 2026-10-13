@@ -74,3 +74,78 @@ func TestBuiltinToolMetadataLanguagePreservesEdits(t *testing.T) {
 		t.Fatal("machine tool name changed")
 	}
 }
+
+func TestAllShippedBuiltinPromptTranslations(t *testing.T) {
+	templates := []string{goalsDefaultTmpl, goalsScopeTail, plannerDefaultTmpl, workerDefaultTmpl, mainAgentDefaultTmpl, autoDefaultTmpl, pentestDefaultTmpl, DefaultAssistantPrompt, ReporterDefaultPrompt, RetesterDefaultPrompt, settleWrapUpPrompt, plannerWrapUpDefault, mainAgentWrapUpDefault, genericWrapUpDefault, workerTaskTimeoutDefault, plannerTaskTimeoutDefault}
+	if len(templates) != 16 {
+		t.Fatal("external agent template inventory changed")
+	}
+	if err := locale.ValidateTextTranslations(templates); err != nil {
+		t.Fatal(err)
+	}
+	for _, lang := range locale.Languages() {
+		for _, english := range templates {
+			translated, ok := locale.Raw(lang, english)
+			if !ok {
+				t.Fatal("fallback masked a missing translation")
+			}
+			if CanonicalBuiltinPrompt(translated) != english {
+				t.Fatalf("%s stock prompt not recognized", lang)
+			}
+			if CanonicalBuiltinPrompt(translated+" custom edit") != translated+" custom edit" {
+				t.Fatal("edited prompt canonicalized")
+			}
+			for _, contract := range []string{"{{.Goal}}", "set_constraints", "add_task_scope", "report_finding", "update_finding_report", "record_finding_retest_result", "confidence", "evidence_version", "frontier_open=0", "100%", "40%"} {
+				if strings.Contains(english, contract) && !strings.Contains(translated, contract) {
+					t.Fatalf("%s prompt %.60s lost contract %q", lang, english, contract)
+				}
+			}
+			if strings.Contains(english, "confidence=observed") && (!strings.Contains(translated, "confidence") || !strings.Contains(translated, "observed")) {
+				t.Fatalf("%s lost confidence enum", lang)
+			}
+		}
+	}
+	old := PromptOverride
+	PromptOverride = nil
+	defer func() { PromptOverride = old }()
+	raw := "用户目标 / 원문 / {{.Goal}}"
+	rendered := renderSystem("planner", plannerDefaultTmpl, PlannerVars{Goal: raw}, locale.ZhHans)
+	if !strings.Contains(rendered, "你是") || !strings.Contains(rendered, raw) || strings.Contains(rendered, "%!") {
+		t.Fatalf("Chinese interpolation corrupted: %s", rendered)
+	}
+	if !strings.Contains(outputLanguageInstruction(locale.ZhHans), "不得翻译") {
+		t.Fatal("Chinese raw-content boundary missing")
+	}
+}
+
+func TestToolMetadataAllShippedLanguagesAndReverse(t *testing.T) {
+	original := NewToolSet(nil, "", locale.En).nodeDetail()
+	for _, lang := range locale.Languages() {
+		translated := localizeBuiltinTools([]actool.CoreTool{original}, lang)[0]
+		wanted := NewToolSet(nil, "", lang).nodeDetail()
+		if translated.Description() != wanted.Description() {
+			t.Fatalf("%s wrong stock description", lang)
+		}
+		translatedSchema, _ := json.Marshal(translated.InputSchema())
+		wantedSchema, _ := json.Marshal(wanted.InputSchema())
+		if string(translatedSchema) != string(wantedSchema) {
+			t.Fatalf("%s wrong schema descriptions", lang)
+		}
+		reversed := localizeBuiltinTools([]actool.CoreTool{translated}, locale.En)[0]
+		reversedSchema, _ := json.Marshal(reversed.InputSchema())
+		originalSchema, _ := json.Marshal(original.InputSchema())
+		if reversed.Description() != original.Description() || string(reversedSchema) != string(originalSchema) {
+			t.Fatal("stock metadata reverse translation failed")
+		}
+	}
+	editedSchema := cloneToolSchema(original.InputSchema())
+	property := editedSchema["properties"].(map[string]any)["id"].(map[string]any)
+	property["description"] = "用户 raw custom"
+	property["default"] = "用户 raw default"
+	edited := DecorateTool(original, "用户 raw prose", editedSchema)
+	translated := localizeBuiltinTools([]actool.CoreTool{edited}, locale.ZhHans)[0]
+	actual := translated.InputSchema()["properties"].(map[string]any)["id"].(map[string]any)
+	if translated.Description() != edited.Description() || actual["description"] != property["description"] || actual["default"] != property["default"] {
+		t.Fatal("custom fields/defaults modified")
+	}
+}

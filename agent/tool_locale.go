@@ -12,31 +12,27 @@ import (
 
 var builtinTranslations struct {
 	sync.Once
-	entries map[string][2]actool.CoreTool
+	entries map[string]map[locale.Lang]actool.CoreTool
 }
 
 // localizeBuiltinTools translates only matching bundled defaults, including exact
 // historical stock metadata. Edited prose/defaults and tool behavior are preserved.
 func localizeBuiltinTools(tools []actool.CoreTool, lang locale.Lang) []actool.CoreTool {
 	builtinTranslations.Do(func() {
-		builtinTranslations.entries = map[string][2]actool.CoreTool{}
-		for _, t := range NewToolSet(nil, "", locale.En).AllDomainTools() {
-			builtinTranslations.entries[t.Name()] = [2]actool.CoreTool{t, nil}
-		}
-		for _, t := range NewToolSet(nil, "", locale.Ko).AllDomainTools() {
-			p := builtinTranslations.entries[t.Name()]
-			p[1] = t
-			builtinTranslations.entries[t.Name()] = p
+		builtinTranslations.entries = map[string]map[locale.Lang]actool.CoreTool{}
+		for _, l := range locale.Languages() {
+			for _, t := range NewToolSet(nil, "", l).AllDomainTools() {
+				if builtinTranslations.entries[t.Name()] == nil {
+					builtinTranslations.entries[t.Name()] = map[locale.Lang]actool.CoreTool{}
+				}
+				builtinTranslations.entries[t.Name()][l] = t
+			}
 		}
 	})
 	out := append([]actool.CoreTool(nil), tools...)
 	for i, t := range out {
-		if p, ok := builtinTranslations.entries[t.Name()]; ok && p[0] != nil && p[1] != nil {
-			if lang == locale.Ko {
-				out[i] = TranslateToolMetadata(t, p[0], p[1])
-			} else {
-				out[i] = TranslateToolMetadata(t, p[1], p[0])
-			}
+		if variants, ok := builtinTranslations.entries[t.Name()]; ok {
+			out[i] = TranslateToolVariants(t, variants, lang)
 		}
 	}
 	return out
@@ -123,4 +119,20 @@ func translateSchemaDescriptions(current, source, target map[string]any, path st
 			}
 		}
 	}
+}
+
+// TranslateToolVariants recognizes exact stock metadata in every shipped source
+// language. Only descriptions are eligible; handlers and edited fields survive.
+func TranslateToolVariants(current actool.CoreTool, variants map[locale.Lang]actool.CoreTool, lang locale.Lang) actool.CoreTool {
+	target := variants[lang]
+	if target == nil {
+		target = variants[locale.En]
+	}
+	if current == nil || target == nil {
+		return current
+	}
+	for _, sourceLang := range locale.Languages() {
+		current = TranslateToolMetadata(current, variants[sourceLang], target)
+	}
+	return current
 }

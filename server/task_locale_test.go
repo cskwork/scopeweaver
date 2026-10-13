@@ -11,6 +11,8 @@ import (
 )
 
 func TestSpawnTaskInheritsRunOrParentLanguage(t *testing.T) {
+	previousDefault := locale.ServerDefault()
+	defer locale.SetServerDefault(previousDefault)
 	m, err := NewManager(t.TempDir(), "")
 	if err != nil {
 		t.Skipf("isolated PostgreSQL unavailable: %v", err)
@@ -27,7 +29,7 @@ func TestSpawnTaskInheritsRunOrParentLanguage(t *testing.T) {
 		name string
 		ctx  context.Context
 		want locale.Lang
-	}{{"parent", context.Background(), locale.Ko}, {"run", locale.WithLang(context.Background(), locale.En), locale.En}} {
+	}{{"parent", context.Background(), locale.Ko}, {"run", locale.WithLang(context.Background(), locale.En), locale.En}, {"chinese", locale.WithLang(context.Background(), locale.ZhHans), locale.ZhHans}} {
 		input, _ := json.Marshal(map[string]any{"description": "locale child " + tc.name, "goal": "no network target", "parent_ref": parent.ID})
 		result, err := s.toolSpawnTask().Call(tc.ctx, input, nil)
 		if err != nil || result.IsError {

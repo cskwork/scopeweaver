@@ -848,5 +848,13 @@ func firstLine(s string, max int) string {
 // isDefaultConversationTitle recognizes only exact built-in titles, including the
 // legacy Chinese title, so existing empty conversations can still be auto-titled.
 func isDefaultConversationTitle(title string) bool {
-	return title == "" || title == "新对话" || title == locale.Text(locale.En, "New conversation") || title == locale.Text(locale.Ko, "New conversation")
+	if title == "" || title == "新对话" {
+		return true
+	}
+	for _, lang := range locale.Languages() {
+		if title == locale.Text(lang, "New conversation") {
+			return true
+		}
+	}
+	return false
 }
