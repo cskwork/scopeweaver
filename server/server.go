@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strconv"
@@ -335,8 +336,10 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	cfg.KeepAlive, cfg.MaxConcurrent = p.KeepAlive, p.MaxConcurrent
+	cfg = s.applyLLMPolicy(cfg)
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if !cfg.Ready() {
 		return cfg, false
 	}
 	s.cfgMu.Lock()
@@ -347,8 +350,7 @@ func (s *Server) loadLLMConfig() (agent.Config, bool) {
 
 // saveLLMConfig persists the LLM config as the active "default" profile in PG.
 func (s *Server) saveLLMConfig(cfg agent.Config) error {
-	// cfg.Provider() already returns one of the three valid format strings
-	// (anthropic / openai / openai-responses), matching the DB CHECK constraint.
+	// cfg.Provider() returns a supported format matching the DB CHECK constraint.
 	format := cfg.Provider()
 	var id int64
 	// This legacy endpoint omits failover, transport, and output-limit parameters, so preserve stored values.
@@ -368,6 +370,12 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 				maxTokens, maxTokensField = p.MaxTokens, p.MaxTokensField
 				sessionHeaderKey = p.SessionHeaderKey
 				retry = p.Retry
+				if cfg.KeepAlive == "" {
+					cfg.KeepAlive = p.KeepAlive
+				}
+				if cfg.MaxConcurrent == 0 {
+					cfg.MaxConcurrent = p.MaxConcurrent
+				}
 				break
 			}
 		}
@@ -378,7 +386,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 		ContextWindowK: cfg.ContextWindowK, ThinkingType: cfg.ThinkingType, ReasoningEffort: cfg.ReasoningEffort, IsDefault: true,
 		Priority: priority, PoolExclude: poolExclude, Streaming: streaming,
 		MaxTokens: maxTokens, MaxTokensField: maxTokensField, SessionHeaderKey: sessionHeaderKey,
-		Retry: retry,
+		Retry: retry, KeepAlive: cfg.KeepAlive, MaxConcurrent: cfg.MaxConcurrent,
 	})
 	if err != nil {
 		return err
@@ -427,12 +435,19 @@ func maxTokensResolver(cfg agent.Config) func() int {
 
 // applyLLM (re)builds the planner/worker/main-agent from cfg and installs them on
 // the running engine as the GLOBAL active pair. Safe to call at runtime (UI configures LLM).
+func sameLLMConfig(a, b agent.Config) bool {
+	a.PolicyResolver = nil
+	b.PolicyResolver = nil
+	return reflect.DeepEqual(a, b)
+}
+
 func (s *Server) applyLLM(cfg agent.Config) error {
+	cfg = s.applyLLMPolicy(cfg)
 	var prov llm.Provider
 	// A persisted active profile must use the same cached provider as task chains
 	// and Agent bindings, otherwise each path owns a separate rate limiter.
 	if active, _ := s.m.pg.ActiveProfile(); active != nil {
-		if activeCfg, ok := s.loadProfileConfig(active.ID); ok && activeCfg == cfg {
+		if activeCfg, ok := s.loadProfileConfig(active.ID); ok && sameLLMConfig(activeCfg, cfg) {
 			prov, _, _ = s.providerForProfile(active.ID)
 		}
 	}
@@ -449,7 +464,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 		prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, profName, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
 		prov = bindSideProvider(prov, cfg, 0, profName)
 		// Process-wide in-flight cap (llm_max_concurrent); no-op when unset.
-		prov = newConcurrencyProvider(prov, s.m)
+		prov = s.profileConcurrencyProvider(prov, cfg)
 	}
 	s.cfgMu.Lock()
 	s.llmDirect = prov
@@ -479,6 +494,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 	s.chatAgent.SetGuard(s.chatGuard())
 	s.chatAgent.SetNonStreaming(nonStreamingResolver(cfg))
 	s.chatAgent.SetMaxTokens(maxTokensResolver(cfg))
+	s.chatAgent.SetNativeOllamaResolver(func() bool { return cfg.Format == llm.Format("ollama") })
 	s.chatAgent.SetNoaEnabled(s.m.NoaCompactionEnabled) // Experimental noa compaction, read once per run.
 	s.llmProv = prov
 	s.llmCfg = cfg
@@ -494,7 +510,7 @@ func (s *Server) applyLLM(cfg agent.Config) error {
 }
 
 // loadProfileConfig builds an agent.Config from a specific profile id (with its key).
-// ok=false when the profile is missing or has no api key.
+// ok=false when the profile is missing or not ready for its provider.
 func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	p, err := s.m.pg.ProfileByID(id)
 	if err != nil || p == nil {
@@ -508,8 +524,10 @@ func (s *Server) loadProfileConfig(id int64) (agent.Config, bool) {
 	cfg.Stream = p.Streaming
 	cfg.MaxTokens, cfg.MaxTokensField = p.MaxTokens, p.MaxTokensField
 	cfg.SessionHeaderKey = p.SessionHeaderKey
+	cfg.KeepAlive, cfg.MaxConcurrent = p.KeepAlive, p.MaxConcurrent
+	cfg = s.applyLLMPolicy(cfg)
 	s.applyProfileRetry(&cfg, p)
-	if cfg.APIKey == "" {
+	if !cfg.Ready() {
 		return cfg, false
 	}
 	return cfg, true
@@ -586,7 +604,7 @@ func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool)
 		prov = bindSideProvider(prov, cfg, id, p.Name)
 	}
 	// Process-wide in-flight cap (llm_max_concurrent); no-op when unset.
-	prov = newConcurrencyProvider(prov, s.m)
+	prov = s.profileConcurrencyProvider(prov, cfg)
 	s.provCacheMu.Lock()
 	if generation != s.provCacheGen {
 		s.provCacheMu.Unlock()
@@ -603,7 +621,7 @@ func (s *Server) providerForProfile(id int64) (llm.Provider, agent.Config, bool)
 }
 
 // chatAgentForProfile returns a ChatAgent built from a specific LLM profile, cached
-// per profile id. Returns nil if the profile is missing or has no API key.
+// per profile id. Returns nil if the profile is missing or not ready.
 func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	s.profMu.Lock()
 	cached := s.profChatAgents[id]
@@ -622,6 +640,7 @@ func (s *Server) chatAgentForProfile(id int64) *agent.ChatAgent {
 	ca.SetGuard(s.chatGuard())
 	ca.SetNonStreaming(nonStreamingResolver(cfg))
 	ca.SetMaxTokens(maxTokensResolver(cfg))
+	ca.SetNativeOllamaResolver(func() bool { return cfg.Format == llm.Format("ollama") })
 	ca.SetNoaEnabled(s.m.NoaCompactionEnabled) // Experimental noa compaction, read once per run.
 	s.profMu.Lock()
 	if ex := s.profChatAgents[id]; ex != nil { // lost the race → keep the winner
@@ -1313,6 +1332,8 @@ func (s *Server) getLLM(w http.ResponseWriter, r *http.Request) {
 // setLLM configures the LLM at runtime. A blank api_key keeps the existing key.
 func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		KeepAlive       string  `json:"keep_alive"`
+		MaxConcurrent   int     `json:"llm_max_concurrent"`
 		Provider        string  `json:"provider"`
 		Model           string  `json:"model"`
 		BaseURL         string  `json:"base_url"`
@@ -1329,6 +1350,8 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	cfg.KeepAlive, cfg.MaxConcurrent = req.KeepAlive, req.MaxConcurrent
+	cfg = s.applyLLMPolicy(cfg)
 	cfg.RatePerSecond, cfg.RatePerMinute = req.RatePerSecond, req.RatePerMinute
 	cfg.ThinkingType = req.ThinkingType
 	cfg.ReasoningEffort = req.ReasoningEffort
@@ -1338,12 +1361,12 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg.ContextWindowK = k
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.Ready() {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if !cfg.Ready() {
 		writeErr(w, 400, "api_key required")
 		return
 	}
@@ -1357,10 +1380,12 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.invalidateProfileAgents()
-	if _, ok := s.loadLLMConfig(); !ok {
+	savedCfg, ok := s.loadLLMConfig()
+	if !ok {
 		writeErr(w, 500, "saved provider is unavailable")
 		return
 	}
+	cfg = savedCfg
 	if err := s.applyLLM(cfg); err != nil {
 		writeErr(w, 400, locale.Text(responseLanguage(w), "provider init failed: ")+locale.ErrorMessage(responseLanguage(w), err))
 		return
@@ -1372,6 +1397,10 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 // testLLM makes a real minimal completion to verify the config works.
 func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	var req struct {
+		KeepAlive        string `json:"keep_alive"`
+		MaxConcurrent    int    `json:"llm_max_concurrent"`
+		ContextWindowK   int    `json:"context_window_k"`
+		MaxTokens        int    `json:"max_tokens"`
 		Provider         string `json:"provider"`
 		Model            string `json:"model"`
 		BaseURL          string `json:"base_url"`
@@ -1388,6 +1417,8 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg := agent.ConfigFrom(req.Provider, req.Model, req.BaseURL, req.APIKey, req.Proxy)
+	cfg.KeepAlive, cfg.MaxConcurrent = req.KeepAlive, req.MaxConcurrent
+	cfg = s.applyLLMPolicy(cfg)
 	// mirror production: send the SAME thinking params so a provider that rejects the
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType
@@ -1404,23 +1435,42 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// API-key precedence: submitted form, specified profile's stored key, then global configuration.
 	// Stored keys never return to the browser; testing an existing profile may require reading its key from DB.
 	// Likewise, fall back to the stored custom session-header name when omitted by the form.
-	if req.ProfileID != nil && (cfg.APIKey == "" || cfg.SessionHeaderKey == "") {
+	if req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			if cfg.APIKey == "" {
+			if cfg.APIKey == "" && (cfg.Provider() != "ollama" || p.Format == "ollama") {
 				cfg.APIKey = p.APIKey
 			}
 			if cfg.SessionHeaderKey == "" {
 				cfg.SessionHeaderKey = p.SessionHeaderKey
 			}
+			if req.KeepAlive == "" {
+				cfg.KeepAlive = p.KeepAlive
+			}
+			if req.ContextWindowK == 0 {
+				cfg.ContextWindowK = p.ContextWindowK
+			}
+			if req.MaxTokens == 0 {
+				cfg.MaxTokens = p.MaxTokens
+			}
 		}
 	}
-	if cfg.APIKey == "" {
+	if cfg.APIKey == "" && !cfg.Ready() {
 		s.cfgMu.Lock()
 		cfg.APIKey = s.llmCfg.APIKey
 		s.cfgMu.Unlock()
 	}
-	if cfg.APIKey == "" {
+	if !cfg.Ready() {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), "API key was not provided")})
+		return
+	}
+	if cfg.Provider() == "ollama" {
+		if req.ContextWindowK > 0 {
+			cfg.ContextWindowK = req.ContextWindowK
+		}
+		if req.MaxTokens > 0 {
+			cfg.MaxTokens = req.MaxTokens
+		}
+		s.testOllama(w, r, cfg)
 		return
 	}
 	// Do not apply configured retries to connection tests: their hard 30-second timeout combined with
@@ -3293,6 +3343,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) settingsPayload() map[string]any {
+	localOnly, effectiveCIDRs := s.effectiveLLMPolicy()
 	on, backend, braveKey, tavilyKey, proxy := s.m.WebSearch()
 	pyStored, _, _ := s.m.pg.GetSetting(settingPythonInterp)
 	concOn, concLimit := s.m.ConcurrencyLimit()
@@ -3316,7 +3367,10 @@ func (s *Server) settingsPayload() map[string]any {
 		"task_concurrency_limit":   concLimit,                   // Maximum simultaneous tasks, default 5 when enabled.
 		// Per-profile in-flight LLM request cap; 0 = unlimited. Each profile's
 		// provider gets its own semaphore, shared across its agents.
-		"llm_max_concurrent": s.m.LLMMaxConcurrent(),
+		"llm_max_concurrent":                s.m.LLMMaxConcurrent(),
+		"local_llm_only":                    localOnly,
+		"local_llm_allowed_cidrs":           s.savedLLMCIDRs(),
+		"local_llm_effective_allowed_cidrs": effectiveCIDRs,
 		// LLM failover is off by default. Enabled global-active agents switch profiles when unavailable.
 		// bind_fallback matters only with failover enabled and is also off by default.
 		"llm_pool_enabled":       s.m.LLMPoolEnabled(),
@@ -3393,7 +3447,9 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		ConcurrencyLimit   *int  `json:"task_concurrency_limit"`
 		// LLMMaxConcurrent caps simultaneous in-flight LLM requests per profile
 		// (0 = unlimited). Changing it rebuilds providers so the new cap takes hold.
-		LLMMaxConcurrent *int `json:"llm_max_concurrent"`
+		LLMMaxConcurrent     *int      `json:"llm_max_concurrent"`
+		LocalLLMOnly         *bool     `json:"local_llm_only"`
+		LocalLLMAllowedCIDRs *[]string `json:"local_llm_allowed_cidrs"`
 		// LLM failover and bound-profile fallback switches both require rebuilding provider chains;
 		// use the changed -> applyLLM path below.
 		LLMPoolEnabled      *bool `json:"llm_pool_enabled"`
@@ -3515,6 +3571,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	changed := false
+	if req.LocalLLMOnly != nil || req.LocalLLMAllowedCIDRs != nil {
+		if err := s.saveLLMPolicy(req.LocalLLMOnly, req.LocalLLMAllowedCIDRs); err != nil {
+			writeError(w, 400, err)
+			return
+		}
+		s.invalidateProfileAgents()
+		changed = true
+	}
 	if req.LLMPoolEnabled != nil {
 		if err := s.m.SetLLMPoolEnabled(*req.LLMPoolEnabled); err != nil {
 			writeError(w, 500, err)
@@ -3635,7 +3699,11 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	// so allow more than the generic 30 seconds. Do not prejudge configuration validity: this test lets the user
 	// verify it, and actual failures below provide better diagnostics than a preliminary guess.
 	probeQuery := "test"
-	if strings.TrimSpace(backend) == deepSeekWebSearchBackend {
+	if strings.EqualFold(strings.TrimSpace(backend), deepSeekWebSearchBackend) {
+		if strict, _ := s.m.effectiveLLMPolicy(); strict {
+			writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), agent.DeepSeekLocalOnlyMessage), "backend": backend})
+			return
+		}
 		cfg.DeepSeekBaseURL, cfg.DeepSeekAPIKey, cfg.DeepSeekModel = s.m.deepSeekSearchCreds()
 		wall = 120 * time.Second
 		// DeepSeek chooses its search terms; a vague "test" may cause it to answer without searching.

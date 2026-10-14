@@ -23,6 +23,7 @@ import (
 // into the frontier. It is the sole intent generator.
 type Planner struct {
 	findingRecorder   FindingRecorder
+	nativeOllamaFn    func() bool
 	prov              llm.Provider
 	model             string
 	tx                *transcript.Store                      // raw LLM conversation persistence (nil = off)
@@ -48,6 +49,9 @@ type Planner struct {
 	todoMu sync.Mutex
 	todos  map[int64]*actool.TodoStore
 }
+
+// SetNativeOllamaResolver resolves whether the current run uses native Ollama.
+func (p *Planner) SetNativeOllamaResolver(fn func() bool) { p.nativeOllamaFn = fn }
 
 func NewPlanner(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *Planner {
 	return &Planner{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, todos: map[int64]*actool.TodoStore{}}
@@ -405,6 +409,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	}
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
 	noaSession := fmt.Sprintf("exp%d-planner", ts.ID())
+	secureWebSearch(&opts, p.webSearch.PolicyResolver)
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: p.nativeOllamaFn != nil && p.nativeOllamaFn(), ContextWindow: p.compactionWindow()})
 	enableNoa(&opts, p.noaEnabledFn, p.workDir, noaSession, noaWarn(noaSession))
 	// Situation data (completed intents and full graph) goes in this round's user input,
 	// alongside instructions and persistent todos, which are regenerable model notes.

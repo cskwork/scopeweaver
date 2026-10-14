@@ -15,13 +15,15 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
 	"strings"
 	"time"
 
+	runtimeconfig "github.com/Autumn-27/artex/config"
+	"github.com/Autumn-27/artex/llmnet"
 	"github.com/Autumn-27/artex/llmrec"
+	"github.com/Autumn-27/artex/ollama"
 	"github.com/Autumn-27/norma/agentcore"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
@@ -31,10 +33,17 @@ import (
 
 // Config describes the LLM backend resolved from the environment.
 type Config struct {
-	Format  llm.Format
-	BaseURL string
-	APIKey  string
-	Model   string
+	PolicyResolver func() (bool, []string)
+
+	KeepAlive            string
+	MaxConcurrent        int
+	LocalLLMOnly         bool
+	LocalLLMAllowedCIDRs []string
+	JSONOutput           bool
+	Format               llm.Format
+	BaseURL              string
+	APIKey               string
+	Model                string
 	// Proxy routes all LLM requests through the given proxy URL (http/https/socks5,
 	// optionally with user:pass@ credentials). Empty means direct — it does NOT
 	// fall back to the standard *_PROXY environment variables.
@@ -114,6 +123,18 @@ const (
 // a 200K default; otherwise clamped to [32K, 1M] so compaction stays effective.
 func (c Config) CompactionWindow() int {
 	k := c.ContextWindowK
+	if c.Provider() == "ollama" {
+		if k <= 0 {
+			k = 32
+		}
+		if k < 16 {
+			k = 16
+		}
+		if k > maxWindowK {
+			k = maxWindowK
+		}
+		return k * 1024
+	}
 	if k <= 0 {
 		k = defaultWindowK
 	}
@@ -144,52 +165,48 @@ func compactionConfig(windowTokens int) *compaction.Config {
 //	ARTEX_LLM_PROXY    = proxy URL        (optional; http/https/socks5)
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY         = credentials
 func FromEnv() (Config, bool) {
-	prov := os.Getenv("ARTEX_LLM_PROVIDER")
-	anthKey := os.Getenv("ANTHROPIC_API_KEY")
-	oaiKey := os.Getenv("OPENAI_API_KEY")
-
+	file := runtimeconfig.ResolveLLM()
+	prov := file.Provider
 	if prov == "" {
 		switch {
-		case anthKey != "":
+		case os.Getenv("ANTHROPIC_API_KEY") != "":
 			prov = "anthropic"
-		case oaiKey != "":
+		case os.Getenv("OPENAI_API_KEY") != "":
 			prov = "openai"
 		default:
 			return Config{}, false
 		}
 	}
-
-	c := Config{
-		BaseURL: os.Getenv("ARTEX_LLM_BASE_URL"),
-		Model:   os.Getenv("ARTEX_LLM_MODEL"),
-		Proxy:   strings.TrimSpace(os.Getenv("ARTEX_LLM_PROXY")),
-		// Streaming defaults on; ARTEX_LLM_STREAM=false/0/off explicitly disables it.
-		Stream: !isFalsy(os.Getenv("ARTEX_LLM_STREAM")),
-	}
-	switch prov {
-	case "openai":
-		c.Format = llm.FormatOpenAI
-		c.APIKey = oaiKey
-		if c.Model == "" {
-			c.Model = "gpt-4o"
-		}
-	case "openai-responses":
-		c.Format = llm.FormatOpenAIResponses
-		c.APIKey = oaiKey
-		if c.Model == "" {
-			c.Model = "gpt-5"
-		}
-	default:
-		c.Format = llm.FormatAnthropic
-		c.APIKey = anthKey
-		if c.Model == "" {
-			c.Model = "claude-opus-4-8"
+	c := ConfigFrom(prov, file.Model, file.BaseURL, file.APIKey, file.Proxy)
+	// Native Ollama never falls back to a cloud credential.
+	_, explicitKey := runtimeconfig.LLMEnv("API_KEY")
+	if c.APIKey == "" && !explicitKey && (c.Provider() == "ollama" || !llmnet.IsLocalEndpoint(c.BaseURL)) {
+		switch c.Provider() {
+		case "ollama":
+			c.APIKey = os.Getenv("OLLAMA_API_KEY")
+		case "anthropic":
+			c.APIKey = os.Getenv("ANTHROPIC_API_KEY")
+		default:
+			c.APIKey = os.Getenv("OPENAI_API_KEY")
 		}
 	}
-	if c.APIKey == "" {
-		return Config{}, false
+	if file.Stream != nil {
+		c.Stream = *file.Stream
 	}
-	return c, true
+	if file.ContextWindowK != 0 {
+		c.ContextWindowK = file.ContextWindowK
+	}
+	if file.MaxTokens != 0 {
+		c.MaxTokens = file.MaxTokens
+	}
+	if file.KeepAlive != "" {
+		c.KeepAlive = file.KeepAlive
+	}
+	c.MaxConcurrent = file.MaxConcurrent
+	c.ThinkingType = file.ThinkingType
+	c.ReasoningEffort = file.ReasoningEffort
+	c.LocalLLMOnly, c.LocalLLMAllowedCIDRs = runtimeconfig.LocalLLMPolicy()
+	return c, c.Ready()
 }
 
 // ConfigFrom builds a Config from UI-provided strings (provider defaults to
@@ -205,6 +222,15 @@ func ConfigFrom(provider, model, baseURL, apiKey, proxy string) Config {
 		Stream:  true, // Streaming defaults on; callers override from the profile.
 	}
 	switch strings.TrimSpace(provider) {
+	case "ollama":
+		c.Format = llm.Format("ollama")
+		c.BaseURL = ollama.NormalizeBaseURL(c.BaseURL)
+		c.KeepAlive = ollama.DefaultKeepAlive
+		c.ContextWindowK = 32
+		c.MaxTokens = 4096
+		if c.Model == "" {
+			c.Model = ollama.DefaultModel
+		}
 	case "openai":
 		c.Format = llm.FormatOpenAI
 		// provider appends "/chat/completions"; tolerate a full endpoint URL.
@@ -243,6 +269,8 @@ func isFalsy(s string) bool {
 // Provider returns the short provider name ("anthropic"/"openai").
 func (c Config) Provider() string {
 	switch c.Format {
+	case llm.Format("ollama"):
+		return "ollama"
 	case llm.FormatOpenAI:
 		return "openai"
 	case llm.FormatOpenAIResponses:
@@ -255,9 +283,23 @@ func (c Config) Provider() string {
 // limiter lives on the single provider instance — so planner + all workers +
 // main agent (which share this provider) are bounded by one shared rate limit.
 func (c Config) NewProvider() (llm.Provider, error) {
-	client, err := quotaAwareHTTPClient(c.Proxy, c.SessionHeaderKey)
+	client, err := c.HTTPClient()
 	if err != nil {
 		return nil, err
+	}
+	if c.Provider() == "ollama" {
+		native, err := ollama.NewClient(c.BaseURL, c.APIKey, client)
+		if err != nil {
+			return nil, err
+		}
+		return llm.RateLimited(ollama.NewProvider(native, c.Model, ollama.Options{ContextWindow: c.CompactionWindow(), KeepAlive: c.KeepAlive, ThinkingType: c.ThinkingType, MaxTokens: c.MaxTokens, JSON: c.JSONOutput, ConnectAttempts: c.Retry.ConnectAttempts, ConnectInterval: c.Retry.ConnectInterval, EmptyAttempts: c.Retry.EmptyAttempts, EmptyInterval: c.Retry.EmptyInterval}), llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}), nil
+	}
+	// Block SDK environment-key inheritance for deliberately keyless local endpoints.
+	if c.APIKey == "" {
+		if !llmnet.IsLocalEndpoint(c.BaseURL) {
+			return nil, locale.Errorf("llm: API key required for non-local compatible endpoint")
+		}
+		c.APIKey = "scopeweaver-local"
 	}
 	lc := llm.Config{
 		Format:     c.Format,
@@ -405,26 +447,29 @@ func requestBodySnapshot(req *http.Request) string {
 	return string(b)
 }
 
-func quotaAwareHTTPClient(proxy, sessionHeaderKey string) (*http.Client, error) {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	proxy = strings.TrimSpace(proxy)
-	if proxy == "" {
-		transport.Proxy = nil // Empty means direct; do not fall back to HTTP_PROXY/HTTPS_PROXY environment variables.
+// Ready allows keyless native Ollama and explicit local compatible servers.
+func (c Config) Ready() bool {
+	return c.APIKey != "" || c.Provider() == "ollama" || llmnet.IsLocalEndpoint(c.BaseURL)
+}
+
+// HTTPClient is shared by inference, metadata, diagnostics, and judge consumers.
+func (c Config) HTTPClient() (*http.Client, error) {
+	var client *http.Client
+	var err error
+	if c.PolicyResolver != nil {
+		client, err = llmnet.NewClientWithPolicy(c.Proxy, c.PolicyResolver)
 	} else {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return nil, locale.Errorf("llm: invalid proxy %q: %w", proxy, err)
-		}
-		switch proxyURL.Scheme {
-		case "http", "https", "socks5":
-		case "":
-			return nil, locale.Errorf("llm: proxy %q missing scheme (use http://, https:// or socks5://)", proxy)
-		default:
-			return nil, locale.Errorf("llm: unsupported proxy scheme %q (use http, https or socks5)", proxyURL.Scheme)
-		}
-		transport.Proxy = http.ProxyURL(proxyURL)
+		client, err = llmnet.NewClient(c.Proxy, c.LocalLLMOnly, c.LocalLLMAllowedCIDRs)
 	}
-	return &http.Client{Transport: quotaAwareTransport{base: transport, sessionHeaderKey: strings.TrimSpace(sessionHeaderKey)}}, nil
+	if err != nil {
+		return nil, err
+	}
+	client.Transport = quotaAwareTransport{base: client.Transport, sessionHeaderKey: strings.TrimSpace(c.SessionHeaderKey)}
+	return client, nil
+}
+
+func quotaAwareHTTPClient(proxy, sessionHeaderKey string) (*http.Client, error) {
+	return (Config{Proxy: proxy, SessionHeaderKey: sessionHeaderKey}).HTTPClient()
 }
 
 // logTestConnection prints the raw HTTP status code(s) and response body of a

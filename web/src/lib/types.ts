@@ -934,6 +934,10 @@ export interface Settings {
   // Per-profile cap on simultaneous in-flight LLM requests; 0 = unlimited.
   // Each profile's provider gets its own semaphore, shared across its agents.
   llm_max_concurrent?: number;
+  // Opt-in zero-egress policy for LLM HTTP only; defaults to false. An environment true cannot be disabled here.
+  local_llm_only?: boolean;
+  // Extra CIDRs trusted in addition to loopback/RFC1918/IPv6 ULA while local_llm_only is on.
+  local_llm_allowed_cidrs?: string[];
   // LLM failover rotation defaults off. Unbound Agents switch to the next profile when the current one fails
   // due to insufficient balance, invalid key, rate limiting, or service errors.
   llm_pool_enabled?: boolean; // Defaults to false.
@@ -1029,11 +1033,13 @@ export interface NotificationDelivery {
 export interface LLMProfile {
   id: string;
   name: string;
-  format: "openai" | "anthropic" | "openai-responses";
+  format: "openai" | "anthropic" | "openai-responses" | "ollama";
   base_url?: string;
   proxy?: string;
   model: string;
   api_key_hint?: string;
+  // True for native Ollama and verified local compatible endpoints; absent on older servers.
+  api_key_optional?: boolean;
   rate_per_second: number;
   rate_per_minute: number;
   context_window_k?: number;
@@ -1059,6 +1065,37 @@ export interface LLMProfile {
   session_header_key?: string;
   // Profile overrides for connection/empty-response/safe-window retries; blank/all zeros inherit global policy.
   retry?: LLMRetryOverride;
+  // Ollama model residency sent as keep_alive (e.g. 30m); empty uses the backend default.
+  keep_alive?: string;
+  // Per-profile in-flight request cap; 0 inherits the global setting (Ollama: one per endpoint).
+  llm_max_concurrent?: number;
+}
+
+// POST /api/llm/test. The first five fields are shared by every format; the rest are
+// native Ollama diagnostics and are absent for cloud and compatible providers.
+export interface LLMTestResult {
+  ok: boolean;
+  error?: string;
+  latency_ms?: number;
+  model?: string;
+  reply?: string;
+  load_duration_ms?: number;
+  tokens_per_second?: number;
+  context_length?: number;
+  context_verified?: boolean;
+  capabilities?: string[];
+  tools_supported?: boolean;
+  tool_call_verified?: boolean;
+}
+
+// POST /api/llm/models model_details item (native Ollama only). error means /api/show failed,
+// so capabilities are unknown rather than absent.
+export interface LLMModelDetail {
+  model?: string;
+  name?: string;
+  details?: { parameter_size?: string; quantization_level?: string; family?: string };
+  capabilities?: string[];
+  error?: string;
 }
 
 // LLM retry policy.

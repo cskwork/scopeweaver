@@ -105,6 +105,8 @@ jobs:
           sh -n start.sh
       - name: Test local installer with isolated fixtures
         run: bash e2e/install-local.sh
+      - name: Test Compose credential bootstrap
+        run: bash e2e/compose-credentials.sh
       - name: Test third-party notice packaging and repair guards
         run: |
           bash e2e/package-notices.sh

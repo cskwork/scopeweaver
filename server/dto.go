@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/artex/traffic"
@@ -591,6 +592,8 @@ func agentDTOs(in []*db.Agent, langs ...locale.Lang) []AgentDTO {
 // ---- LLMProfile (frontend "LLMProfile") — string id ----
 
 type LLMProfileDTO struct {
+	KeepAlive       string  `json:"keep_alive"`
+	MaxConcurrent   int     `json:"llm_max_concurrent"`
 	ID              string  `json:"id"`
 	Name            string  `json:"name"`
 	Format          string  `json:"format"`
@@ -598,6 +601,7 @@ type LLMProfileDTO struct {
 	Proxy           string  `json:"proxy,omitempty"`
 	Model           string  `json:"model"`
 	APIKeyHint      string  `json:"api_key_hint,omitempty"`
+	APIKeyOptional  bool    `json:"api_key_optional"`
 	RatePerSecond   float64 `json:"rate_per_second"`
 	RatePerMinute   float64 `json:"rate_per_minute"`
 	ContextWindowK  int     `json:"context_window_k"`
@@ -626,13 +630,15 @@ type LLMProfileDTO struct {
 
 func llmProfileDTO(p *db.LLMProfile) LLMProfileDTO {
 	return LLMProfileDTO{
-		ID:               i64s(p.ID),
+		ID:        i64s(p.ID),
+		KeepAlive: p.KeepAlive, MaxConcurrent: p.MaxConcurrent,
 		Name:             p.Name,
 		Format:           p.Format,
 		BaseURL:          p.BaseURL,
 		Proxy:            p.Proxy,
 		Model:            p.Model,
 		APIKeyHint:       p.APIKeyHint,
+		APIKeyOptional:   agent.ConfigFrom(p.Format, p.Model, p.BaseURL, "", p.Proxy).Ready(),
 		RatePerSecond:    p.RatePerSecond,
 		RatePerMinute:    p.RatePerMinute,
 		ContextWindowK:   p.ContextWindowK,

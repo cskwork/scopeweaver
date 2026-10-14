@@ -46,6 +46,9 @@ func (s *Server) startTaskEngine(t *Task) {
 		return
 	}
 	ctx = locale.WithLang(ctx, taskLanguage(s.m.pg, t.ID))
+	if !s.prepareTaskOllama(ctx, t) {
+		return
+	}
 	s.engine.emitActivity(t, db.Activity{Worker: "planner", Kind: "round",
 		Summary: locale.Text(locale.FromContext(ctx), "Round 0: goal decomposition")})
 	goals := s.createGoals(ctx, t, func(r db.Activity) {
@@ -244,6 +247,9 @@ func (s *Server) startAdmittedTask(t *Task, mode string) {
 		}()
 		return
 	}
+	if !s.prepareTaskOllama(s.ctx, t) {
+		return
+	}
 	s.engine.Run(s.ctx, t)
 	s.engine.Resume(t)
 	// Run returns early for an already-started task. Explicitly ensure a timeout
@@ -386,7 +392,7 @@ func (s *Server) createGoals(ctx context.Context, t *Task, emit func(db.Activity
 	taskID, _ := strconv.ParseInt(t.ID, 10, 64)
 	s.engine.BeginLLMCall(t.ID)
 	goalRuntime := s.agentsForTask(t).runtime
-	decomposed := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit)
+	decomposed := agent.DecomposeGoalsWithProvider(ctx, goalRuntime, s.m.dir, t.Goal, t.Description, as, t.Store, taskID, goalRuntime.nonStreaming(), goalRuntime.maxTokens(), emit, agent.RuntimePolicy{NativeOllama: goalRuntime.nativeOllama(), ContextWindow: goalRuntime.CompactionWindow()})
 	s.engine.EndLLMCall(t.ID)
 	for _, g := range decomposed {
 		if strings.TrimSpace(g.Text) != "" {

@@ -90,8 +90,15 @@ separately labeled Coding Plan reference. Add your own API key; template selecti
 activate, or contact a provider. Coding Plan use is restricted to officially supported tools, and
 ScopeWeaver is not listed. See [provider setup and support limits](docs/llm-providers.md).
 
+Optional **native Ollama** profiles run without an API key. Three templates cover Ollama on the same
+machine, on the host from Docker, and the opt-in `docker compose --profile local-llm` service. They
+send a 32K context (`num_ctx` 32,768), one request at a time and a 30-minute keep-alive. An opt-in
+**local-only LLM network** setting (off by default) restricts LLM connections to local or trusted
+addresses. Cloud formats, custom URLs and proxies keep working. See
+[native Ollama](docs/llm-providers.md#native-ollama-local-inference).
+
 > Requires a **PostgreSQL** database. Exploration needs an **LLM** configured
-> (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, or set it in the UI).
+> (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, a keyless Ollama profile, or set it in the UI).
 
 ### Option 1: one-click install script (recommended)
 
@@ -331,7 +338,9 @@ internal agents and model configuration intact.
 
 **LLM**: `export ANTHROPIC_API_KEY=sk-...` (or `OPENAI_API_KEY`), or set it on the UI's "LLM
 configuration" page. Optional: `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` /
-`ARTEX_LLM_PROXY`.
+`ARTEX_LLM_PROXY`. Each `SCOPEWEAVER_LLM_*` alias overrides its `ARTEX_LLM_*` counterpart; Ollama
+also accepts `CONTEXT_WINDOW_K`, `MAX_CONCURRENT`, `KEEP_ALIVE` and `MAX_TOKENS` suffixes
+([full list](docs/llm-providers.md#environment-and-configuration)).
 
 **Concurrency**: the number of work agents per task is set in "System settings" (default 3).
 

@@ -58,6 +58,7 @@ import type {
   InterceptRule,
   JudgeConfig,
   JudgeUsage,
+  LLMModelDetail,
   LLMPoolStatus,
   LLMProfile,
   LLMRecordDetail,
@@ -65,6 +66,7 @@ import type {
   LLMRetryOverride,
   LLMRetryPolicy,
   LLMTask,
+  LLMTestResult,
   MCPServer,
   MCPTool,
   MissingSkill,
@@ -960,9 +962,12 @@ export const api = {
     profile_id?: number,
     streaming = true, // Test the profile's actual transport mode so nonstreaming failures are caught before conversations.
     session_header_key = "", // Nonempty sends this custom header on test requests with a one-time session ID.
+    // Native Ollama uses these for num_ctx, residency and num_predict; other formats ignore them.
+    native: { context_window_k?: number; keep_alive?: string; max_tokens?: number; llm_max_concurrent?: number } = {},
   ) =>
     // reply contains truncated actual model output; an entirely empty response fails the backend test.
-    post<{ ok: boolean; error?: string; latency_ms?: number; model?: string; reply?: string }>("/llm/test", {
+    post<LLMTestResult>("/llm/test", {
+      ...native,
       provider,
       model,
       base_url,
@@ -995,6 +1000,8 @@ export const api = {
     max_tokens_field?: string; // Empty string defaults to max_tokens; max_completion_tokens applies only to OpenAI format.
     session_header_key?: string; // Nonempty header names send the current session ID on each request; empty omits the header.
     retry?: LLMRetryOverride; // Per-profile retry overrides; zeros inherit global retry policy.
+    keep_alive?: string; // Ollama residency such as 30m; empty uses the backend default.
+    llm_max_concurrent?: number; // 0 inherits the global cap (Ollama: one request per endpoint).
   }) => post<{ id: number }>("/llm/profiles", p),
   deleteLLMProfile: (id: string) => del<{ deleted: number }>(`/llm/profiles/${id}`),
   activateLLMProfile: (id: string) => post<{ ok: boolean }>("/llm/profiles/active", { id: Number(id) }),
@@ -1006,7 +1013,7 @@ export const api = {
   llmRetryPolicy: () => get<LLMRetryPolicy>("/llm/retry-policy"),
   saveLLMRetryPolicy: (p: LLMRetryPolicy) => post<LLMRetryPolicy>("/llm/retry-policy", p),
   fetchLLMModels: (provider: string, base_url: string, api_key: string, proxy = "", profile_id?: number) =>
-    post<{ ok: boolean; error?: string; models?: string[] }>("/llm/models", {
+    post<{ ok: boolean; error?: string; models?: string[]; model_details?: LLMModelDetail[] }>("/llm/models", {
       provider,
       base_url,
       api_key,

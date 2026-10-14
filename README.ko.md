@@ -84,8 +84,15 @@ LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 +
 않습니다. Coding Plan은 공식 지원 도구에서만 사용할 수 있으며 ScopeWeaver는 목록에 없습니다.
 [제공자 설정과 지원 범위](docs/ko/llm-providers.md)를 확인하세요.
 
+선택 사항인 **기본 Ollama** 프로필은 API 키 없이 동작합니다. 같은 컴퓨터의 Ollama, Docker에서
+접근하는 호스트 Ollama, 선택형 `docker compose --profile local-llm` 서비스용 템플릿 세 개를
+제공합니다. 32K 문맥(`num_ctx` 32,768), 한 번에 요청 1개, 30분 모델 유지 시간을 사용합니다.
+선택형 **로컬 전용 LLM 네트워크** 설정(기본값 꺼짐)은 LLM 연결을 로컬 또는 신뢰 주소로
+제한합니다. 클라우드 형식, 사용자 지정 URL, 프록시는 그대로 사용할 수 있습니다.
+[기본 Ollama](docs/ko/llm-providers.md#기본-ollama로컬-추론)를 참고하세요.
+
 > **PostgreSQL** 데이터베이스가 필요합니다. 탐색에는 **LLM** 설정이 필요합니다
-> (`ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY`, UI에서 설정해도 됩니다).
+> (`ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY`, 키 없는 Ollama 프로필, UI에서 설정해도 됩니다).
 
 ### 방법 1: 원클릭 설치 스크립트 (권장)
 
@@ -326,7 +333,9 @@ Pi는 전용 확장을 사용합니다. 기본값은 읽기 전용이며, 작업
 
 **LLM**: `export ANTHROPIC_API_KEY=sk-...`(또는 `OPENAI_API_KEY`), 또는 UI의 "LLM 설정"
 페이지에서 입력합니다. 선택: `ARTEX_LLM_PROVIDER` / `ARTEX_LLM_MODEL` / `ARTEX_LLM_BASE_URL` /
-`ARTEX_LLM_PROXY`.
+`ARTEX_LLM_PROXY`. `SCOPEWEAVER_LLM_*` 별칭은 같은 이름의 `ARTEX_LLM_*`보다 우선합니다. Ollama는
+`CONTEXT_WINDOW_K`, `MAX_CONCURRENT`, `KEEP_ALIVE`, `MAX_TOKENS` 접미사도 받습니다
+([전체 목록](docs/ko/llm-providers.md#환경-변수와-설정-파일)).
 
 **동시성**: 작업당 work 에이전트 수는 "시스템 설정"에서 지정합니다 (기본 3).
 

@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -1830,6 +1829,10 @@ func (s *Server) pgSaveProfile(w http.ResponseWriter, r *http.Request) {
 	// Negative output limits are meaningless; normalize to zero, omitting the request field. Field-name selection
 	// applies only to Chat Completions; Anthropic and OpenAI Responses fix their field names, so storing it misleads readers.
 	// Clear it for non-OpenAI formats and unknown values, avoiding a user-facing DB CHECK error.
+	if p.MaxConcurrent < 0 {
+		writeErr(w, 400, "profile llm_max_concurrent must be zero or greater (0 uses the global setting; native Ollama uses 1)")
+		return
+	}
 	if p.MaxTokens < 0 {
 		p.MaxTokens = 0
 	}
@@ -2010,10 +2013,17 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 	apiKey := strings.TrimSpace(req.APIKey)
 	if apiKey == "" && req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			apiKey = p.APIKey
+			if req.Provider != "ollama" || p.Format == "ollama" {
+				apiKey = p.APIKey
+			}
 		}
 	}
-	if apiKey == "" {
+	cfg := s.applyLLMPolicy(agent.ConfigFrom(req.Provider, "", req.BaseURL, apiKey, req.Proxy))
+	if req.Provider == "ollama" {
+		s.listOllamaModels(w, r, cfg)
+		return
+	}
+	if !cfg.Ready() {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), "API key was not provided")})
 		return
 	}
@@ -2067,14 +2077,12 @@ func (s *Server) pgListModels(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Build HTTP client with optional proxy.
-	transport := &http.Transport{}
-	if p := strings.TrimSpace(req.Proxy); p != "" {
-		if pu, err := url.Parse(p); err == nil {
-			transport.Proxy = http.ProxyURL(pu)
-		}
+	client, err := cfg.HTTPClient()
+	if err != nil {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": err.Error()})
+		return
 	}
-	client := &http.Client{Transport: transport, Timeout: 30 * time.Second}
+	client.Timeout = 30 * time.Second
 
 	// Try each candidate; return the first that yields a non-empty model list.
 	var lastErr string

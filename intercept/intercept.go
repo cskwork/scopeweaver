@@ -333,14 +333,28 @@ type JudgeConfig struct {
 // judgeConfig reads the judge configuration from settings, applying defaults for
 // missing/invalid keys. Read fresh on each fallback judgement — the LLM call that
 // follows dwarfs a few KV reads, and freshness avoids a cache-invalidation path.
-func (i *Interceptor) judgeConfig() JudgeConfig {
+func (i *Interceptor) judgeConfig(resolveProfile ...bool) JudgeConfig {
+	profileID := int64(i.getSettingInt(settingJudgeProfileID, 0))
+	var profile *db.LLMProfile
+	if profileID == 0 {
+		profile, _ = i.db.ActiveProfile()
+	} else {
+		profile, _ = i.db.ProfileByID(profileID)
+	}
+	timeoutDefault, failDefault := defaultJudgeTimeoutSecs, defaultJudgeFailAction
+	if profile != nil && profile.Format == "ollama" {
+		timeoutDefault, failDefault = 60, "ask"
+	}
 	c := JudgeConfig{
 		Enabled:           i.db.GetBool(settingJudgeEnabled, false),
-		ProfileID:         int64(i.getSettingInt(settingJudgeProfileID, 0)),
-		TimeoutSeconds:    i.getSettingInt(settingJudgeTimeoutSecs, defaultJudgeTimeoutSecs),
-		FailAction:        i.getSettingChoice(settingJudgeFailAction, defaultJudgeFailAction, "allow", "ask", "deny"),
+		ProfileID:         profileID,
+		TimeoutSeconds:    i.getSettingInt(settingJudgeTimeoutSecs, timeoutDefault),
+		FailAction:        i.getSettingChoice(settingJudgeFailAction, failDefault, "allow", "ask", "deny"),
 		AskTimeoutSeconds: i.getSettingInt(settingJudgeAskTimeoutSecs, defaultJudgeAskTimeoutSecs),
 		AskTimeoutAction:  i.getSettingChoice(settingJudgeAskTimeoutAction, defaultJudgeAskTimeoutAction, "allow", "deny"),
+	}
+	if len(resolveProfile) > 0 && resolveProfile[0] && profile != nil {
+		c.ProfileID = profile.ID
 	}
 	// Prompt: stored value if non-empty, else the built-in template.
 	if v, ok, _ := i.db.GetSetting(settingJudgePrompt); ok && strings.TrimSpace(v) != "" {
@@ -349,7 +363,7 @@ func (i *Interceptor) judgeConfig() JudgeConfig {
 		c.Prompt = DefaultJudgePrompt
 	}
 	if c.TimeoutSeconds <= 0 {
-		c.TimeoutSeconds = defaultJudgeTimeoutSecs
+		c.TimeoutSeconds = timeoutDefault
 	}
 	if c.AskTimeoutSeconds <= 0 {
 		c.AskTimeoutSeconds = defaultJudgeAskTimeoutSecs
@@ -427,7 +441,7 @@ func (i *Interceptor) SetJudgeConfig(c JudgeConfig) error {
 // falls back to the configured FailAction. Ask verdicts carry the human-approval
 // timeout so the existing HandleAsk consumes them unchanged.
 func (i *Interceptor) Judge(ctx context.Context, tool string, arguments json.RawMessage) (Decision, bool) {
-	cfg := i.judgeConfig()
+	cfg := i.judgeConfig(true) // Resolve active profile and its defaults together before creating the deadline.
 	i.mu.RLock()
 	rv := i.reviewer
 	i.mu.RUnlock()

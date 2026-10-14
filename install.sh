@@ -18,6 +18,18 @@ die(){  printf '\033[31m[x]\033[0m %s\n' "$*" >&2; exit 1; }
 ask(){  local p="$1" d="${2:-}" a; read -rp "$p${d:+ [$d]}: " a; echo "${a:-$d}"; }
 rand(){ head -c 18 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24; }
 
+# Detect only; configuring ScopeWeaver never changes the host Ollama daemon.
+choose_host_ollama(){
+  OLLAMA_MODEL=''
+  if command -v curl >/dev/null 2>&1 && curl -fsS --connect-timeout 1 --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null 2>&1; then
+    info "$(msg 'Detected Ollama on the host' '호스트에서 Ollama를 감지했습니다')" >&2
+    if [ "$(ask "$(msg 'Configure ScopeWeaver to use host Ollama? (y/n)' 'ScopeWeaver에서 호스트 Ollama를 사용할까요? (y/n)')" n)" = y ]; then
+      OLLAMA_MODEL="$(ask "$(msg 'Downloaded model name (no download will be started)' '이미 다운로드한 모델 이름 (다운로드하지 않습니다)')" 'qwen2.5-coder:7b')"
+      case "$OLLAMA_MODEL" in *[!A-Za-z0-9_./:@-]*|'') die "$(msg 'Invalid model name' '잘못된 모델 이름')" ;; esac
+    fi
+  fi
+}
+
 # ── docker environment detection / auto-install ─────────────
 ensure_docker(){
   if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
@@ -49,6 +61,13 @@ install_docker(){
     sed -i.bak "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pw}|" .env
     sed -i.bak "s|^ANTHROPIC_API_KEY=.*|ANTHROPIC_API_KEY=${key}|" .env
     rm -f .env.bak
+    choose_host_ollama
+    if [ -n "$OLLAMA_MODEL" ]; then
+      sed -i.bak 's|^SCOPEWEAVER_LLM_PROVIDER=.*|SCOPEWEAVER_LLM_PROVIDER=ollama|' .env
+      sed -i.bak "s|^SCOPEWEAVER_LLM_MODEL=.*|SCOPEWEAVER_LLM_MODEL=${OLLAMA_MODEL}|" .env
+      sed -i.bak 's|^SCOPEWEAVER_LLM_BASE_URL=.*|SCOPEWEAVER_LLM_BASE_URL=http://host.docker.internal:11434|' .env
+      rm -f .env.bak
+    fi
     ok "$(msg '.env generated (POSTGRES_PASSWORD set)' '.env 생성 완료 (POSTGRES_PASSWORD 설정됨)')"
   else
     info "$(msg 'Reusing existing .env' '기존 .env를 그대로 사용합니다')"
@@ -82,7 +101,15 @@ install_local(){
       DB_SSL="$(ask "$(msg 'sslmode (disable/require)' 'sslmode (disable/require)')" disable)" ;;
   esac
 
-  # Generate config.json
+  # Existing configuration belongs to the operator; never overwrite it.
+  if [ -f config.json ]; then
+    info "$(msg 'Reusing existing config.json' '기존 config.json을 그대로 사용합니다')"
+  else
+    choose_host_ollama
+    local llm_json=''
+    if [ -n "$OLLAMA_MODEL" ]; then
+      llm_json=", \"llm\": {\"provider\": \"ollama\", \"base_url\": \"http://127.0.0.1:11434\", \"model\": \"${OLLAMA_MODEL}\", \"context_window_k\": 32, \"keep_alive\": \"30m\", \"llm_max_concurrent\": 1}"
+    fi
   cat > config.json <<JSON
 {
   "database": {
@@ -92,10 +119,11 @@ install_local(){
     "password": "${DB_PASS}",
     "dbname": "${DB_NAME}",
     "sslmode": "${DB_SSL}"
-  }
+  }${llm_json}
 }
 JSON
   ok "$(msg 'config.json generated' 'config.json 생성 완료')"
+  fi
 
   # go environment check
   command -v go >/dev/null 2>&1 || die "$(msg 'Go not found, install Go (>=1.26): https://go.dev/dl/' 'Go를 찾지 못했습니다. Go(>=1.26)를 먼저 설치하세요: https://go.dev/dl/')"
