@@ -180,7 +180,7 @@ func FromEnv() (Config, bool) {
 	c := ConfigFrom(prov, file.Model, file.BaseURL, file.APIKey, file.Proxy)
 	// Native Ollama never falls back to a cloud credential.
 	_, explicitKey := runtimeconfig.LLMEnv("API_KEY")
-	if c.APIKey == "" && !explicitKey && (c.Provider() == "ollama" || !llmnet.IsLocalEndpoint(c.BaseURL)) {
+	if c.APIKey == "" && !explicitKey {
 		switch c.Provider() {
 		case "ollama":
 			c.APIKey = os.Getenv("OLLAMA_API_KEY")

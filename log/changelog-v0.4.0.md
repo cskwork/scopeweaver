@@ -13,6 +13,8 @@
 - Ollama selection clears an unsaved cloud API key before discovery; cloud templates continue to preserve entered credentials.
 - Native model-not-found diagnostics preserve the exact model tag in the suggested server-side `ollama pull` command. No model is pulled automatically.
 - Empty environment-variable overrides, local key status and connection-test concurrency use the native-provider rules consistently.
+- Startup configuration preserves Anthropic/OpenAI provider-key authentication for local gateways. An explicit blank generic key still suppresses inherited credentials; native Ollama never inherits cloud keys.
+- A blank-key connection test can reuse the active local gateway key when its format, normalized endpoint and proxy match. Different local targets and native Ollama remain isolated; saving a new blank-key profile does not import credentials.
 
 ## Compatibility and limits
 
@@ -41,6 +43,8 @@ See [verification evidence and limitations](../docs/VERIFICATION.md). Paid cloud
 - Ollama를 선택하면 조회 전에 저장하지 않은 클라우드 API 키를 지웁니다. 클라우드 템플릿은 입력한 자격 증명을 계속 유지합니다.
 - 네이티브 모델이 없을 때 안내하는 서버 측 `ollama pull` 명령에 정확한 모델 태그를 보존합니다. 자동으로 모델을 내려받지는 않습니다.
 - 빈 환경 변수의 덮어쓰기, 로컬 키 상태, 연결 테스트 동시 요청 제한에 네이티브 제공자 규칙을 일관되게 적용합니다.
+- 시작 설정에서 로컬 게이트웨이의 Anthropic·OpenAI 제공자 키 인증을 유지합니다. 공통 키를 명시적으로 비워 두면 기존 자격 증명을 사용하지 않으며, 네이티브 Ollama는 클라우드 키를 가져오지 않습니다.
+- 키를 비운 연결 테스트는 형식, 정규화된 엔드포인트, 프록시가 활성 로컬 게이트웨이와 같으면 활성 키를 사용할 수 있습니다. 다른 로컬 대상과 네이티브 Ollama에는 활성 키를 전달하지 않으며, 새 프로필의 키를 비워 저장해도 자격 증명을 가져오지 않습니다.
 
 ### 호환성과 한계
 

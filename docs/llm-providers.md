@@ -129,7 +129,11 @@ ScopeWeaver cannot see what an Ollama server does next. **Ollama can forward req
 | `CONTEXT_WINDOW_K`, `MAX_TOKENS`, `KEEP_ALIVE`, `MAX_CONCURRENT` | Controls described above |
 | `THINKING_TYPE`, `REASONING_EFFORT`, `STREAM` | Existing reasoning and streaming options |
 
-Policy variables: `SCOPEWEAVER_LOCAL_LLM_ONLY` / `ARTEX_LOCAL_LLM_ONLY` and comma-separated `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` / `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`. `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` keep working for cloud profiles.
+Policy variables: `SCOPEWEAVER_LOCAL_LLM_ONLY` / `ARTEX_LOCAL_LLM_ONLY` and comma-separated `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` / `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`.
+
+At startup, Anthropic and OpenAI formats use `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` when no generic key is configured, including for authenticated local gateways. To start a deliberately keyless local profile while those provider keys are set, explicitly set `SCOPEWEAVER_LLM_API_KEY=` (or `ARTEX_LLM_API_KEY=`). This overrides file credentials and suppresses provider-key fallback. Native Ollama falls back only to `OLLAMA_API_KEY`, never to Anthropic or OpenAI keys.
+
+Saving a new UI profile with a blank key does not import provider environment credentials. **Test connection** with a blank key can reuse an existing profile's saved key when its profile ID is supplied. Without a profile ID, a local Anthropic/OpenAI test reuses the active key only when the format, normalized base URL and proxy all match the active service, including when testing a new draft. A different local endpoint, format or proxy does not inherit the active key; native Ollama never inherits an active cloud key. Existing non-local connection tests retain their active-key fallback.
 
 ```bash
 # .env for ScopeWeaver in Docker with Ollama on the host
