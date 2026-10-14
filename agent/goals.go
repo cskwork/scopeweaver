@@ -67,7 +67,7 @@ func DecomposeGoals(ctx context.Context, prov llm.Provider, dataDir, goalText, d
 // ordered provider chain. It preserves the same tools and write behavior while
 // letting the caller own provider selection/failover. maxTokens is the profile's
 // per-reply output cap (0 = send none).
-func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity)) []GoalSpec {
+func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir, goalText, desc string, as *db.AssetStore, ts *db.ExplorationStore, taskID int64, nonStreaming bool, maxTokens int, emit func(db.Activity), policies ...RuntimePolicy) []GoalSpec {
 	if prov == nil {
 		return nil
 	}
@@ -110,7 +110,7 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 			emit(r)
 		}
 	}
-	captureRun(ctx, agentcore.Options{
+	opts := agentcore.Options{
 		Provider:               prov,
 		SystemPrompt:           []string{sys, outputLanguageInstruction(locale.FromContext(ctx))},
 		Tools:                  tools,
@@ -120,7 +120,12 @@ func DecomposeGoalsWithProvider(ctx context.Context, prov llm.Provider, dataDir,
 		MaxTurns:     8,
 		NonStreaming: nonStreaming, // Non-streaming profiles use Provider.Complete.
 		MaxTokens:    maxTokens,    // 0 omits the limit and uses the server default.
-	}, userMsg, captureEmit)
+	}
+	if len(policies) > 0 {
+		opts.ToolOutputDir = cmdOutDir(ensureRunDir(dataDir, taskID, 0))
+		applyRuntimePolicy(&opts, policies[0])
+	}
+	captureRun(ctx, opts, userMsg, captureEmit)
 	// set_goals persisted the goals directly; read them back so the caller sees what
 	// was written (empty slice ⇒ the LLM produced nothing ⇒ caller falls back).
 	if ts == nil {

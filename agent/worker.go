@@ -40,11 +40,13 @@ import (
 // web_search_20250305 tool, consuming a model call and making requests on DeepSeek's
 // servers, outside the local proxy and traffic capture.
 type WebSearchOpts struct {
-	Enabled   bool
-	Backend   string
-	BraveKey  string
-	TavilyKey string
-	Proxy     string
+	// PolicyResolver reads the live LLM egress policy; it is independent of the selected backend.
+	PolicyResolver func() (bool, []string)
+	Enabled        bool
+	Backend        string
+	BraveKey       string
+	TavilyKey      string
+	Proxy          string
 	// DeepSeek credentials come from the active LLM profile's official Anthropic-format
 	// endpoint, not a separate setting, and change with the active profile.
 	DeepSeekBaseURL string
@@ -54,6 +56,7 @@ type WebSearchOpts struct {
 
 type Worker struct {
 	findingRecorder FindingRecorder
+	nativeOllamaFn  func() bool
 	prov            llm.Provider
 	model           string
 	workDir         string
@@ -153,6 +156,9 @@ func (w *Worker) SetRunTimeout(run time.Duration) {
 // turn/time budget: stop probing, write back what was found, then end with a
 // plain-text one-liner (which becomes this run's displayed result).
 const settleWrapUpPrompt = "Your budget is about to expire. Do not run any more commands or probes. First save every identified but unsaved result: new assets with insert_assets, conclusions/facts with record_fact, and confirmed vulnerabilities with report_finding. Finally, output ONE standalone plain-text sentence summarizing what you did and the key conclusions; it will be shown as this run's result."
+
+// SetNativeOllamaResolver resolves whether the current run uses native Ollama.
+func (w *Worker) SetNativeOllamaResolver(fn func() bool) { w.nativeOllamaFn = fn }
 
 func NewWorker(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int, extra ...actool.CoreTool) *Worker {
 	return &Worker{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns, extraTools: extra}
@@ -480,6 +486,8 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
 	noaSession := WorkerSessionID(ts.ID(), intent.ID)
+	secureWebSearch(&opts, w.webSearch.PolicyResolver)
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: w.nativeOllamaFn != nil && w.nativeOllamaFn(), ContextWindow: w.compactionWindow()})
 	enableNoa(&opts, w.noaEnabledFn, w.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)

@@ -20,6 +20,7 @@ import (
 // autonomous intent-generation loop (that is the planner's job).
 type MainAgent struct {
 	findingRecorder FindingRecorder
+	nativeOllamaFn  func() bool
 	prov            llm.Provider
 	model           string
 	tx              *transcript.Store                      // raw LLM conversation persistence (nil = off)
@@ -57,6 +58,9 @@ func (m *MainAgent) maxTokens() int {
 	}
 	return m.maxTokensFn()
 }
+
+// SetNativeOllamaResolver resolves whether the current run uses native Ollama.
+func (m *MainAgent) SetNativeOllamaResolver(fn func() bool) { m.nativeOllamaFn = fn }
 
 func NewMainAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window, maxTurns int) *MainAgent {
 	return &MainAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window, maxTurns: maxTurns}
@@ -166,6 +170,8 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 	if mainSeg > 0 {
 		noaSession = fmt.Sprintf("exp%d-main-s%d", ts.ID(), mainSeg)
 	}
+	secureWebSearch(&opts, m.webSearch.PolicyResolver)
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: m.nativeOllamaFn != nil && m.nativeOllamaFn(), ContextWindow: m.compactionWindow()})
 	enableNoa(&opts, m.noaEnabledFn, m.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)

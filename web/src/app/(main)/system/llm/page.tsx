@@ -17,20 +17,22 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { CopyButton } from "@/components/copy-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { applyLLMProfilePreset, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
+import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, selectInstalledOllamaModel, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
 import { api } from "@/lib/api";
-import type { LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride } from "@/lib/types";
+import { pullCommand } from "@/lib/ollama-pull";
+import type { LLMModelDetail, LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride, LLMTestResult } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 import { ProfileRetryFields, RetryPolicyPanel, ZERO_OVERRIDE } from "./_components/retry";
@@ -57,7 +59,26 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
   get openai() { return swt("interface.m1331"); },
   get anthropic() { return swt("interface.m1332"); },
   get "openai-responses"() { return swt("interface.m1333"); },
+  get ollama() { return swt("providers.maxTokensFieldOllama"); },
 };
+type ProfileFormat = LLMProfile["format"];
+const FORMATS: readonly string[] = ["anthropic", "openai", "openai-responses", "ollama"];
+const ZAI_PRESETS = ["zai-general", "zai-coding-reference"] as const;
+const OLLAMA_PRESETS = [
+  { id: "ollama-host", key: "providers.ollamaHost", help: "providers.ollamaHostHelp" },
+  { id: "ollama-docker-host", key: "providers.ollamaDockerHost", help: "providers.ollamaDockerHostHelp" },
+  { id: "ollama-compose", key: "providers.ollamaCompose", help: "providers.ollamaComposeHelp" },
+] as const;
+
+// Mirrors the backend: Ollama context is binary K, 0 means 32 and values below 16 are raised to 16.
+function ollamaContextTokens(k: string) {
+  const n = Number(k) || 0;
+  return (n <= 0 ? 32 : Math.max(16, n)) * 1024;
+}
+// Only a successful /api/show without "tools" is a known gap; failed metadata stays unknown.
+function lacksTools(d?: { capabilities?: string[]; error?: string }) {
+  return !!d && !d.error && Array.isArray(d.capabilities) && !d.capabilities.includes("tools");
+}
 const EFFORT_LEVELS: { value: string; label: string }[] = [
   { value: NONE, get label() { return swt("interface.m1329"); } },
   { value: "low", get label() { return swt("english.e089"); } },
@@ -76,8 +97,10 @@ function cooldownText(secs: number) {
 // Profile health prioritizes missing API keys because requests cannot be sent at all;
 // other states come from rotation circuit records. With rotation off, Healthy means no known failures.
 type Health = { label: string; cls: string; hint?: string };
+// Older servers omit api_key_optional; native Ollama was their only keyless format.
+const keyOptional = (p: LLMProfile) => p.api_key_optional ?? p.format === "ollama";
 function healthOf(p: LLMProfile, m?: LLMPoolMember): Health {
-  if (!p.api_key_hint) {
+  if (!p.api_key_hint && !keyOptional(p)) {
     return {
       label: swt("interface.m1334"),
       cls: "border-muted-foreground/40 text-muted-foreground",
@@ -308,7 +331,7 @@ function ProfileSheet({
   const isNew = !profile;
   const [preset, setPreset] = React.useState<LLMProfilePresetId | "">("");
   const [name, setName] = React.useState("");
-  const [format, setFormat] = React.useState<"anthropic" | "openai" | "openai-responses">("anthropic");
+  const [format, setFormat] = React.useState<ProfileFormat>("anthropic");
   const [model, setModel] = React.useState("");
   const [baseUrl, setBaseUrl] = React.useState("");
   const [proxy, setProxy] = React.useState("");
@@ -326,19 +349,41 @@ function ProfileSheet({
   const [maxTokensField, setMaxTokensField] = React.useState(NONE); // Output-limit field name; NONE means max_tokens.
   const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // Custom session header name; blank omits it.
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // Profile retry overrides; all zeros follow global settings.
+  const [keepAlive, setKeepAlive] = React.useState(""); // Ollama residency; blank uses the backend default (30m).
+  const [maxConcurrent, setMaxConcurrent] = React.useState("0"); // 0 inherits the global cap.
+  const [modelDetails, setModelDetails] = React.useState<LLMModelDetail[]>([]);
+  const [diag, setDiag] = React.useState<LLMTestResult | null>(null); // Last native Ollama test, shown inline.
   const [testing, setTesting] = React.useState(false);
   const [saving, setSaving] = React.useState(false);
   const [models, setModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
+  const [modelsError, setModelsError] = React.useState("");
+  const modelsRequest = React.useRef(0);
+
+  function invalidateModels() {
+    modelsRequest.current += 1;
+    setLoadingModels(false);
+    setModelsError("");
+    setModels([]);
+    setModelDetails([]);
+    setModelsOpen(false);
+    setDiag(null);
+  }
+
+  function changeOpen(nextOpen: boolean) {
+    invalidateModels();
+    onOpenChange(nextOpen);
+  }
 
   // Populate from the supplied profile on every open, or reset defaults for creation.
   // Closing and reopening starts fresh without stale values from another profile.
   React.useEffect(() => {
+    invalidateModels();
     if (!open) return;
     setPreset("");
     setName(profile?.name ?? "");
-    setFormat(profile?.format === "openai" || profile?.format === "openai-responses" ? profile.format : "anthropic");
+    setFormat(profile && FORMATS.includes(profile.format) ? profile.format : "anthropic");
     setModel(profile?.model ?? "");
     setBaseUrl(profile?.base_url ?? "");
     setProxy(profile?.proxy ?? "");
@@ -354,14 +399,20 @@ function ProfileSheet({
     setMaxTokensField(fromStore(profile?.max_tokens_field));
     setSessionHeaderKey(profile?.session_header_key ?? "");
     setRetry(profile?.retry ?? ZERO_OVERRIDE);
+    setKeepAlive(profile?.keep_alive ?? "");
+    setMaxConcurrent(String(profile?.llm_max_concurrent ?? 0));
+    setModelDetails([]);
+    setDiag(null);
     setApiKey("");
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
     setModelsOpen(false);
+    return () => { modelsRequest.current += 1; };
   }, [open, profile]);
 
   function applyPreset(id: string) {
     if (!isNew) return;
+    invalidateModels();
     const next = applyLLMProfilePreset({ name, api_key: apiKey, proxy, session_header_key: sessionHeaderKey }, id);
     setPreset(id as LLMProfilePresetId);
     setFormat(next.format);
@@ -372,35 +423,87 @@ function ProfileSheet({
     setCw(String(next.context_window_k));
     setMaxTokens(String(next.max_tokens));
     setMaxTokensField(fromStore(next.max_tokens_field));
+    if (next.format === "ollama") {
+      setApiKey(next.api_key);
+      setKeepAlive(next.keep_alive);
+      setMaxConcurrent(String(next.llm_max_concurrent));
+      void loadModels({ format: "ollama", baseUrl: next.base_url, apiKey: "", proxy }, true);
+    }
     setModels([]);
+    setModelDetails([]);
     setModelsOpen(false);
+    setDiag(null);
   }
 
   const profileId = profile ? Number(profile.id) : undefined;
+  const detailOf = (m: string) => modelDetails.find((d) => (d.name ?? d.model) === m || d.model === m);
+  // Warn only for explicit metadata: the model list or a native test reported capabilities without tools.
+  const keyPlaceholder = format === "ollama" ? swt("providers.keyOptional") : "sk-…";
+  const pull = diag && !diag.ok ? pullCommand(diag.error ?? "", model) : "";
+  const testedModel = diag?.ok && diag.model === model.trim() ? diag : undefined;
+  const modelLacksTools =
+    format === "ollama" && (lacksTools(detailOf(model.trim())) || (!!testedModel?.capabilities?.length && testedModel.tools_supported === false));
 
-  async function loadModels() {
-    if (loadingModels) return;
+  function changeFormat(nextFormat: ProfileFormat) {
+    invalidateModels();
+    setFormat(nextFormat);
+    if (nextFormat === "ollama" && format !== "ollama") {
+      // Drop a cloud template's URL and credential before read-only local discovery.
+      const cloudTemplateURL = (ZAI_PRESETS as readonly string[]).includes(preset)
+        ? getLLMProfilePreset(preset).base_url : "";
+      const nextBaseUrl = !baseUrl.trim() || baseUrl === cloudTemplateURL
+        ? getLLMProfilePreset("ollama-host").base_url : baseUrl;
+      setApiKey("");
+      setKeyHint("");
+      setBaseUrl(nextBaseUrl);
+      if (isNew) {
+        setModel("");
+        void loadModels({ format: "ollama", baseUrl: nextBaseUrl, apiKey: "", proxy }, true);
+      }
+    }
+    setPreset("");
+  }
+
+  async function loadModels(
+    target = { format, baseUrl, apiKey, proxy },
+    selectDefault = false,
+  ) {
+    const request = ++modelsRequest.current;
     setLoadingModels(true);
+    setModelsError("");
     setModels([]);
+    setModelDetails([]);
+    setModelsOpen(false);
     try {
-      const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
+      const r = await api.fetchLLMModels(target.format, target.baseUrl, target.apiKey, target.proxy, profileId);
+      if (request !== modelsRequest.current) return;
       if (r.ok && r.models && r.models.length > 0) {
         setModels(r.models);
-        setModelsOpen(true);
-        toast.success(swt("interface.m1370", { p0: r.models.length }));
+        setModelDetails(r.model_details ?? []);
+        if (selectDefault) setModel(selectInstalledOllamaModel(r.models, r.model_details));
+        else {
+          setModelsOpen(true);
+          toast.success(swt("interface.m1370", { p0: r.models.length }));
+        }
       } else {
-        toast.error(swt("interface.m1371", { p0: r.error ?? swt("interface.m1372") }));
+        const message = swt("interface.m1371", { p0: r.error ?? swt("interface.m1372") });
+        setModelsError(message);
+        toast.error(message);
       }
     } catch (e) {
-      toast.error(swt("interface.m1373", { p0: (e as Error).message }));
+      if (request !== modelsRequest.current) return;
+      const message = swt("interface.m1373", { p0: (e as Error).message });
+      setModelsError(message);
+      toast.error(message);
     } finally {
-      setLoadingModels(false);
+      if (request === modelsRequest.current) setLoadingModels(false);
     }
   }
 
   async function testConnection() {
     if (testing) return;
     setTesting(true);
+    setDiag(null);
     try {
       // Test using the profile's actual reasoning parameters so unsupported fields fail here,
       // not during tasks. Pass profile ID to use the stored key when the key input is blank.
@@ -415,7 +518,14 @@ function ProfileSheet({
         profileId,
         streaming,
         sessionHeaderKey.trim(),
+        {
+          context_window_k: Number(cw) || 0,
+          keep_alive: keepAlive.trim(),
+          max_tokens: Math.max(0, Number(maxTokens) || 0),
+          llm_max_concurrent: Math.max(0, Number(maxConcurrent) || 0),
+        },
       );
+      if (format === "ollama") setDiag(r);
       // Show response content to prove the model actually answered as it would in a conversation.
       if (r.ok)
         toast.success(swt("interface.m1374", { p0: r.latency_ms ?? "?", p1: r.model ?? model }), {
@@ -459,6 +569,8 @@ function ProfileSheet({
         max_tokens_field: format === "openai" ? toStore(maxTokensField) : "",
         session_header_key: sessionHeaderKey.trim(),
         retry,
+        keep_alive: format === "ollama" ? keepAlive.trim() : "",
+        llm_max_concurrent: Math.max(0, Number(maxConcurrent) || 0),
       });
       if (isNew) toast.success(swt("interface.m1380", { p0: name.trim() }));
       else toast.success(profile?.is_default ? swt("interface.m1381") : swt("interface.m0377"));
@@ -472,7 +584,7 @@ function ProfileSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={changeOpen}>
       <SheetContent
         side="right"
         className="flex flex-col gap-0 p-0 data-[side=right]:min-w-[420px] data-[side=right]:sm:max-w-xl"
@@ -501,12 +613,33 @@ function ProfileSheet({
                   <SelectValue placeholder={swt("providers.chooseTemplate")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="zai-general">{swt("providers.general")}</SelectItem>
-                  <SelectItem value="zai-coding-reference">{swt("providers.coding")}</SelectItem>
+                  <SelectGroup>
+                    <SelectLabel>{swt("providers.groupCloud")}</SelectLabel>
+                    <SelectItem value="zai-general">{swt("providers.general")}</SelectItem>
+                    <SelectItem value="zai-coding-reference">{swt("providers.coding")}</SelectItem>
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>{swt("providers.groupLocal")}</SelectLabel>
+                    {OLLAMA_PRESETS.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {swt(o.key)}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">{swt("providers.introduction")}</p>
-              {preset && (
+              {preset && isOllamaPreset(preset) && (
+                <>
+                  <p className="text-muted-foreground text-xs">
+                    {swt(OLLAMA_PRESETS.find((o) => o.id === preset)?.help ?? "providers.ollamaHostHelp")}
+                  </p>
+                  <p className="text-muted-foreground text-xs">{swt("providers.ollamaDefaultsHelp")}</p>
+                  <p className="text-amber-700 text-xs dark:text-amber-400">{swt("providers.ollamaCloudWarning")}</p>
+                  <a className="text-xs underline underline-offset-4" href="https://docs.ollama.com/api" target="_blank" rel="noreferrer">{swt("providers.officialOllama")}</a>
+                </>
+              )}
+              {(ZAI_PRESETS as readonly string[]).includes(preset) && (
                 <>
                   <p className={preset === "zai-coding-reference" ? "text-xs text-amber-700 dark:text-amber-400" : "text-xs text-muted-foreground"}>
                     {swt(preset === "zai-coding-reference" ? "providers.codingHelp" : "providers.generalHelp")}
@@ -532,14 +665,15 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>{swt("interface.m1388")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as "anthropic" | "openai" | "openai-responses")}>
-                <SelectTrigger>
+              <Select value={format} onValueChange={(v) => changeFormat(v as ProfileFormat)}>
+                <SelectTrigger aria-label={swt("interface.m1388")}>
                   <SelectValue placeholder={swt("interface.m1389")} />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="anthropic">Anthropic</SelectItem>
                   <SelectItem value="openai">OpenAI (Chat Completions)</SelectItem>
                   <SelectItem value="openai-responses">OpenAI (Responses API)</SelectItem>
+                  <SelectItem value="ollama">{swt("providers.ollamaFormat")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -553,7 +687,7 @@ function ProfileSheet({
                 className="font-mono"
                 placeholder="claude-opus-4-8"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => { invalidateModels(); setModel(e.target.value); }}
               />
               {/* This body-portaled Popover sits outside Sheet's scroll lock. modal gives it the top scroll lock so its list can scroll. */}
               <Popover open={modelsOpen} onOpenChange={setModelsOpen} modal>
@@ -564,31 +698,62 @@ function ProfileSheet({
                     size="icon"
                     className="shrink-0"
                     disabled={loadingModels}
-                    onClick={loadModels}
+                    onClick={() => void loadModels()}
                     title={swt("interface.m1390")}
                   >
                     {loadingModels ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
                   </Button>
                 </PopoverTrigger>
                 {models.length > 0 && (
-                  <PopoverContent className="max-h-72 w-72 gap-0 overflow-y-auto overscroll-contain p-1" align="end">
-                    {models.map((m) => (
-                      <button
-                        key={m}
-                        type="button"
-                        className="w-full shrink-0 rounded-md px-2 py-1.5 text-left font-mono text-xs hover:bg-accent hover:text-accent-foreground"
-                        onClick={() => {
-                          setModel(m);
-                          setModelsOpen(false);
-                        }}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                  <PopoverContent className="max-h-72 w-80 gap-0 overflow-y-auto overscroll-contain p-1" align="end">
+                    {models.map((m) => {
+                      const d = detailOf(m);
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          className="grid w-full shrink-0 gap-1 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
+                          onClick={() => {
+                            modelsRequest.current += 1;
+                            setLoadingModels(false);
+                            setModelsError("");
+                            setModel(m);
+                            setModelsOpen(false);
+                          }}
+                        >
+                          <span className="font-mono">{m}</span>
+                          {d && (
+                            <span className="flex flex-wrap items-center gap-1 text-muted-foreground">
+                              {d.details?.parameter_size && <span>{d.details.parameter_size}</span>}
+                              {d.details?.quantization_level && <span className="font-mono">{d.details.quantization_level}</span>}
+                              {(["tools", "thinking", "vision"] as const)
+                                .filter((c) => d.capabilities?.includes(c))
+                                .map((c) => (
+                                  <Badge key={c} variant="outline" className="h-4 px-1 font-mono text-[10px]">
+                                    {c}
+                                  </Badge>
+                                ))}
+                              {lacksTools(d) && (
+                                <Badge variant="outline" className="h-4 border-amber-500/50 px-1 text-[10px] text-amber-600 dark:text-amber-400">
+                                  {swt("providers.noToolsBadge")}
+                                </Badge>
+                              )}
+                              {d.error && <span className="truncate" title={d.error}>{swt("providers.capabilitiesUnknown", { error: d.error })}</span>}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
                   </PopoverContent>
                 )}
               </Popover>
             </div>
+            {modelsError && <p role="alert" className="text-destructive text-xs">{modelsError}</p>}
+            {modelLacksTools && (
+              <p role="alert" className="text-amber-700 text-xs dark:text-amber-400">
+                {swt("providers.noTools")}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-2">
@@ -598,7 +763,7 @@ function ProfileSheet({
               className="font-mono"
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              onChange={(e) => { invalidateModels(); setBaseUrl(e.target.value); }}
             />
           </div>
 
@@ -609,7 +774,7 @@ function ProfileSheet({
               className="font-mono"
               placeholder="socks5://user:pass@127.0.0.1:1080 · http://127.0.0.1:8080"
               value={proxy}
-              onChange={(e) => setProxy(e.target.value)}
+              onChange={(e) => { invalidateModels(); setProxy(e.target.value); }}
             />
             <p className="text-muted-foreground text-xs">
               {swt("interface.m1393")}</p>
@@ -633,10 +798,11 @@ function ProfileSheet({
             <Input
               id="p-api-key"
               type="password"
-              placeholder={keyHint ? swt("interface.m1399", { p0: keyHint }) : "sk-…"}
+              placeholder={keyHint ? swt("interface.m1399", { p0: keyHint }) : keyPlaceholder}
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => { invalidateModels(); setApiKey(e.target.value); }}
             />
+            {format === "ollama" && <p className="text-muted-foreground text-xs">{swt("providers.ollamaKeyHelp")}</p>}
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -662,7 +828,37 @@ function ProfileSheet({
             </div>
           </div>
           <p className="-mt-2 text-muted-foreground text-xs">
-            {swt("interface.m1403")}</p>
+            {format === "ollama" ? swt("providers.contextOllama") : swt("interface.m1403")}</p>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-2">
+              <Label htmlFor="p-max-concurrent">{swt("providers.maxConcurrent")}</Label>
+              <Input
+                id="p-max-concurrent"
+                type="number"
+                min={0}
+                value={maxConcurrent}
+                onChange={(e) => setMaxConcurrent(e.target.value)}
+                placeholder="0"
+              />
+            </div>
+            {format === "ollama" && (
+              <div className="grid gap-2">
+                <Label htmlFor="p-keep-alive">{swt("providers.keepAlive")}</Label>
+                <Input
+                  id="p-keep-alive"
+                  className="font-mono"
+                  value={keepAlive}
+                  onChange={(e) => setKeepAlive(e.target.value)}
+                  placeholder="30m"
+                />
+              </div>
+            )}
+          </div>
+          <p className="-mt-2 text-muted-foreground text-xs">
+            {swt("providers.maxConcurrentHelp")}
+            {format === "ollama" && <> {swt("providers.keepAliveHelp")}</>}
+          </p>
 
           <div className="grid gap-3 rounded-lg border p-3">
             <div className="flex items-center justify-between gap-4">
@@ -783,6 +979,43 @@ function ProfileSheet({
 
           <ProfileRetryFields value={retry} onChange={setRetry} />
         </div>
+
+        {format === "ollama" && diag && (
+          <section aria-label={swt("providers.diagnostics")} className="grid gap-1.5 border-t px-4 py-3 text-xs">
+            <p className="font-medium text-sm">{swt("providers.diagnostics")}</p>
+            {diag.ok ? (
+              <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                <dt className="text-muted-foreground">{swt("providers.diagContext")}</dt>
+                <dd className={diag.context_verified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>
+                  {diag.context_length
+                    ? swt(diag.context_verified ? "providers.diagContextOk" : "providers.diagContextLow", { actual: diag.context_length, requested: ollamaContextTokens(cw) })
+                    : swt("providers.diagContextUnknown", { requested: ollamaContextTokens(cw) })}
+                </dd>
+                <dt className="text-muted-foreground">{swt("providers.diagTools")}</dt>
+                <dd className={diag.tool_call_verified ? "text-emerald-600 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>
+                  {swt(diag.tool_call_verified ? "providers.diagToolsOk" : "providers.diagToolsFail")}
+                </dd>
+                <dt className="text-muted-foreground">{swt("providers.diagLoad")}</dt>
+                <dd>{swt("providers.diagLoadValue", { ms: Math.round(diag.load_duration_ms ?? 0) })}</dd>
+                <dt className="text-muted-foreground">{swt("providers.diagSpeed")}</dt>
+                <dd>{swt("providers.diagSpeedValue", { tps: (diag.tokens_per_second ?? 0).toFixed(1) })}</dd>
+              </dl>
+            ) : (
+              <>
+                {pull && (
+                  <div className="grid gap-1.5">
+                    <p>{swt("providers.missingModel")}</p>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 rounded bg-muted px-2 py-1 font-mono">{pull}</code>
+                      <CopyButton text={pull} />
+                    </div>
+                  </div>
+                )}
+                <p className="break-words font-mono text-destructive">{diag.error}</p>
+              </>
+            )}
+          </section>
+        )}
 
         <div className="flex gap-2 border-t px-4 py-3">
           <Button variant="outline" onClick={testConnection} disabled={testing}>
@@ -944,6 +1177,7 @@ export default function LLMPage() {
 
                     <div className="flex flex-wrap gap-x-3 gap-y-0.5 pl-6 text-muted-foreground text-xs">
                       {p.api_key_hint && <span>{p.api_key_hint}</span>}
+                      {!p.api_key_hint && keyOptional(p) &&<span>{swt("providers.keyless")}</span>}
                       <span>
                         {p.rate_per_second}{swt("english.e102")}{p.rate_per_minute}{swt("english.e103")}</span>
                       {p.proxy && <span className="truncate">{swt("interface.m1427")}{" "}{p.proxy}</span>}

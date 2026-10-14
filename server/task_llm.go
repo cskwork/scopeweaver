@@ -189,6 +189,11 @@ func (r *taskLLMRuntime) maxTokens() int {
 	return cfg.MaxTokens
 }
 
+func (r *taskLLMRuntime) nativeOllama() bool {
+	cfg, ok := r.activeCfg()
+	return ok && cfg.Format == llm.Format("ollama")
+}
+
 func parseTaskID(id string) (int64, error) {
 	n, err := strconv.ParseInt(id, 10, 64)
 	if err != nil || n <= 0 {
@@ -565,6 +570,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	wk := agent.NewWorker(workerRuntime, "task-router", s.m.dir, tx, window, s.agentMaxTurns("worker"))
 	wk.SetFindingRecorder(s.evidenceStore())
 	wk.SetCompactionWindowResolver(workerRuntime.CompactionWindow)
+	wk.SetNativeOllamaResolver(workerRuntime.nativeOllama)
 	wk.SetNonStreaming(workerRuntime.nonStreaming) // Read the task's currently active profile streaming flag on each round.
 	wk.SetMaxTokens(workerRuntime.maxTokens)       // The output limit likewise follows the currently active profile.
 	wk.SetNoaEnabled(s.m.NoaCompactionEnabled)     // Experimental noa compaction: platform-level flag read once per run.
@@ -575,6 +581,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	pl := agent.NewPlanner(plannerRuntime, "task-router", s.m.dir, tx, plannerRuntime.CompactionWindow(), s.agentMaxTurns("planner"))
 	pl.SetFindingRecorder(s.evidenceStore())
 	pl.SetCompactionWindowResolver(plannerRuntime.CompactionWindow)
+	pl.SetNativeOllamaResolver(plannerRuntime.nativeOllama)
 	pl.SetNonStreaming(plannerRuntime.nonStreaming)
 	pl.SetMaxTokens(plannerRuntime.maxTokens)
 	pl.SetNoaEnabled(s.m.NoaCompactionEnabled) // Experimental noa compaction: platform-level flag read once per run.
@@ -590,6 +597,7 @@ func (s *Server) agentsForTask(t *Task) *taskAgentBundle {
 	main := agent.NewMainAgent(mainRuntime, "task-router", s.m.dir, tx, mainRuntime.CompactionWindow(), s.agentMaxTurns("mainagent"))
 	main.SetFindingRecorder(s.evidenceStore())
 	main.SetCompactionWindowResolver(mainRuntime.CompactionWindow)
+	main.SetNativeOllamaResolver(mainRuntime.nativeOllama)
 	main.SetNonStreaming(mainRuntime.nonStreaming)
 	main.SetMaxTokens(mainRuntime.maxTokens)
 	main.SetNoaEnabled(s.m.NoaCompactionEnabled) // Experimental noa compaction: platform-level flag read once per run.

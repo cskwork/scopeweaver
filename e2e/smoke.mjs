@@ -6,6 +6,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import { chromium, request } from "playwright";
+import { runOllamaProfileChecks } from "./ollama-profiles.mjs";
 
 const base = process.env.SCOPEWEAVER_URL || "http://127.0.0.1:8787";
 const dsn = new URL(process.env.ARTEX_PG_DSN || "");
@@ -42,7 +43,7 @@ async function step(name, fn) {
     console.log(`PASS ${name}`);
   } catch (err) {
     failures.push(name);
-    console.log(`FAIL ${name}: ${err.message.split("\n")[0]}`);
+    console.log(`FAIL ${name}: ${err.stack || err.message}`);
   }
 }
 
@@ -256,6 +257,9 @@ for (const locale of ["en", "ko", "zh-Hans"]) {
     await p.context().close();
   });
 }
+
+// 5. Native Ollama templates, keyless save/activate and the opt-in local-only policy (fixture endpoint).
+await runOllamaProfileChecks({ base, token, step, check, openPage, out });
 
 await step("no uncaught page errors", async () => check(pageErrors.length === 0, pageErrors.join(" | ")));
 
