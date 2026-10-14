@@ -4,7 +4,7 @@ import { translate as swt } from "@/i18n/runtime";
 import { useI18n } from "@/i18n";
 import * as React from "react";
 
-import { CpuIcon, FlaskConicalIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon, ZapIcon } from "lucide-react";
+import { CpuIcon, FlaskConicalIcon, HardDriveIcon, KeyboardIcon, RadioTowerIcon, SearchIcon, ShieldAlertIcon, ZapIcon } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { CHAT_SEND_MODE_OPTIONS, type ChatSendMode, setChatSendMode, useChatSendMode } from "@/lib/chat-send-mode";
 import type { Settings } from "@/lib/types";
@@ -45,6 +46,10 @@ export default function SystemSettingsPage() {
   const [savingWorkers, setSavingWorkers] = React.useState(false);
   const [maxConcurrent, setMaxConcurrent] = React.useState("0");
   const [savingMaxConcurrent, setSavingMaxConcurrent] = React.useState(false);
+  // Opt-in local-only LLM network policy; off by default so cloud providers keep working.
+  const [localOnly, setLocalOnly] = React.useState(false);
+  const [localCidrs, setLocalCidrs] = React.useState("");
+  const [savingLocalPolicy, setSavingLocalPolicy] = React.useState(false);
   // Operational constraint injection targets; both enabled by default.
   const [injectPlanner, setInjectPlanner] = React.useState(true);
   const [injectWorker, setInjectWorker] = React.useState(true);
@@ -65,6 +70,8 @@ export default function SystemSettingsPage() {
     setPyInterp(s.python_interpreter ?? "");
     setWorkers(String(s.workers ?? 3));
     setMaxConcurrent(String(s.llm_max_concurrent ?? 0));
+    setLocalOnly(!!s.local_llm_only);
+    setLocalCidrs((s.local_llm_allowed_cidrs ?? []).join("\n"));
     setInjectPlanner(s.constraints_inject_planner !== false);
     setInjectWorker(s.constraints_inject_worker !== false);
     setNoaCompaction(!!s.noa_compaction);
@@ -106,6 +113,18 @@ export default function SystemSettingsPage() {
       })
       .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
       .finally(() => setSavingMaxConcurrent(false));
+  };
+
+  const saveLocalPolicy = (patch: Pick<Settings, "local_llm_only" | "local_llm_allowed_cidrs">, success: string) => {
+    setSavingLocalPolicy(true);
+    api
+      .setSettings(patch)
+      .then((s) => {
+        apply(s);
+        toast.success(success);
+      })
+      .catch((e) => toast.error(swt("interface.m1450") + (e as Error).message))
+      .finally(() => setSavingLocalPolicy(false));
   };
 
   const savePython = () => {
@@ -659,6 +678,55 @@ export default function SystemSettingsPage() {
                 onChange={(e) => setMaxConcurrent(e.target.value)}
               />
               <Button onClick={saveMaxConcurrent} disabled={!loaded || savingMaxConcurrent}>
+                {swt("interface.m0273")}</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="mb-4 break-inside-avoid md:mb-6">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <HardDriveIcon className="size-4" />
+              {swt("settings.localOnlyTitle")}</CardTitle>
+            <CardDescription>
+              {rich("settings.localOnlyDesc", {}, { b: (text) => <b>{text}</b>, code: (text) => <code>{text}</code> })}</CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3">
+            <div className="flex items-center justify-between gap-4">
+              <Label htmlFor="local-llm-only" className="font-normal text-sm">
+                {swt("settings.localOnlyToggle")}</Label>
+              <Switch
+                id="local-llm-only"
+                checked={localOnly}
+                disabled={!loaded || savingLocalPolicy}
+                onCheckedChange={(v) =>
+                  saveLocalPolicy({ local_llm_only: v }, swt(v ? "settings.localOnlyOn" : "settings.localOnlyOff"))
+                }
+              />
+            </div>
+            <p className="text-muted-foreground text-xs">{swt("settings.localOnlyEnv")}</p>
+            <Label htmlFor="local-llm-cidrs" className="text-sm">
+              {swt("settings.allowlistLabel")}</Label>
+            <Textarea
+              id="local-llm-cidrs"
+              rows={3}
+              className="font-mono text-sm"
+              placeholder="100.64.0.0/10"
+              value={localCidrs}
+              disabled={!loaded || savingLocalPolicy}
+              onChange={(e) => setLocalCidrs(e.target.value)}
+            />
+            <p className="text-muted-foreground text-xs">{swt("settings.allowlistHelp")}</p>
+            <div>
+              <Button
+                disabled={!loaded || savingLocalPolicy}
+                onClick={() =>
+                  saveLocalPolicy(
+                    { local_llm_allowed_cidrs: localCidrs.split(/[\s,]+/).filter(Boolean) },
+                    swt("settings.allowlistSaved"),
+                  )
+                }
+              >
                 {swt("interface.m0273")}</Button>
             </div>
           </CardContent>

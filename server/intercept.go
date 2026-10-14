@@ -41,10 +41,26 @@ func (s *Server) wireInterceptReviewer() {
 		if profileID == 0 {
 			return intercept.Decision{}, locale.Errorf("No available judge model is configured")
 		}
-		prov, _, ok := s.providerForProfile(profileID)
+		prov, cfg, ok := s.providerForProfile(profileID)
 		if !ok {
 			return intercept.Decision{ProfileID: profileID}, locale.Errorf("Judge model profile %d is unavailable", profileID)
 		}
+		if cfg.Format == llm.Format("ollama") {
+			// JSON mode is specific to the judge; retain the same endpoint admission
+			// gate as task inference so this separate provider cannot overfill VRAM.
+			cfg = s.applyLLMPolicy(cfg)
+			cfg.JSONOutput = true
+			var err error
+			prov, err = cfg.NewProvider()
+			if err != nil {
+				return intercept.Decision{ProfileID: profileID}, err
+			}
+			if p, _ := s.m.pg.ProfileByID(profileID); p != nil {
+				prov = llmrec.Wrap(prov, s.m.PG(), cfg.Model, p.Name, cfg.ThinkingType, cfg.ReasoningEffort, s.m.LLMRecordEnabled)
+			}
+			prov = s.profileConcurrencyProvider(prov, cfg)
+		}
+
 		ctx = llmrec.WithWorker(ctx, judgeWorkerLane)
 		text, err := reviewCompletion(ctx, prov, prompt, input)
 		if err != nil {

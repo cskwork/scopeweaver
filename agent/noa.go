@@ -31,6 +31,12 @@ func enableNoa(opts *agentcore.Options, enabled func() bool, archiveRoot, sessio
 	if enabled == nil || !enabled() {
 		return
 	}
+	if _, local := opts.Compactor.(*localCompactor); local {
+		if onWarn != nil {
+			onWarn("Native Ollama contexts up to 64K retain the 75% compaction policy; experimental noa is skipped")
+		}
+		return
+	}
 	if opts.OnWarn == nil {
 		opts.OnWarn = onWarn
 	}

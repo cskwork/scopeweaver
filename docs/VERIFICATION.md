@@ -2,6 +2,50 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Native Ollama branch — 2026-10-15 (branch-local, not a release)
+
+Local checks on `feat/ollama-native-flexible-providers`, recorded before the pull request was opened. Remote PR CI is tracked separately in GitHub Actions; nothing here is a release, merge or CI result.
+
+| Check | Result |
+| --- | --- |
+| Go suites, all 20 packages run separately, each on a fresh disposable PostgreSQL 16 database | 1,197 tests/subtests passed; 2 opt-in skips (`TestAgentAdapterE2E`, `TestLiveContextReview`) |
+| Agent adapter, run separately | 3 real MCP/Pi scenarios passed |
+| `go vet ./...` | Passed |
+| Frontend unit and localization tests | 43 passed; 3,159 unique keys in each of English, Korean and Simplified Chinese |
+| Backend message catalog | 1,938 unique keys in each of the three languages; printf and parity tests passed |
+| TypeScript and production static export | Passed, rebuilt after the final health UI changes |
+| Frontend dependency audit (`npm audit`) | 0 vulnerabilities |
+| Builds | Embedded `CGO_ENABLED=0` binary rebuilt after the final health UI changes; Windows amd64 `CGO_ENABLED=0` cross-build passed (native Windows runtime not run) |
+| Browser smoke (`npm run smoke`) on the real embedded binary and a fresh `scopeweaver_test_ollama_final_health` database | 37 passed, 0 failures (25 smoke checks + 12 dashboard scenarios). Covers the three Ollama templates in English and Korean with no implicit requests, keyless save/activate, keyless local compatible health versus a public cloud profile with a missing key, cloud formats and editable GLM, per-model metadata and tool warnings, the exact missing-model pull command, tool/context/load/speed diagnostics and the default-off local-only policy, plus the existing English/Korean/Simplified Chinese setup, sign-in, language, draft, SSE and approval-usage regressions |
+| Compose credentials | 11 cases passed in real `network_mode: none` containers, through container environment and `FromEnv` |
+| Installer and packaging | 8 installer fixtures passed in total, including English and Korean selection cases; 5 archives passed in each of English and Korean |
+| Release notice (Python 3.12) | 6 tests passed |
+| Independent backend security/correctness review | Passed, including the DeepSeek local-only policy, live CIDR checks and 404 classification |
+
+### Real Ollama run
+
+Host Ollama 0.32.15 with `qwen3:4b`, through the native streaming API:
+
+- In an SDK-level streaming check with a synthetic tool fixture, the model made a `record_fact` tool call; ScopeWeaver executed it locally, replayed the result, and the turn completed. This was not a platform database `record_fact`.
+- 32K context was requested; `/api/ps` reported 32,768 allocated.
+- Exact usage in that check: streaming turn 186 input / 750 output tokens; completing turn 826 input / 193 output.
+- Keyless save/activate through the real API passed. Diagnostics reported `tool_call_verified` and `context_verified` true, context 32,768, load 2.225375 ms, 29.231 tokens/s and latency 18,958 ms. **This was one warm run, not a cold-start benchmark or a hardware generalization.**
+- The exact Korean pull hint for a missing model, and the strict-policy toggle blocking a public IP, passed.
+- **Platform task worker Bash proof:** a real task worker (task 1) running `qwen3:4b` (32K requested, 32,768 allocated; concurrency cap 1; keep-alive 30m; thinking disabled; max 4,096 tokens) made a native Bash tool call `call_219yv72x`. Activity 9 (call) and 10 (`tool_result`) share that ID with no error, and the output contained the marker `LOCAL_TASK_OLLAMA_OK`. The ledger recorded exactly 6,704 input / 4,096 output tokens for that native call, and the next native call replayed the same `tool_call_id`. The intent was seeded manually through the existing `db.AddIntent`, not created by the LLM. The output also contains a literal `\n` from fixture escaping; no newline-handling or model-bug conclusion is drawn. The run used a binary built from the uncommitted branch source before the final UI/DTO changes.
+
+### Autonomous task reliability is not validated
+
+A passing tool-call diagnostic proves the wire path, not that a model can complete a task.
+
+- `qwen2.5-coder:7b` declares `tools`, yet wrote tool-shaped JSON in `assistant.content` instead of wire `tool_calls`, so no Bash or fact tool ran. ScopeWeaver correctly kept it as text.
+- `qwen3:4b` as the main agent, given a long prompt, deliberated and wrote the expected marker as text. As a task worker it did run Bash (above), but the task was paused at 360 s without `record_fact` or autonomous completion; one successful worker tool call does not establish autonomous completion.
+
+**No end-to-end autonomous task completion or security-assessment quality is claimed for any local model, and 7B-class models are not validated as a full agent.** The [hardware tiers](llm-providers.md#hardware-tiers) are estimates, not benchmarks.
+
+### Not exercised
+
+No paid cloud calls, external target scans, real notifications, publication, deployment, release or merge. Anthropic, OpenAI Chat/Responses and custom gateways were verified through wire-contract tests, regressions and editable browser flows, not live provider accounts. All test databases were disposable, and the host Ollama configuration was not changed. The optional `local_llm_only` policy is off by default; servers still need `OLLAMA_NO_CLOUD` set separately.
+
 ## v0.2.1 candidate — 2026-10-11
 
 The Windows release candidate was built with the real static frontend and tested against disposable PostgreSQL 16.15 databases. These results supersede the historical dependency and Windows-runtime limitations below; the older record is retained for traceability.

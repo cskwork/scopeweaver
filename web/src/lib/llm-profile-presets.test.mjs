@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyLLMProfilePreset, getLLMProfilePreset } from "./llm-profile-presets.ts";
+import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, LLM_PROFILE_PRESET_IDS } from "./llm-profile-presets.ts";
 
 test("GLM templates distinguish billing endpoints and use documented model settings", () => {
   const general = getLLMProfilePreset("zai-general");
@@ -15,6 +15,9 @@ test("GLM templates distinguish billing endpoints and use documented model setti
     assert.equal(preset.context_window_k, 1000);
     assert.equal(preset.max_tokens, 0);
     assert.equal(preset.max_tokens_field, "");
+    assert.equal("api_key" in preset, false, "GLM templates never touch credentials");
+    assert.equal("keep_alive" in preset, false);
+    assert.equal("llm_max_concurrent" in preset, false);
   }
 });
 
@@ -28,9 +31,51 @@ test("applying a template preserves entered secrets and unrelated draft preferen
   assert.equal(next.model, "user-selected-model", "the preset does not lock model editing");
 });
 
+test("three Ollama templates select native host, Docker host bridge and Compose service routes", () => {
+  const expected = {
+    "ollama-host": ["http://127.0.0.1:11434", "qwen2.5-coder:32b"],
+    "ollama-docker-host": ["http://host.docker.internal:11434", "qwen2.5-coder:32b"],
+    "ollama-compose": ["http://ollama:11434", "qwen2.5-coder:14b"],
+  };
+  assert.deepEqual(LLM_PROFILE_PRESET_IDS.filter(isOllamaPreset), Object.keys(expected));
+  for (const [id, [baseURL, model]] of Object.entries(expected)) {
+    assert.deepEqual(getLLMProfilePreset(id), {
+      format: "ollama",
+      base_url: baseURL,
+      model,
+      api_key: "",
+      thinking_type: "",
+      reasoning_effort: "",
+      context_window_k: 32,
+      max_tokens: 4096,
+      max_tokens_field: "",
+      keep_alive: "30m",
+      llm_max_concurrent: 1,
+    });
+  }
+});
+
+test("Ollama templates clear an unsaved cloud key but keep name, proxy, session header and other preferences", () => {
+  const draft = Object.freeze({ name: "Lab GPU", api_key: "sk-cloud-unsaved", proxy: "http://127.0.0.1:8080", session_header_key: "x-session", streaming: false, rate_per_minute: 7, priority: 3, pool_exclude: true });
+  for (const id of ["ollama-host", "ollama-docker-host", "ollama-compose"]) {
+    const next = applyLLMProfilePreset(draft, id);
+    assert.equal(next.api_key, "", `${id} must not carry the cloud key to a local endpoint`);
+    for (const key of ["name", "proxy", "session_header_key", "streaming", "rate_per_minute", "priority", "pool_exclude"]) assert.equal(next[key], draft[key]);
+    assert.equal(draft.api_key, "sk-cloud-unsaved", "the original draft is not mutated");
+  }
+});
+
+test("switching from an Ollama template back to GLM restores the cloud format without inventing a key", () => {
+  const local = applyLLMProfilePreset({ name: "n", api_key: "sk-cloud" }, "ollama-host");
+  const cloud = applyLLMProfilePreset(local, "zai-general");
+  assert.equal(cloud.format, "openai");
+  assert.equal(cloud.base_url, "https://api.z.ai/api/paas/v4");
+  assert.equal(cloud.api_key, "", "a cleared key stays cleared; the user re-enters it explicitly");
+});
+
 test("unsupported template IDs fail explicitly without changing the draft", () => {
   const draft = { api_key: "keep", model: "keep-model" };
-  for (const id of ["", "glm-unknown", "__proto__", "zai-general-extra"]) {
+  for (const id of ["", "glm-unknown", "__proto__", "zai-general-extra", "ollama", "ollama-host-extra", "constructor", "toString"]) {
     assert.throws(() => applyLLMProfilePreset(draft, id), RangeError);
     assert.deepEqual(draft, { api_key: "keep", model: "keep-model" });
   }

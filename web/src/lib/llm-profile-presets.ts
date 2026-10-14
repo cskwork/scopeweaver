@@ -1,10 +1,17 @@
 // Z.ai documentation verified 2026-10-03. Presets change form fields only.
 // https://docs.z.ai/guides/llm/glm-5.3
 // https://zcode.z.ai/en/docs/configuration
-export const LLM_PROFILE_PRESET_IDS = ["zai-general", "zai-coding-reference"] as const;
+// Ollama templates target the native /api/chat path (https://docs.ollama.com/api), verified 2026-10-15.
+export const LLM_PROFILE_PRESET_IDS = [
+  "zai-general",
+  "zai-coding-reference",
+  "ollama-host",
+  "ollama-docker-host",
+  "ollama-compose",
+] as const;
 export type LLMProfilePresetId = (typeof LLM_PROFILE_PRESET_IDS)[number];
 
-export interface LLMProfilePresetFields {
+export interface ZaiPresetFields {
   format: "openai";
   model: string;
   base_url: string;
@@ -15,9 +22,52 @@ export interface LLMProfilePresetFields {
   max_tokens_field: "";
 }
 
+export interface OllamaPresetFields {
+  format: "ollama";
+  model: string;
+  base_url: string;
+  // Native templates clear any unsaved key so a cloud credential is never sent to a local endpoint.
+  api_key: "";
+  // Empty values omit the fields: Ollama decides thinking per model.
+  thinking_type: "";
+  reasoning_effort: "";
+  // Binary K for Ollama: 32 sends options.num_ctx = 32768.
+  context_window_k: number;
+  max_tokens: number;
+  max_tokens_field: "";
+  keep_alive: string;
+  llm_max_concurrent: number;
+}
+
+export type LLMProfilePresetFields = ZaiPresetFields | OllamaPresetFields;
+
+const OLLAMA_TARGETS: Record<string, { base_url: string; model: string }> = {
+  "ollama-host": { base_url: "http://127.0.0.1:11434", model: "qwen2.5-coder:32b" },
+  "ollama-docker-host": { base_url: "http://host.docker.internal:11434", model: "qwen2.5-coder:32b" },
+  "ollama-compose": { base_url: "http://ollama:11434", model: "qwen2.5-coder:14b" },
+};
+
+export function isOllamaPreset(id: string): boolean {
+  return Object.hasOwn(OLLAMA_TARGETS, id);
+}
+
 export function getLLMProfilePreset(id: string): Readonly<LLMProfilePresetFields> {
   if (!(LLM_PROFILE_PRESET_IDS as readonly string[]).includes(id)) {
     throw new RangeError(`Unknown LLM profile preset: ${id}`);
+  }
+  if (isOllamaPreset(id)) {
+    return {
+      format: "ollama",
+      ...OLLAMA_TARGETS[id],
+      api_key: "",
+      thinking_type: "",
+      reasoning_effort: "",
+      context_window_k: 32,
+      max_tokens: 4096,
+      max_tokens_field: "",
+      keep_alive: "30m",
+      llm_max_concurrent: 1,
+    };
   }
   return {
     format: "openai",
@@ -32,7 +82,8 @@ export function getLLMProfilePreset(id: string): Readonly<LLMProfilePresetFields
   };
 }
 
-// Unknown fields, including credentials and profile names, survive unchanged.
+// Unknown fields, including profile names, proxies and session headers, survive unchanged.
+// GLM templates also keep entered credentials; Ollama templates clear them (see api_key above).
 // The original draft is not mutated, and no request or persistence occurs here.
 export function applyLLMProfilePreset<T extends object>(draft: T, id: string): T & LLMProfilePresetFields {
   return { ...draft, ...getLLMProfilePreset(id) };
