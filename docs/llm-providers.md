@@ -2,7 +2,7 @@
 
 ScopeWeaver supports four profile formats: **Anthropic**, **OpenAI Chat Completions**, **OpenAI Responses** and native **Ollama**. Every format keeps its custom base URL, proxy, session header, retry, rate and concurrency settings, so cloud providers, gateways and self-hosted OpenAI-compatible servers keep working unchanged. Ollama is optional, and cloud providers remain the default-compatible path.
 
-A template only fills a **new profile's form**; it does not contact a provider, save credentials, activate a profile, or modify existing profiles. Format, base URL and model stay editable after any template.
+A template fills a **new profile's form** without saving credentials, activating a profile, or modifying existing profiles. Ollama templates also read installed models from the selected server; cloud templates make no requests. Format, base URL and model stay editable after any template.
 
 ## Z.ai GLM-5.3
 
@@ -46,7 +46,7 @@ Open **LLM → New → Configuration template → Local inference (Ollama)**.
 | --- | --- | --- | --- |
 | Format | Ollama (native /api/chat) | Ollama (native /api/chat) | Ollama (native /api/chat) |
 | Base URL | `http://127.0.0.1:11434` | `http://host.docker.internal:11434` | `http://ollama:11434` |
-| Model | `qwen2.5-coder:32b` | `qwen2.5-coder:32b` | `qwen2.5-coder:14b` |
+| Model | Installed model from this server | Installed model from this server | Installed model from this server |
 | API key | empty | empty | empty |
 | Context window (K) | `32` (`num_ctx` 32,768) | `32` | `32` |
 | Max concurrent requests | `1` | `1` | `1` |
@@ -54,9 +54,9 @@ Open **LLM → New → Configuration template → Local inference (Ollama)**.
 | Output limit | `4096` | `4096` | `4096` |
 | Thinking / effort | omitted (model default) | omitted | omitted |
 
-Selecting a template does not save, activate or contact the endpoint. **Test connection** and **Load models** make requests only when clicked.
+Selecting an Ollama template reads `/api/tags` and model metadata from the selected endpoint, then chooses an installed model, preferring one that declares `tools`. Choosing the Ollama format for a new profile does the same; a blank endpoint or an unchanged cloud-template endpoint uses the host default. A custom endpoint stays unchanged. The model is blank while discovery runs, and stays blank with an error if discovery fails or the list is empty. Check the endpoint, optional token and proxy, then click **Load models** or enter a model tag manually. Editing the model or connection fields cancels the pending selection; late responses cannot overwrite those edits. Opening an existing profile preserves its stored model. Selection never downloads or runs a model, saves, or activates a profile. **Test connection** runs only when clicked.
 
-**API key behavior:** Ollama templates keep the profile name, proxy, session header and other entered preferences, but **clear any unsaved API key** so a cloud credential is never sent to a local endpoint. The GLM templates still keep an entered key. Leave the key blank for local Ollama; enter a token only when a reverse proxy in front of Ollama requires one (it is sent as `Authorization: Bearer`). Keyless Ollama profiles can be tested, saved, activated and used in failover; the profile card shows **No key needed** instead of a missing-key warning. When you edit a saved native Ollama profile, a blank key field keeps the saved token; switching a cloud profile to Ollama with the field blank deletes the old cloud key.
+**API key behavior:** Ollama templates and switching to the Ollama format clear an unsaved key before discovery. Ollama templates keep the profile name, proxy, session header and other entered preferences, but **clear any unsaved API key** so a cloud credential is never sent to a local endpoint. The GLM templates still keep an entered key. Leave the key blank for local Ollama; enter a token only when a reverse proxy in front of Ollama requires one (it is sent as `Authorization: Bearer`). Keyless Ollama profiles can be tested, saved, activated and used in failover; the profile card shows **No key needed** instead of a missing-key warning. When you edit a saved native Ollama profile, a blank key field keeps the saved token; switching a cloud profile to Ollama with the field blank deletes the old cloud key.
 
 **Keys for the other formats:** Anthropic and OpenAI formats require a key unless the base URL is explicitly local, meaning its host resolves only to loopback or private addresses. A keyless local OpenAI-compatible server such as vLLM or LM Studio therefore works with a blank key. ScopeWeaver then sends an internal non-secret placeholder so the SDK does not inherit `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` from the environment. A non-local endpoint with no key is refused (*llm: API key required for non-local compatible endpoint*).
 
@@ -158,11 +158,11 @@ Approximate starting points by GPU VRAM or Apple unified memory, using the tool-
 | Memory | Example model | Context window (K) | Role |
 | --- | --- | --- | --- |
 | 8–12 GB | `qwen2.5-coder:7b`, `qwen3:8b` | `16`–`32` | Approval judge or auxiliary profile; weak as the main agent |
-| 16–24 GB | `qwen2.5-coder:14b`, `qwen3:14b` | `32` | Main agent on a workstation (Compose template default) |
-| 32–48 GB | `qwen2.5-coder:32b`, `qwen3:32b` | `32` | Main agent (host template default). Use `64` only with a model whose limit allows it; these list 32K and 40K |
+| 16–24 GB | `qwen2.5-coder:14b`, `qwen3:14b` | `32` | Main agent on a workstation  |
+| 32–48 GB | `qwen2.5-coder:32b`, `qwen3:32b` | `32` | Main agent. Use `64` only with a model whose limit allows it; these list 32K and 40K |
 | 64–128 GB+ | `llama3.3:70b` | `64` (model lists 128K) | Main agent on large-memory hosts; 64K needs the upper part of this range |
 
-The templates keep their defaults regardless of tier: `qwen2.5-coder:32b` for host templates and `qwen2.5-coder:14b` for Compose, both at 32K.
+Templates choose from models installed on the selected server and use a 32K context. Hardware examples are not automatic model choices.
 
 ### Model candidates
 
@@ -171,8 +171,8 @@ Only models whose [Ollama library](https://ollama.com/library) page lists the `t
 | Model | Download | Notes |
 | --- | --- | --- |
 | `qwen2.5-coder:7b` | 4.7 GB | Smallest practical candidate; also a judge candidate |
-| `qwen2.5-coder:14b` | 9.0 GB | Compose template default |
-| `qwen2.5-coder:32b` | 20 GB | Host templates default |
+| `qwen2.5-coder:14b` | 9.0 GB | Workstation candidate |
+| `qwen2.5-coder:32b` | 20 GB | Larger-host candidate |
 | `qwen3:8b`, `qwen3:14b`, `qwen3:32b` | 5.2 / 9.3 / 20 GB | Also declare `thinking` |
 | `llama3.3:70b` | 43 GB | Large-memory hosts |
 

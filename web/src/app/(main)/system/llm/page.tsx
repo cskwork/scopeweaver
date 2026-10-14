@@ -29,7 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { applyLLMProfilePreset, isOllamaPreset, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
+import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, selectInstalledOllamaModel, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
 import { api } from "@/lib/api";
 import { pullCommand } from "@/lib/ollama-pull";
 import type { LLMModelDetail, LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride, LLMTestResult } from "@/lib/types";
@@ -358,10 +358,28 @@ function ProfileSheet({
   const [models, setModels] = React.useState<string[]>([]);
   const [loadingModels, setLoadingModels] = React.useState(false);
   const [modelsOpen, setModelsOpen] = React.useState(false);
+  const [modelsError, setModelsError] = React.useState("");
+  const modelsRequest = React.useRef(0);
+
+  function invalidateModels() {
+    modelsRequest.current += 1;
+    setLoadingModels(false);
+    setModelsError("");
+    setModels([]);
+    setModelDetails([]);
+    setModelsOpen(false);
+    setDiag(null);
+  }
+
+  function changeOpen(nextOpen: boolean) {
+    invalidateModels();
+    onOpenChange(nextOpen);
+  }
 
   // Populate from the supplied profile on every open, or reset defaults for creation.
   // Closing and reopening starts fresh without stale values from another profile.
   React.useEffect(() => {
+    invalidateModels();
     if (!open) return;
     setPreset("");
     setName(profile?.name ?? "");
@@ -389,10 +407,12 @@ function ProfileSheet({
     setKeyHint(profile?.api_key_hint ?? "");
     setModels([]);
     setModelsOpen(false);
+    return () => { modelsRequest.current += 1; };
   }, [open, profile]);
 
   function applyPreset(id: string) {
     if (!isNew) return;
+    invalidateModels();
     const next = applyLLMProfilePreset({ name, api_key: apiKey, proxy, session_header_key: sessionHeaderKey }, id);
     setPreset(id as LLMProfilePresetId);
     setFormat(next.format);
@@ -407,6 +427,7 @@ function ProfileSheet({
       setApiKey(next.api_key);
       setKeepAlive(next.keep_alive);
       setMaxConcurrent(String(next.llm_max_concurrent));
+      void loadModels({ format: "ollama", baseUrl: next.base_url, apiKey: "", proxy }, true);
     }
     setModels([]);
     setModelDetails([]);
@@ -423,25 +444,59 @@ function ProfileSheet({
   const modelLacksTools =
     format === "ollama" && (lacksTools(detailOf(model.trim())) || (!!testedModel?.capabilities?.length && testedModel.tools_supported === false));
 
-  async function loadModels() {
-    if (loadingModels) return;
+  function changeFormat(nextFormat: ProfileFormat) {
+    invalidateModels();
+    setFormat(nextFormat);
+    if (nextFormat === "ollama" && format !== "ollama") {
+      // Drop a cloud template's URL and credential before read-only local discovery.
+      const cloudTemplateURL = (ZAI_PRESETS as readonly string[]).includes(preset)
+        ? getLLMProfilePreset(preset).base_url : "";
+      const nextBaseUrl = !baseUrl.trim() || baseUrl === cloudTemplateURL
+        ? getLLMProfilePreset("ollama-host").base_url : baseUrl;
+      setApiKey("");
+      setKeyHint("");
+      setBaseUrl(nextBaseUrl);
+      if (isNew) {
+        setModel("");
+        void loadModels({ format: "ollama", baseUrl: nextBaseUrl, apiKey: "", proxy }, true);
+      }
+    }
+    setPreset("");
+  }
+
+  async function loadModels(
+    target = { format, baseUrl, apiKey, proxy },
+    selectDefault = false,
+  ) {
+    const request = ++modelsRequest.current;
     setLoadingModels(true);
+    setModelsError("");
     setModels([]);
     setModelDetails([]);
+    setModelsOpen(false);
     try {
-      const r = await api.fetchLLMModels(format, baseUrl, apiKey, proxy, profileId);
+      const r = await api.fetchLLMModels(target.format, target.baseUrl, target.apiKey, target.proxy, profileId);
+      if (request !== modelsRequest.current) return;
       if (r.ok && r.models && r.models.length > 0) {
         setModels(r.models);
         setModelDetails(r.model_details ?? []);
-        setModelsOpen(true);
-        toast.success(swt("interface.m1370", { p0: r.models.length }));
+        if (selectDefault) setModel(selectInstalledOllamaModel(r.models, r.model_details));
+        else {
+          setModelsOpen(true);
+          toast.success(swt("interface.m1370", { p0: r.models.length }));
+        }
       } else {
-        toast.error(swt("interface.m1371", { p0: r.error ?? swt("interface.m1372") }));
+        const message = swt("interface.m1371", { p0: r.error ?? swt("interface.m1372") });
+        setModelsError(message);
+        toast.error(message);
       }
     } catch (e) {
-      toast.error(swt("interface.m1373", { p0: (e as Error).message }));
+      if (request !== modelsRequest.current) return;
+      const message = swt("interface.m1373", { p0: (e as Error).message });
+      setModelsError(message);
+      toast.error(message);
     } finally {
-      setLoadingModels(false);
+      if (request === modelsRequest.current) setLoadingModels(false);
     }
   }
 
@@ -529,7 +584,7 @@ function ProfileSheet({
   }
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet open={open} onOpenChange={changeOpen}>
       <SheetContent
         side="right"
         className="flex flex-col gap-0 p-0 data-[side=right]:min-w-[420px] data-[side=right]:sm:max-w-xl"
@@ -610,7 +665,7 @@ function ProfileSheet({
             </div>
             <div className="grid gap-2">
               <Label>{swt("interface.m1388")}</Label>
-              <Select value={format} onValueChange={(v) => setFormat(v as ProfileFormat)}>
+              <Select value={format} onValueChange={(v) => changeFormat(v as ProfileFormat)}>
                 <SelectTrigger aria-label={swt("interface.m1388")}>
                   <SelectValue placeholder={swt("interface.m1389")} />
                 </SelectTrigger>
@@ -632,7 +687,7 @@ function ProfileSheet({
                 className="font-mono"
                 placeholder="claude-opus-4-8"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => { invalidateModels(); setModel(e.target.value); }}
               />
               {/* This body-portaled Popover sits outside Sheet's scroll lock. modal gives it the top scroll lock so its list can scroll. */}
               <Popover open={modelsOpen} onOpenChange={setModelsOpen} modal>
@@ -643,7 +698,7 @@ function ProfileSheet({
                     size="icon"
                     className="shrink-0"
                     disabled={loadingModels}
-                    onClick={loadModels}
+                    onClick={() => void loadModels()}
                     title={swt("interface.m1390")}
                   >
                     {loadingModels ? <Loader2Icon className="animate-spin" /> : <RefreshCwIcon />}
@@ -659,6 +714,9 @@ function ProfileSheet({
                           type="button"
                           className="grid w-full shrink-0 gap-1 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent hover:text-accent-foreground"
                           onClick={() => {
+                            modelsRequest.current += 1;
+                            setLoadingModels(false);
+                            setModelsError("");
                             setModel(m);
                             setModelsOpen(false);
                           }}
@@ -690,6 +748,7 @@ function ProfileSheet({
                 )}
               </Popover>
             </div>
+            {modelsError && <p role="alert" className="text-destructive text-xs">{modelsError}</p>}
             {modelLacksTools && (
               <p role="alert" className="text-amber-700 text-xs dark:text-amber-400">
                 {swt("providers.noTools")}
@@ -704,7 +763,7 @@ function ProfileSheet({
               className="font-mono"
               placeholder="https://api.openai.com/v1"
               value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
+              onChange={(e) => { invalidateModels(); setBaseUrl(e.target.value); }}
             />
           </div>
 
@@ -715,7 +774,7 @@ function ProfileSheet({
               className="font-mono"
               placeholder="socks5://user:pass@127.0.0.1:1080 · http://127.0.0.1:8080"
               value={proxy}
-              onChange={(e) => setProxy(e.target.value)}
+              onChange={(e) => { invalidateModels(); setProxy(e.target.value); }}
             />
             <p className="text-muted-foreground text-xs">
               {swt("interface.m1393")}</p>
@@ -741,7 +800,7 @@ function ProfileSheet({
               type="password"
               placeholder={keyHint ? swt("interface.m1399", { p0: keyHint }) : keyPlaceholder}
               value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
+              onChange={(e) => { invalidateModels(); setApiKey(e.target.value); }}
             />
             {format === "ollama" && <p className="text-muted-foreground text-xs">{swt("providers.ollamaKeyHelp")}</p>}
           </div>
