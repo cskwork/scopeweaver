@@ -91,8 +91,8 @@ activate, or contact a provider. Coding Plan use is restricted to officially sup
 ScopeWeaver is not listed. See [provider setup and support limits](docs/llm-providers.md).
 
 Optional **native Ollama** profiles run without an API key. Three templates cover Ollama on the same
-machine, on the host from Docker, and the opt-in `docker compose --profile local-llm` service. They
-send a 32K context (`num_ctx` 32,768), one request at a time and a 30-minute keep-alive. An opt-in
+machine, on the host from Docker, and the opt-in `docker compose --profile local-llm` service. Selecting one reads installed models and prefills one, preferring declared tool support;
+it does not download or run a model. They send a 32K context (`num_ctx` 32,768), one request at a time and a 30-minute keep-alive. An opt-in
 **local-only LLM network** setting (off by default) restricts LLM connections to local or trusted
 addresses. Cloud formats, custom URLs and proxies keep working. See
 [native Ollama](docs/llm-providers.md#native-ollama-local-inference).

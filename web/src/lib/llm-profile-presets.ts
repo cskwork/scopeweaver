@@ -1,4 +1,4 @@
-// Z.ai documentation verified 2026-10-03. Presets change form fields only.
+// Z.ai documentation verified 2026-10-03. This helper changes form fields only.
 // https://docs.z.ai/guides/llm/glm-5.3
 // https://zcode.z.ai/en/docs/configuration
 // Ollama templates target the native /api/chat path (https://docs.ollama.com/api), verified 2026-10-15.
@@ -41,10 +41,10 @@ export interface OllamaPresetFields {
 
 export type LLMProfilePresetFields = ZaiPresetFields | OllamaPresetFields;
 
-const OLLAMA_TARGETS: Record<string, { base_url: string; model: string }> = {
-  "ollama-host": { base_url: "http://127.0.0.1:11434", model: "qwen2.5-coder:32b" },
-  "ollama-docker-host": { base_url: "http://host.docker.internal:11434", model: "qwen2.5-coder:32b" },
-  "ollama-compose": { base_url: "http://ollama:11434", model: "qwen2.5-coder:14b" },
+const OLLAMA_TARGETS: Record<string, { base_url: string }> = {
+  "ollama-host": { base_url: "http://127.0.0.1:11434" },
+  "ollama-docker-host": { base_url: "http://host.docker.internal:11434" },
+  "ollama-compose": { base_url: "http://ollama:11434" },
 };
 
 export function isOllamaPreset(id: string): boolean {
@@ -59,6 +59,8 @@ export function getLLMProfilePreset(id: string): Readonly<LLMProfilePresetFields
     return {
       format: "ollama",
       ...OLLAMA_TARGETS[id],
+      // The form discovers an installed model from this server; never assume a tag is installed.
+      model: "",
       api_key: "",
       thinking_type: "",
       reasoning_effort: "",
@@ -87,4 +89,14 @@ export function getLLMProfilePreset(id: string): Readonly<LLMProfilePresetFields
 // The original draft is not mutated, and no request or persistence occurs here.
 export function applyLLMProfilePreset<T extends object>(draft: T, id: string): T & LLMProfilePresetFields {
   return { ...draft, ...getLLMProfilePreset(id) };
+}
+
+// Choose only from the installed list, preferring confirmed native tool support.
+export function selectInstalledOllamaModel(
+  models: readonly string[],
+  details: readonly { name?: string; model?: string; capabilities?: string[]; error?: string }[] = [],
+): string {
+  return models.find((model) => details.some((d) =>
+    (d.name === model || d.model === model) && !d.error && d.capabilities?.includes("tools"),
+  )) ?? models[0] ?? "";
 }

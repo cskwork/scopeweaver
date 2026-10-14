@@ -2,7 +2,22 @@
 
 [한국어](ko/VERIFICATION.md)
 
-## Native Ollama branch — 2026-10-15 (branch-local, not a release)
+## Installed-model selection follow-up — 2026-10-15
+
+Local verification of the new-profile Ollama default selection on `feat/ollama-native-flexible-providers`. This follow-up supersedes the earlier template behavior: selecting Ollama now performs read-only model discovery. The historical 37-check browser snapshot below predates this behavior; its “no implicit requests” assertion is historical, not the current Ollama contract.
+
+| Check | Result |
+| --- | --- |
+| Frontend unit and localization tests (`npm --prefix web test`) | 45 passed, 0 failures |
+| Production static export (`npm --prefix web run build:static`) | Passed, including TypeScript and all 31 pages |
+| Real host installed-model discovery through the browser and authenticated backend | Passed on an unsaved new profile, same-machine Ollama, blank proxy and API key |
+| Expanded full browser smoke on the embedded binary and fresh `scopeweaver_test_default_final` database | 43 passed, 0 failures (31 smoke checks + 12 dashboard scenarios). Covers English/Korean installed defaults for all three templates, direct format selection, cloud compatibility, metadata-only selection, failed/empty discovery, manual edits and late-response rejection, reopening drafts and existing profiles, plus existing setup, sign-in, localization, SSE and dashboard regressions |
+
+The real host's `/api/tags` returned `qwen2.5-coder:7b`, `qwen3:4b`, and `embeddinggemma:latest`. The browser selected **`qwen2.5-coder:7b`**, the first returned installed model declaring `tools`. Its metadata reported `completion`, `tools`, `insert`, 7.6B parameters and Q4_K_M quantization. `qwen3:4b` also declared `tools`; `embeddinggemma:latest` declared only `embedding`.
+
+The browser sent exactly one LLM operation, `POST /api/llm/models`, using the host endpoint with no key or proxy. The new draft was closed without save, activation, connection testing or inference. Model and machine configuration were unchanged. This proves installed-model selection and metadata discovery; it does not establish tool execution or autonomous task reliability.
+
+## Historical native Ollama branch — 2026-10-15 (branch-local, not a release)
 
 Local checks on `feat/ollama-native-flexible-providers`, recorded before the pull request was opened. Remote PR CI is tracked separately in GitHub Actions; nothing here is a release, merge or CI result.
 

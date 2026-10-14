@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, LLM_PROFILE_PRESET_IDS } from "./llm-profile-presets.ts";
+import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, selectInstalledOllamaModel, LLM_PROFILE_PRESET_IDS } from "./llm-profile-presets.ts";
 
 test("GLM templates distinguish billing endpoints and use documented model settings", () => {
   const general = getLLMProfilePreset("zai-general");
@@ -33,9 +33,9 @@ test("applying a template preserves entered secrets and unrelated draft preferen
 
 test("three Ollama templates select native host, Docker host bridge and Compose service routes", () => {
   const expected = {
-    "ollama-host": ["http://127.0.0.1:11434", "qwen2.5-coder:32b"],
-    "ollama-docker-host": ["http://host.docker.internal:11434", "qwen2.5-coder:32b"],
-    "ollama-compose": ["http://ollama:11434", "qwen2.5-coder:14b"],
+    "ollama-host": ["http://127.0.0.1:11434", ""],
+    "ollama-docker-host": ["http://host.docker.internal:11434", ""],
+    "ollama-compose": ["http://ollama:11434", ""],
   };
   assert.deepEqual(LLM_PROFILE_PRESET_IDS.filter(isOllamaPreset), Object.keys(expected));
   for (const [id, [baseURL, model]] of Object.entries(expected)) {
@@ -79,4 +79,22 @@ test("unsupported template IDs fail explicitly without changing the draft", () =
     assert.throws(() => applyLLMProfilePreset(draft, id), RangeError);
     assert.deepEqual(draft, { api_key: "keep", model: "keep-model" });
   }
+});
+
+test("installed Ollama default prefers confirmed tools while preserving the returned order", () => {
+  const models = ["embeddinggemma:latest", "qwen3:4b", "qwen2.5-coder:7b"];
+  assert.equal(selectInstalledOllamaModel(models, [
+    { name: "embeddinggemma:latest", capabilities: ["embedding"] },
+    { model: "not-installed:32b", capabilities: ["tools"] },
+    { model: "qwen2.5-coder:7b", capabilities: ["tools"] },
+    { name: "qwen3:4b", capabilities: ["tools", "thinking"] },
+  ]), "qwen3:4b");
+});
+
+test("installed Ollama default falls back to the first installed model and never invents a tag", () => {
+  assert.equal(selectInstalledOllamaModel(["custom:latest", "other:7b"]), "custom:latest");
+  assert.equal(selectInstalledOllamaModel(["custom:latest", "other:7b"], [
+    { model: "other:7b", capabilities: ["tools"], error: "metadata failed" },
+  ]), "custom:latest");
+  assert.equal(selectInstalledOllamaModel([], [{ name: "not-installed:32b", capabilities: ["tools"] }]), "");
 });
