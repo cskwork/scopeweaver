@@ -10,6 +10,8 @@ ScopeWeaver는 [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)의 커밋 `
 
 이 변경 날짜는 릴리스 태그가 아니며 바이너리 릴리스나 컨테이너 이미지 공개를 뜻하지 않습니다. `sidequestion/`의 과거 검증 문서는 원본 실행 기록이며 새 ScopeWeaver 검증 결과가 아닙니다. 번역된 과거 JSON은 기술 식별자와 측정값을 유지하고 서술 번역임을 표시합니다.
 
+**2026-10-15** 변경에서는 선택형 기본 Ollama 프로필 형식(`num_ctx`, `keep_alive`, `num_predict`를 보내는 `/api/chat`), 새 프로필 전용 Ollama 템플릿 세 개, 키 없는 로컬 프로필, 프로필별 동시 요청 수, Ollama에 맞춘 예열·압축·승인 판정 기본값, 선택형 `local_llm_only` LLM 네트워크 정책을 추가합니다. `SCOPEWEAVER_LLM_*`와 `SCOPEWEAVER_LOCAL_LLM_*` 변수는 유지하는 `ARTEX_*` 설정보다 우선하는 별칭입니다. 기존 Anthropic, OpenAI, OpenAI Responses, 사용자 지정 URL, 프록시, GLM 템플릿 동작은 유지하며 정책의 기본값은 꺼짐입니다.
+
 **2026-10-03**에는 서버 번역의 최종 점검을 완료하고 GLM-5.3 설정 템플릿과 추론을 항상 켜야 하는 모델의 호환 처리를 추가했습니다. 템플릿은 기존 제공자 연결 방식을 사용하며 프로필을 자동으로 만들거나 활성화하지 않습니다.
 
 ARTEX의 후속 커밋 `e2c8a23`, `86729b6`, `a951e4a`를 백포트했습니다.

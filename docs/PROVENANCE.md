@@ -10,6 +10,8 @@ The original `LICENSE` is retained unchanged. Original authorship, contributor a
 
 This modification date is not a release tag. It does not assert that binary releases or container images have been published. Historical validation documents under `sidequestion/` describe upstream runs; they are not new ScopeWeaver verification receipts. Translated historical JSON preserves technical identifiers and measurements while labeling translated narrative.
 
+Modifications on **2026-10-15** add an optional native Ollama profile format (`/api/chat` with `num_ctx`, `keep_alive` and `num_predict`), three new-form Ollama templates, keyless local profiles, per-profile concurrency, Ollama-aware pre-warm, compaction and approval-judge defaults, and an opt-in `local_llm_only` LLM network policy. `SCOPEWEAVER_LLM_*` and `SCOPEWEAVER_LOCAL_LLM_*` variables are added as aliases that take precedence over the retained `ARTEX_*` contracts. Existing Anthropic, OpenAI, OpenAI Responses, custom URL, proxy and GLM template behavior is preserved, and the policy is off by default.
+
 Additional modifications on **2026-10-03** complete the server translation audit and add GLM-5.3 configuration templates plus its required always-enabled reasoning compatibility. Templates use the existing provider adapter and do not create or activate a profile automatically.
 
 The subsequent upstream fixes from ARTEX commits `e2c8a23`, `86729b6`, and

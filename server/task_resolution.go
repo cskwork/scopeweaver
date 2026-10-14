@@ -4,6 +4,7 @@ import (
 	"github.com/Autumn-27/artex/locale"
 	"net/http"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/db"
 )
 
@@ -34,7 +35,7 @@ func (s *Server) resolutionFromProfileForLanguage(p *db.LLMProfile, source strin
 		Model:     p.Model,
 		Source:    source,
 	}
-	if p.APIKey == "" {
+	if !agent.ConfigFrom(p.Format, p.Model, p.BaseURL, p.APIKey, p.Proxy).Ready() {
 		result.Reason = locale.Text(lang, "LLM profile has no API key")
 		return result
 	}

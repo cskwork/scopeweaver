@@ -362,7 +362,7 @@ CREATE TABLE IF NOT EXISTS settings (
 CREATE TABLE IF NOT EXISTS llm_profiles (
     id               BIGSERIAL PRIMARY KEY,
     name             TEXT NOT NULL UNIQUE,
-    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses')),
+    format           TEXT NOT NULL CHECK (format IN ('openai','anthropic','openai-responses','ollama')),
     base_url         TEXT,
     proxy            TEXT,
     model            TEXT NOT NULL,
@@ -416,10 +416,16 @@ ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS pool_exclude BOOLEAN NOT NULL 
 -- Add streaming switch to older databases; default true preserves streaming transparently.
 ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS streaming    BOOLEAN NOT NULL DEFAULT true;
 -- Expand format constraints to include openai-responses (OpenAI Responses API) for older databases.
--- Idempotent on every startup: drop the old CHECK and recreate with all three values.
+-- Idempotent on every startup: drop the old CHECK and recreate with all supported values.
 ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_format_check;
 ALTER TABLE llm_profiles ADD  CONSTRAINT llm_profiles_format_check
-    CHECK (format IN ('openai','anthropic','openai-responses'));
+    CHECK (format IN ('openai','anthropic','openai-responses','ollama'));
+
+-- Native Ollama options are additive; cloud profiles retain their existing defaults.
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS keep_alive TEXT NOT NULL DEFAULT '';
+ALTER TABLE llm_profiles ADD COLUMN IF NOT EXISTS llm_max_concurrent INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE llm_profiles DROP CONSTRAINT IF EXISTS llm_profiles_max_concurrent_check;
+ALTER TABLE llm_profiles ADD CONSTRAINT llm_profiles_max_concurrent_check CHECK (llm_max_concurrent >= 0);
 
 -- Add output cap and field name to older databases. Defaults 0/'' omit the cap and retain max_tokens,
 -- preserving existing profile behavior.

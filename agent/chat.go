@@ -24,6 +24,7 @@ import (
 // LS/Glob/Grep) plus whatever skills/MCP the key is made visible; NO pentest
 // graph/task context is injected (that stays exclusive to MainAgent).
 type ChatAgent struct {
+	nativeOllamaFn func() bool
 	prov           llm.Provider
 	model          string
 	workDir        string
@@ -37,6 +38,9 @@ type ChatAgent struct {
 	noaEnabledFn   func() bool  // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn    func() int   // resolver: per-reply output cap (nil/0 = send no cap)
 }
+
+// SetNativeOllamaResolver resolves whether the current run uses native Ollama.
+func (c *ChatAgent) SetNativeOllamaResolver(fn func() bool) { c.nativeOllamaFn = fn }
 
 func NewChatAgent(prov llm.Provider, model, workDir string, tx *transcript.Store, window int) *ChatAgent {
 	return &ChatAgent{prov: prov, model: model, workDir: workDir, tx: tx, window: window}
@@ -169,6 +173,8 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		opts.SessionID = sessionID
 	}
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
+	secureWebSearch(&opts, ws.PolicyResolver)
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: c.nativeOllamaFn != nil && c.nativeOllamaFn(), ContextWindow: c.window})
 	enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
 	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)
