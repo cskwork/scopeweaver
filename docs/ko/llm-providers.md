@@ -129,7 +129,11 @@ ScopeWeaver는 Ollama 서버가 이후에 하는 일을 볼 수 없습니다. **
 | `CONTEXT_WINDOW_K`, `MAX_TOKENS`, `KEEP_ALIVE`, `MAX_CONCURRENT` | 위에서 설명한 설정 |
 | `THINKING_TYPE`, `REASONING_EFFORT`, `STREAM` | 기존 추론 및 스트리밍 옵션 |
 
-정책 변수: `SCOPEWEAVER_LOCAL_LLM_ONLY` / `ARTEX_LOCAL_LLM_ONLY`, 쉼표로 구분한 `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` / `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`. `ANTHROPIC_API_KEY`와 `OPENAI_API_KEY`는 클라우드 프로필에서 계속 사용할 수 있습니다.
+정책 변수: `SCOPEWEAVER_LOCAL_LLM_ONLY` / `ARTEX_LOCAL_LLM_ONLY`, 쉼표로 구분한 `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` / `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`.
+
+시작 시 Anthropic·OpenAI 형식에 공통 키가 설정되어 있지 않으면 `ANTHROPIC_API_KEY` 또는 `OPENAI_API_KEY`를 사용합니다. 인증이 필요한 로컬 게이트웨이도 같습니다. 제공자 키가 설정된 환경에서 키 없는 로컬 프로필로 시작하려면 `SCOPEWEAVER_LLM_API_KEY=`(또는 `ARTEX_LLM_API_KEY=`)를 명시적으로 비워 설정하세요. 설정 파일의 키를 덮어쓰고 제공자 키도 사용하지 않습니다. 네이티브 Ollama는 `OLLAMA_API_KEY`만 사용하며 Anthropic·OpenAI 키를 가져오지 않습니다.
+
+UI에서 새 프로필의 키를 비워 저장하면 제공자 환경 변수의 키를 가져오지 않습니다. **연결 테스트**에서는 프로필 ID가 있으면 해당 프로필의 저장된 키를 사용할 수 있습니다. 프로필 ID 없이 로컬 Anthropic·OpenAI 연결을 테스트할 때는 형식, 정규화된 기본 URL, 프록시가 활성 서비스와 모두 같을 때만 활성 키를 사용합니다. 새 초안을 테스트할 때도 같은 기준입니다. 로컬 엔드포인트, 형식, 프록시 중 하나라도 다르면 활성 키를 가져오지 않으며, 네이티브 Ollama는 활성 클라우드 키를 가져오지 않습니다. 로컬이 아닌 연결 테스트는 기존처럼 활성 키를 사용할 수 있습니다.
 
 ```bash
 # Docker의 ScopeWeaver가 호스트 Ollama를 사용하는 .env 예

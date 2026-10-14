@@ -2,6 +2,22 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Provider authentication follow-up — 2026-10-15
+
+Local regression checks on `fix/provider-env-auth`, based on merged main `38fde23`, reproduce and fix two authenticated-local-gateway failures. Startup provider-key fallback and blank-key connection testing each returned HTTP 401 with the previous implementation for Anthropic, OpenAI Chat Completions and OpenAI Responses. The same fixtures pass with the fixes.
+
+| Check | Result |
+| --- | --- |
+| [`FromEnv → NewProvider` local HTTP authentication](../agent/provider_env_test.go) | 21 scenario cases passed: 18 generic-format cases covering provider keys, file keys, modern/legacy overrides and explicit blank overrides; 3 native cases covering cloud-key isolation, an Ollama token and an explicit blank override |
+| [Connection-test handler through local HTTP fixtures](../server/llm_gateway_test.go) | 16 scenario cases passed: 15 generic-format cases covering a matching normalized service, different endpoint/format/proxy and preserved non-local fallback; 1 native case rejecting active cloud-key inheritance |
+| Both focused groups with `-race` | Passed, no race reports |
+
+The **37 cases** above count leaf scenarios, excluding parent tests. Authentication failures were reproduced before each product fix and the same tests passed afterward. Public documentation addresses in the non-local handler cases use an explicit local fixture proxy; no public provider is contacted.
+
+A blank-key connection test without a profile ID can reuse the active local service's key only when the generic format, normalized base URL and proxy all match, including for a new draft. Different local services and native Ollama remain isolated. Saving a new blank-key profile does not import environment credentials.
+
+These checks establish the tested protocol and credential boundaries, not paid-account availability or every historical feature. Full-suite, browser, CI, merged-main and release-artifact results after these fixes are separate gates. No paid provider calls were made.
+
 ## Installed-model selection follow-up — 2026-10-15
 
 Local verification of the new-profile Ollama default selection on `feat/ollama-native-flexible-providers`. This follow-up supersedes the earlier template behavior: selecting Ollama now performs read-only model discovery. The historical 37-check browser snapshot below predates this behavior; its “no implicit requests” assertion is historical, not the current Ollama contract.

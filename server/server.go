@@ -1454,10 +1454,17 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	if cfg.APIKey == "" && !cfg.Ready() {
+	if cfg.APIKey == "" {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey
+		active := s.llmCfg
 		s.cfgMu.Unlock()
+		active = agent.ConfigFrom(active.Provider(), active.Model, active.BaseURL, active.APIKey, active.Proxy)
+		// Reuse local gateway credentials only for the same format and transport target.
+		// Other local endpoints and native Ollama remain deliberately keyless.
+		sameGateway := cfg.Provider() != "ollama" && cfg.Format == active.Format && cfg.BaseURL == active.BaseURL && cfg.Proxy == active.Proxy
+		if !cfg.Ready() || sameGateway {
+			cfg.APIKey = active.APIKey
+		}
 	}
 	if !cfg.Ready() {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), "API key was not provided")})
