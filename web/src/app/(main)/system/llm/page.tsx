@@ -29,7 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { applyLLMProfilePreset, getLLMProfilePreset, isOllamaPreset, selectInstalledOllamaModel, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
+import { applyLLMProfilePreset, getLLMProfilePreset, isCloudEconomyPreset, isOllamaPreset, selectInstalledOllamaModel, type LLMProfilePresetId } from "@/lib/llm-profile-presets";
 import { api } from "@/lib/api";
 import { pullCommand } from "@/lib/ollama-pull";
 import type { LLMModelDetail, LLMPoolMember, LLMPoolStatus, LLMProfile, LLMRetryOverride, LLMTestResult } from "@/lib/types";
@@ -64,6 +64,14 @@ const MAX_TOKENS_FIELD_HINTS: Record<string, string> = {
 type ProfileFormat = LLMProfile["format"];
 const FORMATS: readonly string[] = ["anthropic", "openai", "openai-responses", "ollama"];
 const ZAI_PRESETS = ["zai-general", "zai-coding-reference"] as const;
+const CLOUD_PRESETS = [
+  { id: "deepseek", key: "providers.deepseek", help: "providers.deepseekHelp" },
+  { id: "claude", key: "providers.claude", help: "providers.claudeHelp" },
+  { id: "openai", key: "providers.openai", help: "providers.openaiHelp" },
+  { id: "qwen", key: "providers.qwen", help: "providers.qwenHelp" },
+  { id: "kimi", key: "providers.kimi", help: "providers.kimiHelp" },
+  { id: "openrouter", key: "providers.openrouter", help: "providers.openrouterHelp" },
+] as const;
 const OLLAMA_PRESETS = [
   { id: "ollama-host", key: "providers.ollamaHost", help: "providers.ollamaHostHelp" },
   { id: "ollama-docker-host", key: "providers.ollamaDockerHost", help: "providers.ollamaDockerHostHelp" },
@@ -346,7 +354,7 @@ function ProfileSheet({
   const [priority, setPriority] = React.useState("0"); // Rotation priority; higher values first.
   const [poolExclude, setPoolExclude] = React.useState(false);
   const [streaming, setStreaming] = React.useState(true); // True means streaming (default), false means nonstreaming.
-  const [maxTokens, setMaxTokens] = React.useState("0"); // Per-response output limit; 0 omits the field.
+  const [maxTokens, setMaxTokens] = React.useState("0"); // Per-response output limit; 0 uses the call path's default (32768 on agent turns).
   const [maxTokensField, setMaxTokensField] = React.useState(NONE); // Output-limit field name; NONE means max_tokens.
   const [sessionHeaderKey, setSessionHeaderKey] = React.useState(""); // Custom session header name; blank omits it.
   const [retry, setRetry] = React.useState<LLMRetryOverride>(ZERO_OVERRIDE); // Profile retry overrides; all zeros follow global settings.
@@ -450,7 +458,7 @@ function ProfileSheet({
     setFormat(nextFormat);
     if (nextFormat === "ollama" && format !== "ollama") {
       // Drop a cloud template's URL and credential before read-only local discovery.
-      const cloudTemplateURL = (ZAI_PRESETS as readonly string[]).includes(preset)
+      const cloudTemplateURL = preset && !isOllamaPreset(preset)
         ? getLLMProfilePreset(preset).base_url : "";
       const nextBaseUrl = !baseUrl.trim() || baseUrl === cloudTemplateURL
         ? getLLMProfilePreset("ollama-host").base_url : baseUrl;
@@ -618,6 +626,11 @@ function ProfileSheet({
                     <SelectLabel>{swt("providers.groupCloud")}</SelectLabel>
                     <SelectItem value="zai-general">{swt("providers.general")}</SelectItem>
                     <SelectItem value="zai-coding-reference">{swt("providers.coding")}</SelectItem>
+                    {CLOUD_PRESETS.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {swt(o.key)}
+                      </SelectItem>
+                    ))}
                   </SelectGroup>
                   <SelectGroup>
                     <SelectLabel>{swt("providers.groupLocal")}</SelectLabel>
@@ -639,6 +652,11 @@ function ProfileSheet({
                   <p className="text-amber-700 text-xs dark:text-amber-400">{swt("providers.ollamaCloudWarning")}</p>
                   <a className="text-xs underline underline-offset-4" href="https://docs.ollama.com/api" target="_blank" rel="noreferrer">{swt("providers.officialOllama")}</a>
                 </>
+              )}
+              {preset && isCloudEconomyPreset(preset) && (
+                <p className="text-muted-foreground text-xs">
+                  {swt(CLOUD_PRESETS.find((o) => o.id === preset)?.help ?? "providers.deepseekHelp")}
+                </p>
               )}
               {(ZAI_PRESETS as readonly string[]).includes(preset) && (
                 <>
