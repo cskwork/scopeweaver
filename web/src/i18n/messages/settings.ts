@@ -7,6 +7,7 @@ export const en = {
   judgeUsageOutput: "Output tokens",
   judgeUsageCacheRead: "Cache read",
   judgeUsageCacheWrite: "Cache write",
+  thinkingAdaptive: "Adaptive",
   judgeUsageRecent: "Daily input and output tokens over the past 30 days",
   judgeUsageDay: "{date} · {calls} calls · {tokens} tokens",
 
@@ -51,6 +52,7 @@ export const ko: Record<keyof typeof en, string> = {
   judgeUsageOutput: "출력 토큰",
   judgeUsageCacheRead: "캐시 읽기",
   judgeUsageCacheWrite: "캐시 쓰기",
+  thinkingAdaptive: "적응형",
   judgeUsageRecent: "최근 30일간 일별 입력 및 출력 토큰",
   judgeUsageDay: "{date} · 호출 {calls}회 · 토큰 {tokens}개",
 

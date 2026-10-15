@@ -311,8 +311,11 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		HTTPClient: client,
 	}
 	// Pass thinking.type and effort independently; empty omits each field.
-	// Either, both, or neither may be sent.
+	// Either, both, or neither may be sent; official Claude 5.5 defaults to adaptive.
 	lc.ThinkingType = c.ThinkingType
+	if c.officialClaude55() && lc.ThinkingType == "" {
+		lc.ThinkingType = "adaptive"
+	}
 	lc.ReasoningEffort = c.ReasoningEffort
 	// Choose the output-limit field name (empty means max_tokens). Its value comes
 	// from agentcore.Options.MaxTokens per round; the provider only chooses the key.
@@ -329,6 +332,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
+	provider = cloudProviderAdapter{Provider: provider, format: c.Format, claude: c.officialClaude55(), rejectDisabled: strings.HasPrefix(c.Model, "claude-sonnet-") || strings.HasPrefix(c.Model, "claude-opus-") || (strings.HasPrefix(c.Model, "claude-haiku-") && (c.ReasoningEffort == "xhigh" || c.ReasoningEffort == "max"))}
 	if c.Model == "glm-5.3" {
 		return glm53Provider{Provider: provider}, nil
 	}
@@ -380,7 +384,8 @@ func IsQuotaExhaustedMessage(message string) bool {
 // 402 lets a task router fail over immediately while retaining the original
 // response body for provider-specific classification and audit logs.
 type quotaAwareTransport struct {
-	base http.RoundTripper
+	base   http.RoundTripper
+	claude *claudeReplay
 	// sessionHeaderKey, when non-empty, is the HTTP header name each request
 	// carries; its value is the session id read from the request context. Empty
 	// disables it. See Config.SessionHeaderKey.
@@ -388,6 +393,15 @@ type quotaAwareTransport struct {
 }
 
 func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.claude != nil {
+		if err := t.claude.rewrite(req); err != nil {
+			return nil, err
+		}
+	}
+	raw, _ := req.Context().Value(rawUsageKey{}).(*rawUsage)
+	if raw != nil {
+		raw.reset()
+	}
 	// Custom session-id header: name is user-configured, value is THIS run's
 	// session id (norma stashes it on the context via transcript.WithSessionID).
 	// Stable across a session's turns and distinct across sessions — exactly what
@@ -412,6 +426,20 @@ func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error
 	// 429 branch below reads through this wrapper, so its body lands in the
 	// capture before being replaced.
 	resp.Body = capt.TeeResponse(resp.StatusCode, resp.Body)
+	if raw != nil || t.claude != nil {
+		var observation *claudeObservation
+		if t.claude != nil {
+			observation = &claudeObservation{replay: t.claude}
+		}
+		resp.Body = &observeBody{ReadCloser: resp.Body, sse: strings.Contains(resp.Header.Get("Content-Type"), "text/event-stream"), observe: func(event string, data []byte) {
+			if raw != nil {
+				raw.observe(event, data)
+			}
+			if observation != nil {
+				observation.observe(event, data)
+			}
+		}}
+	}
 
 	if resp.StatusCode != http.StatusTooManyRequests {
 		return resp, nil
@@ -466,7 +494,11 @@ func (c Config) HTTPClient() (*http.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	client.Transport = quotaAwareTransport{base: client.Transport, sessionHeaderKey: strings.TrimSpace(c.SessionHeaderKey)}
+	var replay *claudeReplay
+	if c.officialClaude55() {
+		replay = &claudeReplay{}
+	}
+	client.Transport = quotaAwareTransport{base: client.Transport, sessionHeaderKey: strings.TrimSpace(c.SessionHeaderKey), claude: replay}
 	return client, nil
 }
 

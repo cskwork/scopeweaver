@@ -38,13 +38,13 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 		{"DeepSeek", "openai", "deepseek-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":400,"prompt_tokens_details":{"cached_tokens":800},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, ""},
 		{"Z.ai", "openai", "glm-5.3", `{"prompt_tokens":5464,"completion_tokens":159,"total_tokens":5623,"prompt_tokens_details":{"cached_tokens":1664},"completion_tokens_details":{"reasoning_tokens":14}}`, llm.Usage{InputTokens: 5464, OutputTokens: 159, CacheReadTokens: 1664}, ""},
 		{"Claude", "anthropic", "claude-haiku-5-5", `{"input_tokens":1100,"output_tokens":20,"cache_read_input_tokens":60,"cache_creation_input_tokens":40,"output_tokens_details":{"thinking_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 40}, ""},
-		{"OpenAI-Chat", "openai", "gpt-6-luna", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "cache_write_tokens is not decoded by Norma v0.4.3"},
-		{"OpenAI-Responses", "openai-responses", "gpt-6-luna", `{"input_tokens":1200,"output_tokens":20,"input_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"output_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "cache_write_tokens is not decoded by Norma v0.4.3"},
-		{"Qwen", "openai", "qwen3.8-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_creation_input_tokens":40,"cache_creation":{"ephemeral_5m_input_tokens":40}},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "explicit cache creation is not decoded by Norma v0.4.3"},
-		{"Kimi", "openai", "kimi-k3", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "cache_write_tokens is not decoded by Norma v0.4.3"},
-		{"OpenRouter", "openai", "deepseek/deepseek-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "cache_write_tokens is not decoded by Norma v0.4.3"},
-		{"DeepSeek-alias-only", "openai", "deepseek-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":400}`, llm.Usage{InputTokens: 1200, OutputTokens: 20}, "top-level prompt_cache_hit_tokens is not decoded by Norma v0.4.3"},
-		{"Kimi-legacy-alias-only", "openai", "kimi-k3", `{"prompt_tokens":1200,"completion_tokens":20,"cached_tokens":800}`, llm.Usage{InputTokens: 1200, OutputTokens: 20}, "legacy top-level cached_tokens is not decoded by Norma v0.4.3"},
+		{"OpenAI-Chat", "openai", "gpt-6-luna", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800, CacheWriteTokens: 40}, "cache_write_tokens is not decoded by Norma v0.4.3"},
+		{"OpenAI-Responses", "openai-responses", "gpt-6-luna", `{"input_tokens":1200,"output_tokens":20,"input_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"output_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800, CacheWriteTokens: 40}, "cache_write_tokens is not decoded by Norma v0.4.3"},
+		{"Qwen", "openai", "qwen3.8-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_creation_input_tokens":40,"cache_creation":{"ephemeral_5m_input_tokens":40}},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800, CacheWriteTokens: 40}, "explicit cache creation is not decoded by Norma v0.4.3"},
+		{"Kimi", "openai", "kimi-k3", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800, CacheWriteTokens: 40}, "cache_write_tokens is not decoded by Norma v0.4.3"},
+		{"OpenRouter", "openai", "deepseek/deepseek-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_tokens_details":{"cached_tokens":800,"cache_write_tokens":40},"completion_tokens_details":{"reasoning_tokens":5}}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800, CacheWriteTokens: 40}, "cache_write_tokens is not decoded by Norma v0.4.3"},
+		{"DeepSeek-alias-only", "openai", "deepseek-flash", `{"prompt_tokens":1200,"completion_tokens":20,"prompt_cache_hit_tokens":800,"prompt_cache_miss_tokens":400}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "top-level prompt_cache_hit_tokens is not decoded by Norma v0.4.3"},
+		{"Kimi-legacy-alias-only", "openai", "kimi-k3", `{"prompt_tokens":1200,"completion_tokens":20,"cached_tokens":800}`, llm.Usage{InputTokens: 1200, OutputTokens: 20, CacheReadTokens: 800}, "legacy top-level cached_tokens is not decoded by Norma v0.4.3"},
 	}
 	for _, tc := range cases {
 		for _, stream := range []bool{false, true} {
@@ -84,7 +84,7 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 						usage, _ := json.Marshal(start)
 						fmt.Fprintf(w, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\",\"content\":[],\"usage\":%s}}\n\n", usage)
 						fmt.Fprint(w, "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"done\"}}\n\n")
-						fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":10}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
+						fmt.Fprint(w, "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{},\"usage\":{\"output_tokens\":10}}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20,\"output_tokens_details\":{\"thinking_tokens\":5}}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n")
 					case "openai-responses":
 						fmt.Fprint(w, "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"done\"}\n\n")
 						fmt.Fprintf(w, "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"usage\":%s}}\n\n", tc.usage)
@@ -132,7 +132,7 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 						}
 					}
 				}
-				rows, err := pg.Query(`SELECT input_tokens,output_tokens,cache_read,cache_write,status FROM llm_usage WHERE profile_name=$1 ORDER BY id`, profile)
+				rows, err := pg.Query(`SELECT input_tokens,output_tokens,cache_read,cache_write,reasoning_tokens,status FROM llm_usage WHERE profile_name=$1 ORDER BY id`, profile)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -142,8 +142,24 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 					count++
 					var usage llm.Usage
 					var status string
-					if err := rows.Scan(&usage.InputTokens, &usage.OutputTokens, &usage.CacheReadTokens, &usage.CacheWriteTokens, &status); err != nil {
+					var reasoning int
+					if err := rows.Scan(&usage.InputTokens, &usage.OutputTokens, &usage.CacheReadTokens, &usage.CacheWriteTokens, &reasoning, &status); err != nil {
 						t.Fatal(err)
+					}
+					var rawUsage map[string]any
+					json.Unmarshal([]byte(tc.usage), &rawUsage)
+					wantReasoning := 0
+					for _, key := range []string{"completion_tokens_details", "output_tokens_details"} {
+						if details, ok := rawUsage[key].(map[string]any); ok {
+							for _, tokenKey := range []string{"reasoning_tokens", "thinking_tokens"} {
+								if n, ok := details[tokenKey].(float64); ok {
+									wantReasoning = int(n)
+								}
+							}
+						}
+					}
+					if reasoning != wantReasoning {
+						t.Errorf("reasoning=%d want %d", reasoning, wantReasoning)
 					}
 					if usage != tc.want || usage.CacheReadTokens > usage.InputTokens || status != "ok" {
 						t.Errorf("ledger usage=%+v status=%s want %+v", usage, status, tc.want)
@@ -153,7 +169,7 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 					t.Fatal(err)
 				}
 				if tc.format == "anthropic" && stream {
-					answer, err := (sidequestion.SideQuestionService{Provider: p}).Answer(t.Context(), req, true, nil)
+					answer, err := (sidequestion.SideQuestionService{Provider: llmrec.Wrap(p, nil, tc.model, "", "", "", func() bool { return false })}).Answer(t.Context(), req, true, nil)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -166,7 +182,7 @@ func TestCloudProviderUsageLedgerFixtures(t *testing.T) {
 					t.Fatalf("ledger rows=%d HTTP requests=%d want 2/2", count, requests)
 				}
 				if tc.gap != "" {
-					t.Logf("KNOWN GAP: %s", tc.gap)
+					t.Logf("Regression covered: %s", tc.gap)
 				}
 			})
 		}

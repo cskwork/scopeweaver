@@ -8,15 +8,15 @@ import (
 	"github.com/Autumn-27/norma/llm"
 )
 
-func TestStreamUsageCumulativePerCall(t *testing.T) {
+func TestStreamUsageDeltaPerCall(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		events []llm.StreamEvent
 	}{
 		{"anthropic", []llm.StreamEvent{
 			{Type: llm.SEMessageStart, Usage: llm.Usage{InputTokens: 100, OutputTokens: 1, CacheReadTokens: 60, CacheWriteTokens: 10}},
+			{Type: llm.SEMessageDelta, Usage: llm.Usage{OutputTokens: 9}},
 			{Type: llm.SEMessageDelta, Usage: llm.Usage{OutputTokens: 10}},
-			{Type: llm.SEMessageDelta, Usage: llm.Usage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 10}},
 		}},
 		{"openai-final", []llm.StreamEvent{{Type: llm.SEMessageDelta, Usage: llm.Usage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 60, CacheWriteTokens: 10}}}},
 	} {

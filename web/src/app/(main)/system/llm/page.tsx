@@ -48,6 +48,7 @@ const THINKING_TYPES: { value: string; label: string }[] = [
   { value: NONE, get label() { return swt("interface.m1329"); } },
   { value: "disabled", get label() { return swt("interface.m0211"); } },
   { value: "enabled", get label() { return swt("interface.m0210"); } },
+  { value: "adaptive", get label() { return swt("settings.thinkingAdaptive"); } },
 ];
 // Output-limit request key matters only for OpenAI format; reuse NONE/empty-string conversion.
 const MAX_TOKENS_FIELDS: { value: string; label: string }[] = [
