@@ -39,6 +39,7 @@ type Config struct {
 	MaxConcurrent        int
 	LocalLLMOnly         bool
 	LocalLLMAllowedCIDRs []string
+	JSONSchema           map[string]any
 	JSONOutput           bool
 	Format               llm.Format
 	BaseURL              string
@@ -292,7 +293,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 		if err != nil {
 			return nil, err
 		}
-		return llm.RateLimited(ollama.NewProvider(native, c.Model, ollama.Options{ContextWindow: c.CompactionWindow(), KeepAlive: c.KeepAlive, ThinkingType: c.ThinkingType, MaxTokens: c.MaxTokens, JSON: c.JSONOutput, ConnectAttempts: c.Retry.ConnectAttempts, ConnectInterval: c.Retry.ConnectInterval, EmptyAttempts: c.Retry.EmptyAttempts, EmptyInterval: c.Retry.EmptyInterval}), llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}), nil
+		return llm.RateLimited(ollama.NewProvider(native, c.Model, ollama.Options{ContextWindow: c.CompactionWindow(), KeepAlive: c.KeepAlive, ThinkingType: c.ThinkingType, MaxTokens: c.MaxTokens, JSON: c.JSONOutput, Schema: c.JSONSchema, ConnectAttempts: c.Retry.ConnectAttempts, ConnectInterval: c.Retry.ConnectInterval, EmptyAttempts: c.Retry.EmptyAttempts, EmptyInterval: c.Retry.EmptyInterval}), llm.RateLimit{PerSecond: c.RatePerSecond, PerMinute: c.RatePerMinute}), nil
 	}
 	// Block SDK environment-key inheritance for deliberately keyless local endpoints.
 	if c.APIKey == "" {
