@@ -70,9 +70,10 @@ type Config struct {
 	// avoids broken gateway SSE (empty frames or lost reasoning deltas), at the cost
 	// of live progress/token counts. Maps to agentcore.Options.NonStreaming = !Stream.
 	Stream bool
-	// MaxTokens limits output tokens per reply. Zero omits it and uses server defaults.
-	// Unlike ContextWindowK, the local total-capacity/compaction threshold setting,
-	// this value is sent with each request through agentcore.Options.MaxTokens.
+	// MaxTokens limits output tokens per reply, independently of ContextWindowK.
+	// Zero becomes 32768 on agent harness turns. Direct Anthropic calls default
+	// to 8192; direct native Ollama calls use their own default (4096).
+	// Agent turns pass this value through agentcore.Options.MaxTokens.
 	MaxTokens int
 	// MaxTokensField chooses the request field for MaxTokens in openai format:
 	// Empty uses max_tokens; max_completion_tokens selects the newer field.
