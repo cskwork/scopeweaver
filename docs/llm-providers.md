@@ -102,7 +102,7 @@ GLM-5.3 always thinks, so these runs do not measure the effect of turning thinki
 
 **Prompt caching:**
 
-- Claude: ScopeWeaver now always marks the system prompt, and the tool schemas before it, as cacheable. The first use of each distinct system prompt writes the cache at 1.25× the input price; later calls within the cache lifetime read it at the cached price. Worker prompts differ per intent, so each intent writes once. Marker placement is verified by tests; **the live saving is unverified** (no Claude key).
+- Claude: ScopeWeaver now always marks the system prompt, and the tool schemas before it, as cacheable in planner, worker, main-agent and chat sessions (including the report writer). Goal setup and conversation or graph summaries send no marker. The first use of each distinct system prompt writes the cache at 1.25× the input price; later calls within the cache lifetime read it at the cached price. Worker prompts differ per intent, so each intent writes once. Marker placement is verified by tests; **the live saving is unverified** (no Claude key).
 - DeepSeek, Kimi and Z.ai cache prefixes automatically. DeepSeek and Kimi document that their Anthropic-compatible endpoints ignore block markers. OpenAI, Qwen and OpenRouter (DeepSeek Flash) also cache matching prefixes automatically.
 - Tests confirm that consecutive tool turns in one session keep the same system prompt and tool schemas and only append history, for all three cloud formats. Compaction, wrap-up and newly unlocked deferred tools change the prefix. An edited prompt template that uses `{{.Now}}` changes the system prompt on each run.
 
