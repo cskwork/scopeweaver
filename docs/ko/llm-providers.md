@@ -67,15 +67,17 @@ Ollama 템플릿 선택과 Ollama 형식 전환은 조회 전에 저장하지 �
 | 문맥 창(K) | 이진 K로 `options.num_ctx`에 전송(32 = 32,768). `0`이면 32, 16 미만이면 16. 압축 기준에도 사용 | 기존과 같음: 압축 기준만, `0` = 200K |
 | 출력 한도 | `options.num_predict`로 전송, `0`이면 4,096 | 기존과 같음: `0`이면 필드 생략 |
 | 모델 유지 시간 | `keep_alive`로 전송, 비우면 `30m`(Ollama 자체 기본값은 5분) | 전송하지 않음 |
-| 최대 동시 요청 수 | `0`이면 1. 프로필이 여러 개여도 Ollama 서버마다 입장 제어 하나를 공유 | `0`이면 **시스템 설정 → 최대 동시 LLM 요청 수**를 따름 |
+| 최대 동시 요청 수 | `0`이면 1. 프로필이 여러 개여도 Ollama 서버마다 입장 제어 하나를 공유하며 가장 낮은 설정값을 적용 | `0`이면 **시스템 설정 → 최대 동시 LLM 요청 수**를 따름 |
+
+대기 중인 승인 판정·주 에이전트·곁가지 질문 요청은 백그라운드 작업보다 다음 빈 슬롯을 우선 배정받습니다. 각 그룹 안에서는 먼저 온 순서이며 진행 중인 추론은 중단하지 않습니다. 연결 진단과 예열은 백그라운드 요청입니다.
 
 서버에서 `OLLAMA_NUM_PARALLEL`을 1보다 크게 설정했을 때만 동시 요청 수를 늘리세요. Ollama의 메모리 사용량은 `OLLAMA_NUM_PARALLEL × 문맥 길이`에 비례해 늘어납니다([FAQ](https://docs.ollama.com/faq)).
 
 ### 실행 중 보호 장치
 
 - **예열:** 기본 프로필로 첫 추론을 하기 전에 `/api/show`를 호출하고, `tools`를 선언하지 않은 모델은 거부합니다. 그다음 프로필의 `num_ctx`와 `keep_alive`로 빈 `/api/chat` 요청을 보내 모델을 불러옵니다. 예열도 같은 동시 요청 슬롯 안에서 실행합니다.
-- **압축:** 창이 64K 이하인 기본 Ollama에서는 창의 75%에 도달하면 기록 압축을 시작하며, 도구 호출과 결과 쌍은 온전히 유지합니다. 실험 기능인 noa 압축을 켜도 이런 프로필에서는 이 보호 장치가 우선합니다. noa는 건너뛰고 경고를 남깁니다. 32K 이하이면 도구 출력 중 모델에 전달하는 부분을 하나당 16,384**바이트**(16KiB, 유니코드 문자 수가 아니라 SDK의 `len(s)` 기준)로 제한합니다. 전체 출력은 도구 결과에서 가리키는 별도 파일에 보존합니다. 클라우드 형식은 기존 압축 및 noa 동작을 유지합니다.
-- **승인 판정:** 판정 프로필(지정하지 않았다면 활성 프로필)이 Ollama이면 기본 제한 시간은 **60초**, 기본 실패 처리 방식은 **ask(사용자 확인)**가 됩니다. 직접 저장한 제한 시간이나 실패 처리 방식은 그대로 유지합니다.
+- **압축:** 창이 64K 이하인 기본 Ollama에서는 창의 72%에 도달하면 기록 압축을 시작하며, 도구 호출과 결과 쌍은 온전히 유지합니다. 실험 기능인 noa 압축을 켜도 이런 프로필에서는 이 보호 장치가 우선합니다. noa는 건너뛰고 경고를 남깁니다. 32K 이하이면 도구 출력 중 모델에 전달하는 부분을 하나당 16,384**바이트**(16KiB, 유니코드 문자 수가 아니라 SDK의 `len(s)` 기준)로 제한합니다. 32K 초과부터 64K 이하까지는 32,768바이트(32KiB)로 제한합니다. 전체 출력은 도구 결과에서 가리키는 별도 파일에 보존합니다. 클라우드 형식은 기존 압축 및 noa 동작을 유지합니다.
+- **승인 판정:** 직접 지정한 판정 프로필이 우선합니다. 지정하지 않았다면 원래 에이전트·실행에서 실제 사용한 네이티브 프로필(바인딩·풀·장애 조치 포함)을 우선하고, 클라우드 실행이나 원래 프로필 정보가 없으면 활성 프로필을 사용합니다. 네이티브 판정 기본값은 **90초**, 실패 처리 방식은 **ask(사용자 확인)**입니다. 직접 저장한 값이 우선하며 사용자 승인 대기는 기본 300초 뒤 거부입니다. 네이티브 출력은 decision/comment JSON 스키마로 제한한 뒤 검증합니다. 설정 화면은 서버의 저장 값을 불러오기 전에는 저장할 수 없습니다.
 
 ### 일반 OpenAI 호환 서버(vLLM, LM Studio)
 
@@ -106,14 +108,23 @@ Ollama 템플릿 선택과 Ollama 형식 전환은 조회 전에 저장하지 �
 
 기본값은 꺼짐이며 클라우드 제공자를 계속 사용할 수 있습니다. **시스템 설정 → 로컬 전용 LLM 네트워크** 또는 `SCOPEWEAVER_LOCAL_LLM_ONLY=true`로 켭니다. 켜면 다음과 같이 동작합니다.
 
-- **LLM HTTP에만** 적용합니다. 추론, 모델 목록, 연결 테스트, 예열, 승인 판정이 대상입니다. 대상 트래픽, 다른 웹 검색 백엔드, 전역 프록시에는 영향이 없습니다.
-- **DeepSeek 웹 검색은 사용할 수 없습니다.** 엔드포인트가 신뢰 CIDR에 있어도 마찬가지입니다. SDK가 자체 HTTP 클라이언트로 원격 LLM을 호출하며, 이 연결 검사를 주입할 경로가 없기 때문입니다. 정책을 끄면 DeepSeek 검색이 다시 동작합니다.
-- 허용 대상은 루프백, 사설 IPv4(RFC 1918), IPv6 고유 로컬 주소와 **신뢰 CIDR**(`local_llm_allowed_cidrs`)입니다. 신뢰 범위의 서버는 사설 LLM 서버처럼 취급하므로 직접 관리하는 네트워크만 추가하세요.
-- `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS`의 CIDR은 저장된 목록에 더해 적용됩니다. 목록에 복사되지 않으며 UI에서 편집할 수 없습니다.
-- 시스템 설정의 변경은 재시작 없이 다음 LLM HTTP 호출부터 적용됩니다.
-- 연결을 열 때마다 실제로 확인된 IP를 검사합니다. 공용 주소가 하나라도 섞인 DNS 이름은 거부하며, 공용 주소로의 리디렉션도 같은 방식으로 실패합니다.
-- **LLM 프로필 프록시를 거부합니다.**
-- 환경 변수 `true`는 하한선입니다. UI에서 끌 수 없습니다.
+- LLM HTTP(추론, 모델 목록, 연결 테스트, 예열, 승인 판정)는 **루프백과 명시적 신뢰 CIDR**(`local_llm_allowed_cidrs`)만 허용합니다. 사설 IPv4, IPv6 ULA, LAN, Docker 주소는 더 이상 자동으로 신뢰하지 않습니다. 직접 관리하는 추론 서버 주소만 추가하고 IPv4는 `/32`, IPv6는 `/128`을 권장합니다.
+- 링크 로컬·멀티캐스트·지정되지 않은 주소는 허용 목록에 있어도 거부합니다. 연결을 열 때 DNS가 반환한 모든 주소를 검사하며 전부 허용되어야 합니다. 모든 리디렉션과 LLM 프로필 프록시를 거부합니다.
+- **Agent 웹 검색(모든 백엔드), 검색 연결 테스트, 업데이트 확인·다운로드를 차단합니다.** 업데이트 화면은 이 정책을 일반 연결 오류와 구분해 설명합니다. 현재 버전 확인·업데이트 진행 상태·로컬 롤백은 유지하며, 원격 릴리스 캐시로 정책을 우회하지 않습니다.
+- 변경은 재시작 없이 이미 생성된 세션에도 적용합니다. 다운로드 시작 후 strict 모드를 켜면 다음 네트워크 동작·응답 본문 읽기 검사에서 중단하고 부분 staging 파일을 정리합니다. 이미 전송한 트래픽은 회수할 수 없습니다.
+- `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS`(또는 기존 `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`)도 함께 적용하며 저장 목록에 복사하거나 UI에서 편집하지 않습니다. 정책 환경 변수의 `true`는 UI에서 끌 수 없습니다.
+- 대상 트래픽·대상 도구·전역 프록시는 연결을 유지합니다. 애플리케이션 정책이며 암호학적 보장이나 호스트 전체의 오프라인 보장이 아닙니다.
+
+**기존 strict LAN/Docker 프로필 전환:** 같은 컴퓨터의 `http://127.0.0.1:11434`에는 CIDR이 필요 없습니다. LAN의 `http://192.168.1.20:11434`에는 `192.168.1.20/32`, IPv6 추론 주소 `fd00::20`에는 `fd00::20/128`을 추가하세요. Docker에서는 호스트와 컨테이너가 다른 주소를 볼 수 있으므로 **ScopeWeaver 컨테이너 안에서** 이름을 확인하세요.
+
+```bash
+# 기존 Compose 서비스의 실제 이름 해석과 네트워크 주소를 읽습니다.
+docker compose exec scopeweaver getent ahosts host.docker.internal
+docker compose exec scopeweaver getent ahosts ollama
+docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{.GlobalIPv6Address}}{{end}}' "$(docker compose ps -q ollama)"
+```
+
+이미지에 `getent`가 없으면 `docker compose exec scopeweaver cat /etc/hosts`로 기존 호스트 게이트웨이 매핑을 확인하고 `docker inspect`로 Ollama 컨테이너 주소를 확인하세요. 예시 주소를 복사하거나 Docker 서브넷 전체를 허용하지 말고 ScopeWeaver가 실제 연결하는 추론 IP만 사용하세요. **추가 신뢰 CIDR** 또는 환경 변수에 추가합니다(예: `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS=192.168.1.20/32`). `host.docker.internal`과 `ollama`라는 이름 자체는 신뢰 근거가 아닙니다. Docker가 서비스를 다시 만들거나 주소를 바꾸면 좁은 허용 목록을 갱신한 뒤 **모델 불러오기** 또는 **연결 테스트**를 다시 실행하세요.
 
 ScopeWeaver는 Ollama 서버가 이후에 하는 일을 볼 수 없습니다. **Ollama는 요청을 Ollama 클라우드 모델로 전달할 수 있습니다.** 번들 Compose 서비스는 `OLLAMA_NO_CLOUD=1`을 설정하지만, 호스트나 원격 Ollama는 별도로 클라우드를 꺼야 합니다(`OLLAMA_NO_CLOUD=1` 또는 `~/.ollama/server.json`의 `disable_ollama_cloud`, [FAQ](https://docs.ollama.com/faq) 참고).
 
@@ -137,23 +148,33 @@ UI에서 새 프로필의 키를 비워 저장하면 제공자 환경 변수의 
 
 ```bash
 # Docker의 ScopeWeaver가 호스트 Ollama를 사용하는 .env 예
+# your-installed-tool-model은 모델 불러오기에 나온 도구 지원 태그로 바꾸세요.
 SCOPEWEAVER_LLM_PROVIDER=ollama
 SCOPEWEAVER_LLM_BASE_URL=http://host.docker.internal:11434
-SCOPEWEAVER_LLM_MODEL=qwen2.5-coder:32b
+SCOPEWEAVER_LLM_MODEL=your-installed-tool-model
 SCOPEWEAVER_LLM_CONTEXT_WINDOW_K=32
 SCOPEWEAVER_LLM_MAX_CONCURRENT=1
 SCOPEWEAVER_LLM_KEEP_ALIVE=30m
 SCOPEWEAVER_LLM_MAX_TOKENS=4096
-SCOPEWEAVER_LOCAL_LLM_ONLY=false   # 로컬 전용 정책을 쓰려면 true
+SCOPEWEAVER_LOCAL_LLM_ONLY=false   # strict 모드 전에 실제 호스트 /32 또는 /128 추가
+# SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS=192.168.1.20/32  # 실제 추론 IP로 교체
 ```
 
 ```json
 {
-  "llm": { "provider": "ollama", "base_url": "http://127.0.0.1:11434", "model": "qwen2.5-coder:32b", "context_window_k": 32, "llm_max_concurrent": 1, "keep_alive": "30m", "max_tokens": 4096 },
+  "llm": { "provider": "ollama", "base_url": "http://127.0.0.1:11434", "model": "your-installed-tool-model", "context_window_k": 32, "llm_max_concurrent": 1, "keep_alive": "30m", "max_tokens": 4096 },
   "local_llm_only": false,
   "local_llm_allowed_cidrs": []
 }
 ```
+
+### 진단과 계측의 범위
+
+**연결 테스트**는 사용자가 누르면 추론 검사를 실행하며 템플릿 선택은 설치된 메타데이터만 조회합니다. 도구·문맥 확인, 로드 시간·속도와 함께 선택한 실행 모델의 `/api/ps` `size`와 `size_vram`으로 GPU 메모리 비율을 표시합니다. 전체 크기가 없거나 0이거나 VRAM 크기가 없으면 0%가 아닌 **알 수 없음**입니다. 양수 전체 크기에 VRAM이 명시적으로 0이면 0%입니다. 이 값은 메모리 추정치이며 정확한 가중치 분할·GPU 용량 측정·모델 상주 보장이 아닙니다.
+
+80% 이하면 CPU 처리로 생성이 느려질 수 있다고 경고합니다. 다른 모델이 로드되어 있거나 같은 엔드포인트의 명시적 판정 프로필이 다른 모델·문맥을 쓰면 메모리·재로드 경고를 각각 표시합니다. 같은 모델·문맥을 써도 상주를 보장할 수 없습니다. 진단은 모델을 내려받거나 프로필을 저장·활성화하지 않습니다.
+
+문맥 한계 근접 경고는 보고된 토큰 수에 근거한 서버 로그의 경험적 신호이며 잘림 감지기가 아닙니다. Ollama 원본 타이밍 필드는 원본 기록이 켜진 경우에만 저장하며 토큰·캐시 사용량은 별도로 항상 계측합니다. 작은 모델에는 여전히 작업별 검증이 필요하며 아래의 기존 신뢰성 한계는 유지됩니다.
 
 ### 하드웨어 등급
 

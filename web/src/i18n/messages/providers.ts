@@ -45,6 +45,13 @@ export const en = {
   diagLoadValue: "{ms} ms",
   diagSpeed: "Generation speed",
   diagSpeedValue: "{tps} tokens/s",
+  diagGpu: "GPU memory share",
+  diagGpuValue: "{percent} in GPU memory ({vram} of {total})",
+  diagGpuUnknown: "Not reported by /api/ps",
+  diagGpuNote: "Share of the /api/ps memory estimate for this loaded model. It is not an exact weight split or a measure of GPU capacity.",
+  diagWarnOffload: "The GPU holds 80% or less of the reported model memory. CPU work may make generation slower. Try a smaller model or context window.",
+  diagWarnOtherModels: "Other models are also loaded on this Ollama server: {models}. They share memory, so models can be offloaded to the CPU or unloaded and reloaded.",
+  diagWarnJudge: "The approval judge is set to a different model or context window on this Ollama server, so each judgement can force a model reload.",
   missingModel: "The model is not available on this Ollama server. Run this on the server, then test again:",
 };
 export const ko: Record<keyof typeof en, string> = {
@@ -94,5 +101,12 @@ export const ko: Record<keyof typeof en, string> = {
   diagLoadValue: "{ms}ms",
   diagSpeed: "생성 속도",
   diagSpeedValue: "초당 {tps} 토큰",
+  diagGpu: "GPU 메모리 비율",
+  diagGpuValue: "GPU 메모리에 {percent}({total} 중 {vram})",
+  diagGpuUnknown: "/api/ps가 보고하지 않음",
+  diagGpuNote: "로드된 모델에 대해 /api/ps가 추정한 메모리 중 GPU에 있는 비율입니다. 가중치 분할을 정확히 나타내거나 GPU 용량을 측정한 값이 아닙니다.",
+  diagWarnOffload: "보고된 모델 메모리의 80% 이하가 GPU에 있습니다. CPU 처리로 생성이 느려질 수 있습니다. 더 작은 모델이나 문맥 창을 사용해 보세요.",
+  diagWarnOtherModels: "이 Ollama 서버에 다른 모델도 로드되어 있습니다: {models}. 메모리를 함께 쓰므로 모델이 CPU로 밀려나거나 언로드 후 다시 로드될 수 있습니다.",
+  diagWarnJudge: "승인 판정 모델이 이 Ollama 서버에서 다른 모델이나 문맥 창으로 설정되어 있어 판정할 때마다 모델을 다시 로드할 수 있습니다.",
   missingModel: "이 Ollama 서버에 모델이 없습니다. 서버에서 다음을 실행한 후 다시 테스트하세요.",
 };
