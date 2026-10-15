@@ -326,7 +326,8 @@ function ProfileSheet({
   onSaved: (id: string) => void;
 }) {
   "use no memo";
-  const { t: swt, locale: swLocale } = useI18n();
+  const { t: swt, locale: swLocale, fmt } = useI18n();
+  const gigabytes = (n: number) => fmt.number(n / 1e9, { style: "unit", unit: "gigabyte", maximumFractionDigits: 1 });
 
   const isNew = !profile;
   const [preset, setPreset] = React.useState<LLMProfilePresetId | "">("");
@@ -587,7 +588,7 @@ function ProfileSheet({
     <Sheet open={open} onOpenChange={changeOpen}>
       <SheetContent
         side="right"
-        className="flex flex-col gap-0 p-0 data-[side=right]:min-w-[420px] data-[side=right]:sm:max-w-xl"
+        className="flex flex-col gap-0 p-0 data-[side=right]:min-w-[min(420px,100vw)] data-[side=right]:sm:max-w-xl"
       >
         <SheetHeader className="px-4">
           <SheetTitle className="flex items-center gap-2">
@@ -999,6 +1000,17 @@ function ProfileSheet({
                 <dd>{swt("providers.diagLoadValue", { ms: Math.round(diag.load_duration_ms ?? 0) })}</dd>
                 <dt className="text-muted-foreground">{swt("providers.diagSpeed")}</dt>
                 <dd>{swt("providers.diagSpeedValue", { tps: (diag.tokens_per_second ?? 0).toFixed(1) })}</dd>
+                <dt className="text-muted-foreground">{swt("providers.diagGpu")}</dt>
+                {/* Percent is present only when /api/ps reported a nonzero total size; VRAM bytes may be omitted when zero. */}
+                <dd className={diag.gpu_offload_percent === undefined ? "text-muted-foreground" : undefined}>
+                  {diag.gpu_offload_percent === undefined
+                    ? swt("providers.diagGpuUnknown")
+                    : swt("providers.diagGpuValue", {
+                        percent: fmt.number(diag.gpu_offload_percent / 100, { style: "percent", maximumFractionDigits: 0 }),
+                        vram: gigabytes(diag.size_vram_bytes ?? 0),
+                        total: gigabytes(diag.size_bytes ?? 0),
+                      })}
+                </dd>
               </dl>
             ) : (
               <>
@@ -1014,6 +1026,18 @@ function ProfileSheet({
                 <p className="break-words font-mono text-destructive">{diag.error}</p>
               </>
             )}
+            {diag.gpu_offload_percent !== undefined && <p className="text-muted-foreground">{swt("providers.diagGpuNote")}</p>}
+            {(diag.gpu_offload_percent !== undefined && diag.gpu_offload_percent <= 80) ||
+            !!diag.other_loaded_models?.length ||
+            diag.judge_model_mismatch ? (
+              <ul role="status" className="grid gap-1 text-amber-700 dark:text-amber-400">
+                {diag.gpu_offload_percent !== undefined && diag.gpu_offload_percent <= 80 && <li>{swt("providers.diagWarnOffload")}</li>}
+                {!!diag.other_loaded_models?.length && (
+                  <li className="break-words">{swt("providers.diagWarnOtherModels", { models: diag.other_loaded_models.join(", ") })}</li>
+                )}
+                {diag.judge_model_mismatch && <li>{swt("providers.diagWarnJudge")}</li>}
+              </ul>
+            ) : null}
           </section>
         )}
 
