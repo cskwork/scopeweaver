@@ -74,6 +74,13 @@ func SameAsLive(dsn string) bool {
 		strings.EqualFold(test.Database, live.Database)
 }
 
+// disabledDSN is what Main exports as ARTEX_PG_DSN when ARTEX_TEST_DSN is unset.
+// config.PostgresDSN prefers ARTEX_PG_DSN over config.json, so code under test
+// that resolves the app DSN gets this instead of the live database. It names a
+// unix socket in a directory that does not exist, so connecting fails at once
+// without any network access.
+const disabledDSN = "postgres:///artex_dbtest_disabled?host=/nonexistent/artex-dbtest-disabled&sslmode=disable"
+
 const skipMsg = "set " + EnvTestDSN + " to a throwaway database (see make test-db) — skipping DB-backed test"
 
 const liveGuardMsg = "refusing to run tests against the live database; point " + EnvTestDSN + " at a throwaway DB"
@@ -115,9 +122,10 @@ func resolveDSN(t skipFataler) string {
 // as `os.Exit(dbtest.Main(m))`.
 //
 //   - ARTEX_TEST_DSN unset → run the suite without touching any database at all
-//     (DB-backed tests skip themselves via DSN). Crucially, it does NOT fall back
-//     to config.PostgresDSN, so an unconfigured test run can never reach the live
-//     database.
+//     (DB-backed tests skip themselves via DSN). ARTEX_PG_DSN is pointed at
+//     disabledDSN, so a test that forgets to call DSN and resolves the app DSN
+//     (db.DSN, server.NewManager) gets a connection error instead of the live
+//     database from config.json.
 //   - ARTEX_TEST_DSN points at the live database → print the guard message and
 //     return non-zero without running anything.
 //   - otherwise → redirect every downstream resolver (db.DSN, server.NewManager,
@@ -126,6 +134,10 @@ func resolveDSN(t skipFataler) string {
 func Main(m *testing.M) int {
 	dsn := strings.TrimSpace(os.Getenv(EnvTestDSN))
 	if dsn == "" {
+		if err := os.Setenv("ARTEX_PG_DSN", disabledDSN); err != nil {
+			fmt.Fprintf(os.Stderr, "dbtest: set ARTEX_PG_DSN: %v\n", err)
+			return 1
+		}
 		return m.Run()
 	}
 	if SameAsLive(dsn) {
