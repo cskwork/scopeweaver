@@ -143,6 +143,11 @@ export async function runOllamaProfileChecks({ base, token, step, check, openPag
           await p.locator("#p-preset").click();
           await p.getByRole("option", { name: t.p.general, exact: true }).click();
           check(await p.inputValue("#p-base-url") === "https://api.z.ai/api/paas/v4" && await p.inputValue("#p-model") === "glm-5.3", "GLM template changed");
+          // A template that omits thinking shows the "do not send" choice, not a blank selector.
+          await p.locator("#p-preset").click();
+          await p.getByRole("option", { name: t.p.deepseek, exact: true }).click();
+          check(await p.inputValue("#p-model") === "deepseek-flash", "DeepSeek template not applied");
+          check((await p.locator("#p-thinking").textContent())?.trim() === t.i.m1329, `DeepSeek template thinking shows "${await p.locator("#p-thinking").textContent()}"`);
           await sheet.getByRole("combobox", { name: t.i.m1388, exact: true }).click();
           for (const label of ["Anthropic", "OpenAI (Chat Completions)", "OpenAI (Responses API)", t.p.ollamaFormat]) {
             await p.getByRole("option", { name: label, exact: true }).waitFor();

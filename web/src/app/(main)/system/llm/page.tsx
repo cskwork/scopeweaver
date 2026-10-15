@@ -427,8 +427,8 @@ function ProfileSheet({
     setFormat(next.format);
     setModel(next.model);
     setBaseUrl(next.base_url);
-    setThinkingType(next.thinking_type);
-    setEffort(next.reasoning_effort);
+    setThinkingType(fromStore(next.thinking_type));
+    setEffort(fromStore(next.reasoning_effort));
     setCw(String(next.context_window_k));
     setMaxTokens(String(next.max_tokens));
     setMaxTokensField(fromStore(next.max_tokens_field));
@@ -963,7 +963,7 @@ function ProfileSheet({
                   {swt("interface.m1414")}</p>
               </div>
               <Select value={thinkingType} onValueChange={setThinkingType}>
-                <SelectTrigger className="w-32 shrink-0">
+                <SelectTrigger id="p-thinking" className="w-32 shrink-0">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
