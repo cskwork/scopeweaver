@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"strings"
 
 	runtimeconfig "github.com/Autumn-27/artex/config"
 	"github.com/Autumn-27/artex/locale"
@@ -12,13 +11,15 @@ import (
 )
 
 // DeepSeekLocalOnlyMessage is shared with the search connectivity probe.
-const DeepSeekLocalOnlyMessage = "DeepSeek web search uses a remote LLM and is unavailable while local_llm_only is enabled"
+const WebSearchLocalOnlyMessage = "Web search is unavailable while local_llm_only is enabled"
 
-// secureWebSearch replaces only the SDK's DeepSeek search tool: its private HTTP
-// client cannot receive the application's guarded LLM transport. Keep the SDK
-// schema and permissions, but check the live policy before every invocation.
+// DeepSeekLocalOnlyMessage remains an alias for callers using the former name.
+const DeepSeekLocalOnlyMessage = WebSearchLocalOnlyMessage
+
+// secureWebSearch retains the SDK tool contract and checks live policy before
+// every backend invocation, including sessions created before a policy change.
 func secureWebSearch(opts *agentcore.Options, policy func() (bool, []string)) {
-	if !opts.EnableWebSearch || strings.ToLower(strings.TrimSpace(opts.WebSearchBackend)) != "deepseek" {
+	if !opts.EnableWebSearch {
 		return
 	}
 	opts.EnableWebSearch = false

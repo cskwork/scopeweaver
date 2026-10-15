@@ -67,15 +67,17 @@ Selecting an Ollama template reads `/api/tags` and model metadata from the selec
 | Context window (K) | Binary K sent as `options.num_ctx` (32 = 32,768). `0` uses 32; values below 16 use 16. Also sets the compaction budget. | Unchanged: compaction budget only, `0` = 200K |
 | Output limit | Sent as `options.num_predict`; `0` uses 4,096 | Unchanged: `0` omits the field |
 | Keep-alive | Sent as `keep_alive`; blank uses `30m` (Ollama's own default is 5 minutes) | Not sent |
-| Max concurrent requests | `0` uses 1. One admission gate is shared per Ollama server, even across profiles | `0` inherits **System settings → Max concurrent LLM requests** |
+| Max concurrent requests | `0` uses 1. One admission gate is shared per Ollama server, even across profiles; the lowest configured cap applies | `0` inherits **System settings → Max concurrent LLM requests** |
+
+Queued approval-judge, main-agent and side-question requests take the next free slot before background work. Each group is FIFO; active inference is never interrupted. Diagnostics and pre-warm remain background requests.
 
 Raise concurrency only when the server sets `OLLAMA_NUM_PARALLEL` above 1. Ollama's memory use grows with `OLLAMA_NUM_PARALLEL × context length` ([FAQ](https://docs.ollama.com/faq)).
 
 ### Runtime safeguards
 
 - **Pre-warm:** before the first inference through a native profile, ScopeWeaver calls `/api/show`, refuses a model that does not declare `tools`, then loads the model with an empty `/api/chat` request using the profile's `num_ctx` and `keep_alive`. Warm-up runs inside the same concurrency slot.
-- **Compaction:** for native Ollama with a window of 64K or less, history compaction triggers at 75% of the window and keeps complete tool call/result pairs. If experimental noa compaction is enabled, this safeguard takes priority for those profiles: noa is skipped and a warning is emitted. At 32K or less, the part of each tool output given to the model is capped at 16,384 **bytes** (16 KiB, measured as the SDK's `len(s)`, not Unicode characters); the full output is preserved in a spill file referenced from the tool result. Cloud formats keep their existing compaction and noa behavior.
-- **Approval judge:** when the judge profile (or the active profile, if no judge profile is selected) is Ollama, the default timeout becomes **60 s** and the default failure action becomes **ask**. A timeout or failure action you saved explicitly is preserved.
+- **Compaction:** for native Ollama with a window of 64K or less, history compaction triggers at 72% of the window and keeps complete tool call/result pairs. If experimental noa compaction is enabled, this safeguard takes priority for those profiles: noa is skipped and a warning is emitted. At 32K or less, the part of each tool output given to the model is capped at 16,384 **bytes** (16 KiB, measured as the SDK's `len(s)`, not Unicode characters); above 32K through 64K, the cap is 32,768 bytes (32 KiB). The full output is preserved in a spill file referenced from the tool result. Cloud formats keep their existing compaction and noa behavior.
+- **Approval judge:** an explicitly selected judge profile wins. Otherwise the actual native profile used by the originating agent/run is preferred (including binding, pool or failover); cloud or missing origin uses the active profile. For a native judge, the default timeout is **90 s** and the default failure action is **ask**. Saved timeout/failure overrides win; user approval still expires after 300 seconds with deny by default. Native output is constrained to a decision/comment JSON schema and still validated. The settings form cannot save until its server configuration loads successfully.
 
 ### Generic OpenAI-compatible servers (vLLM, LM Studio)
 
@@ -106,14 +108,23 @@ Inside a container, `127.0.0.1` is the container itself. Compose maps `host.dock
 
 Off by default; cloud providers remain available. Turn it on in **System settings → Local-only LLM network** or with `SCOPEWEAVER_LOCAL_LLM_ONLY=true`. When on:
 
-- It applies to **LLM HTTP only**: inference, model lists, connection tests, warm-up and the approval judge. Target traffic, other web search backends and the global proxy are unaffected.
-- **DeepSeek web search is unavailable**, even if its endpoint is in a trusted CIDR: the SDK makes that remote LLM call with its own HTTP client, and there is no path to inject this connection guard into it. Turning the policy off restores DeepSeek search.
-- Allowed destinations are loopback, private IPv4 (RFC 1918) and IPv6 unique-local addresses, plus **trusted CIDRs** (`local_llm_allowed_cidrs`). A trusted range is treated like a private LLM server, so add only networks you control.
-- CIDRs from `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` apply in addition to the stored list; they are not copied into it and cannot be edited in the UI.
-- Changes in System settings apply to the next LLM HTTP calls without a restart.
-- The resolved IP is checked when each connection opens. DNS names that resolve to any public address are refused, and redirects to public addresses fail the same way.
-- **LLM profile proxies are rejected.**
-- An environment value of `true` is a floor; it cannot be switched off in the UI.
+- LLM HTTP (inference, model lists, connection tests, warm-up and the approval judge) permits **loopback plus explicit trusted CIDRs** (`local_llm_allowed_cidrs`). Private IPv4, IPv6 ULA, LAN and Docker addresses are no longer implicitly trusted. Add only inference-server addresses you control, preferably `/32` for IPv4 or `/128` for IPv6.
+- Link-local, multicast and unspecified addresses are always refused, even in a trusted CIDR. DNS names are checked against every resolved address when a connection opens; all addresses must be allowed. All redirects and LLM profile proxies are refused.
+- **Agent web search (every backend), search connectivity probes, update checks and update downloads are blocked.** The update screen describes this deliberate policy separately from a network failure. Local version status, update progress and rollback remain available; cached remote release information is not returned as a way around the policy.
+- Runtime changes apply without a restart, including already-created sessions. A download admitted before strict mode is enabled stops at the next guarded network operation/body read and removes partial staging; traffic already sent cannot be recalled.
+- CIDRs from `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS` (or retained `ARTEX_LOCAL_LLM_ALLOWED_CIDRS`) also apply, are not copied into the stored list and cannot be edited in the UI. An environment `true` for the policy is a floor that the UI cannot disable.
+- Target traffic, target tools and the global proxy remain connected. This is an application policy, not a cryptographic or whole-host offline guarantee.
+
+**Migration for existing strict LAN/Docker profiles:** same-machine `http://127.0.0.1:11434` needs no CIDR. A LAN endpoint such as `http://192.168.1.20:11434` needs `192.168.1.20/32`; an IPv6 inference address such as `fd00::20` needs `fd00::20/128`. For Docker, resolve the name **from the ScopeWeaver container**, because the host and container may see different addresses:
+
+```bash
+# Existing Compose service; read its actual name resolution and network addresses.
+docker compose exec scopeweaver getent ahosts host.docker.internal
+docker compose exec scopeweaver getent ahosts ollama
+docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}} {{.GlobalIPv6Address}}{{end}}' "$(docker compose ps -q ollama)"
+```
+
+If the image lacks `getent`, inspect the existing host-gateway mapping with `docker compose exec scopeweaver cat /etc/hosts` and the Ollama container's address with `docker inspect`. Use the inference IP that ScopeWeaver actually reaches, not a copied example or a whole Docker subnet. Add it to **Additional trusted CIDRs** or the environment allowlist, for example `SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS=192.168.1.20/32`. Neither `host.docker.internal` nor the service name `ollama` grants implicit trust. Recheck after Docker recreates the service or changes its address; update the narrow allowlist before retrying **Load models** or **Test connection**.
 
 ScopeWeaver cannot see what an Ollama server does next. **Ollama can forward requests to Ollama cloud models**; the bundled Compose service sets `OLLAMA_NO_CLOUD=1`, but a host or remote Ollama must disable cloud independently (`OLLAMA_NO_CLOUD=1` or `disable_ollama_cloud` in `~/.ollama/server.json`, per the [FAQ](https://docs.ollama.com/faq)).
 
@@ -137,23 +148,33 @@ Saving a new UI profile with a blank key does not import provider environment cr
 
 ```bash
 # .env for ScopeWeaver in Docker with Ollama on the host
+# Replace your-installed-tool-model with a tool-capable tag shown by Load models.
 SCOPEWEAVER_LLM_PROVIDER=ollama
 SCOPEWEAVER_LLM_BASE_URL=http://host.docker.internal:11434
-SCOPEWEAVER_LLM_MODEL=qwen2.5-coder:32b
+SCOPEWEAVER_LLM_MODEL=your-installed-tool-model
 SCOPEWEAVER_LLM_CONTEXT_WINDOW_K=32
 SCOPEWEAVER_LLM_MAX_CONCURRENT=1
 SCOPEWEAVER_LLM_KEEP_ALIVE=30m
 SCOPEWEAVER_LLM_MAX_TOKENS=4096
-SCOPEWEAVER_LOCAL_LLM_ONLY=false   # set true for the opt-in local-only policy
+SCOPEWEAVER_LOCAL_LLM_ONLY=false   # add the actual host /32 or /128 before enabling strict mode
+# SCOPEWEAVER_LOCAL_LLM_ALLOWED_CIDRS=192.168.1.20/32  # replace with the resolved inference IP
 ```
 
 ```json
 {
-  "llm": { "provider": "ollama", "base_url": "http://127.0.0.1:11434", "model": "qwen2.5-coder:32b", "context_window_k": 32, "llm_max_concurrent": 1, "keep_alive": "30m", "max_tokens": 4096 },
+  "llm": { "provider": "ollama", "base_url": "http://127.0.0.1:11434", "model": "your-installed-tool-model", "context_window_k": 32, "llm_max_concurrent": 1, "keep_alive": "30m", "max_tokens": 4096 },
   "local_llm_only": false,
   "local_llm_allowed_cidrs": []
 }
 ```
+
+### Bounded diagnostics and telemetry
+
+**Test connection** makes a deliberate inference probe; selecting a template only discovers installed metadata. Alongside tool/context checks and load time/speed, native diagnostics show the selected runner's `/api/ps` `size` and `size_vram` as a GPU-memory percentage. Missing or zero total size, or missing VRAM size, means **unknown**, not 0% GPU. Explicit zero VRAM with a positive total means 0%. This ratio is a memory estimate, not an exact weight split, GPU-capacity test or a guarantee that a model stays resident.
+
+A percentage at or below 80% warns that CPU work may slow generation. Other loaded models and an explicitly configured judge using a different model/context on the same endpoint produce separate memory/reload warnings. Using the same model/context may reduce reloads but cannot guarantee residency. No diagnostic downloads a model or saves/activates a profile.
+
+Near-context-capacity warnings are a server-log heuristic based on reported token counts, not a truncation detector. Full raw Ollama timing fields are stored only when raw recording is enabled; token/cache usage remains metered independently. Small models still need task-specific validation; the existing reliability limitations below remain.
 
 ### Hardware tiers
 

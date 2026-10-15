@@ -3672,6 +3672,11 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 // edits are tested); empty API keys fall back to stored values so the user need
 // not retype them. Always 200 with {ok, error?, count?, backend?}.
 func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
+	if strict, _ := s.effectiveLLMPolicy(); strict {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), agent.WebSearchLocalOnlyMessage), "local_llm_only": true})
+		return
+	}
+
 	var req struct {
 		Backend   string `json:"web_search_backend"`
 		Proxy     string `json:"web_search_proxy"`
@@ -3718,6 +3723,10 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), wall)
 	defer cancel()
+	if strict, _ := s.effectiveLLMPolicy(); strict {
+		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), agent.WebSearchLocalOnlyMessage), "backend": backend, "local_llm_only": true})
+		return
+	}
 	results, err := actool.WebSearchProbe(ctx, cfg, probeQuery, 3)
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.ErrorMessage(responseLanguage(w), err), "backend": backend})
