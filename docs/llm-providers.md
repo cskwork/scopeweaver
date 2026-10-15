@@ -36,7 +36,7 @@ Verified against official documentation on **2026-10-03**. Provider availability
 
 Every agent turn resends the system prompt, the tool schemas and the conversation so far. Input therefore grows turn by turn until compaction shortens the history, and provider prompt caching decides how much of the repeated input is billed at the cheaper cached rate. This section answers [issue #24](https://github.com/cskwork/scopeweaver/issues/24) for cloud profiles. Native Ollama has its own safeguards, described [below](#runtime-safeguards).
 
-**Evidence status:** measurements use Z.ai GLM-5.3 on the Coding Plan as a proxy for DeepSeek. GLM has a different tokenizer, cache accounting and price, so **DeepSeek numbers are unverified**. DeepSeek, Claude, OpenAI, Qwen, Kimi and OpenRouter support is verified with test fixtures built from each provider's documented responses, not with live calls.
+**Evidence status:** measurements use Z.ai GLM-5.3 on the Coding Plan as a proxy for DeepSeek. GLM has a different tokenizer, cache accounting and price, so **DeepSeek numbers are unverified**. DeepSeek, Claude, OpenAI, Qwen, Kimi and OpenRouter support is verified with test fixtures built from each provider's documented responses, not with live calls. This includes all Claude 5.5 request and replay behavior below; no Claude API key was used.
 
 ### Economy templates
 
@@ -52,10 +52,21 @@ Open **LLM → New → Configuration template** and choose an *(economy)* entry.
 | OpenRouter | OpenAI Chat Completions | `https://openrouter.ai/api/v1` | `deepseek/deepseek-v4.1-flash` | omitted | `low` | `max_tokens` |
 
 - **Effort `low` is an untested economy default** on every provider above. If results are cut off or too shallow, raise effort toward the provider default (DeepSeek `high`, GPT-6 Luna `medium`, Qwen `xhigh`, Kimi K3 `max`), then the output limit.
-- Claude: thinking is disabled because ScopeWeaver cannot yet replay Claude 5.5 adaptive thinking blocks in tool history. Haiku accepts disabled thinking only at effort `low`, `medium` or `high`. `claude-sonnet-5-5` rejects disabled thinking, so it has no template.
+- Claude: the template disables thinking on Haiku to save output tokens. Haiku accepts disabled thinking only at effort `low`, `medium` or `high`. Sonnet and Opus 5.5 reject disabled thinking, so they have no economy template; use them with thinking **Omit** or **Adaptive** (see [Claude 5.5 thinking](#claude-55-thinking)).
 - OpenAI: the template uses the Responses format because GPT-6 Luna accepts tools on Chat Completions only at effort `none`.
 - OpenRouter: the model id and its `reasoning_effort` support were checked in OpenRouter's public model list on 2026-10-16. Claude models through OpenRouter need cache markers that the Chat Completions format cannot send, so the template uses DeepSeek Flash, which caches prefixes automatically.
 - Z.ai GLM-5.3: the General and Coding Plan templates now fill effort `low`, output `16384` and context `0`, the economy row measured below. Earlier versions filled effort `max`, context `1000` and output `0`. Thinking stays on because GLM-5.3 requires it.
+
+### Claude 5.5 thinking
+
+These rules apply only to a model id of the form `claude-…-5-5` (or its dated snapshot `claude-…-5-5-YYYYMMDD`) on the official host (`https://api.anthropic.com`, or an empty base URL).
+
+- Thinking left empty (**Omit**) now sends `thinking: {type: adaptive, display: summarized}`. The new **Adaptive** option sends the same; **On** (`enabled`) also gets `display: summarized`.
+- In tool loops, thinking blocks are replayed with their tool calls, including blocks with empty text and `redacted_thinking` blocks. ScopeWeaver keeps them in memory for the latest 128 tool calls (at most 4 MiB) per provider; blocks with summarized text are also saved in the session history, but empty or redacted blocks do not survive a restart in the middle of a tool loop.
+- Summary and approval-judge calls no longer send `temperature`. They also drop their `disabled` thinking for Sonnet, Opus, and Haiku at effort `xhigh` or `max`, which reject it; the profile's thinking setting applies instead.
+- A profile set to **Off** (`disabled`) still sends `disabled` on agent turns, so Sonnet and Opus 5.5 need **Omit** or **Adaptive**.
+- Third-party Anthropic-compatible endpoints (DeepSeek, Kimi, Z.ai) and other model ids are unchanged: empty thinking is still omitted.
+- **Verified with request and stream fixtures only**; live Claude behavior and billing are unverified.
 
 ### Measured effect (GLM proxy)
 
@@ -68,9 +79,13 @@ One small task (three routes on a local test target with one planted unauthentic
 
 - Economy vs baseline: 54% fewer input + output tokens and 65% fewer credits at the median; every economy run was below the cheapest baseline run. The largest single call used 13,287 input and 3,829 output tokens, so neither the 200K window nor the output limit was reached: the saving here comes from effort `low`. The output limit and window bound larger tasks and were not measured. Run-to-run spread: largest/smallest run 1.25× for baseline, 1.10× for economy.
 - Share by lane: baseline credits: worker 29.6%, planner 29.3%, report writer 29.1%, goal setup 12.0%; economy credits: report writer 38.8%, planner 34.1%, worker 20.2%, goal setup 6.9%. Runs had no compaction, so no session-summary calls; judge and web search were off.
-- Cached share of input: 85.2% baseline, 92.3% economy. Reasoning share: output, which includes reasoning, was 39.3% of baseline credits and 23.4% of economy credits; ScopeWeaver does not record reasoning tokens separately.
+- Cached share of input: 85.2% baseline, 92.3% economy. Reasoning share: output, which includes reasoning, was 39.3% of baseline credits and 23.4% of economy credits; ScopeWeaver did not yet record reasoning tokens separately when these runs were made.
 
 GLM-5.3 always thinks, so these runs do not measure the effect of turning thinking off.
+
+Live bridge checks (Claude via `claude -p`, OpenAI via `codex exec`) test model behavior through a local bridge. They do not test the API wire format or billing.
+
+{{LIVE:bridge-results}}
 
 ### Recommended settings
 
@@ -88,7 +103,7 @@ GLM-5.3 always thinks, so these runs do not measure the effect of turning thinki
 | --- | --- | --- |
 | Context window (K) | Local compaction budget only; not sent to the provider. `0` = 200K; values are clamped to 32–1000. | A larger window delays compaction, so each call carries more history. At 200K, old tool results start being cleared above about 115K tokens and history is summarized at about 179K. |
 | Output limit | Per-reply cap. **`0` is not omitted**: agent turns send 32768, direct Anthropic calls send 8192, native Ollama uses its own default. | A cap does not make replies shorter; it stops long ones. Too low truncates replies. Templates use 16384. |
-| Thinking | `thinking.type`; empty omits it. Reasoning is billed as output. | DeepSeek thinks by default and documents `disabled`. With tools, DeepSeek also resends earlier reasoning as input. GLM-5.3 always thinks. The Claude template disables it. |
+| Thinking | `thinking.type`; empty omits it, except on official Claude 5.5, where empty sends `adaptive`. Reasoning is billed as output. | DeepSeek thinks by default and documents `disabled`. With tools, DeepSeek also resends earlier reasoning as input. GLM-5.3 always thinks. The Claude template disables it. |
 | Reasoning effort | `low` to `max`; empty omits it. | Templates use `low`. It was measured only on GLM-5.3; on other providers it is an untested economy default. Supported values differ per provider. |
 
 ### Context optimization
@@ -102,7 +117,7 @@ GLM-5.3 always thinks, so these runs do not measure the effect of turning thinki
 
 **Prompt caching:**
 
-- Claude: ScopeWeaver now always marks the system prompt, and the tool schemas before it, as cacheable in planner, worker, main-agent and chat sessions (including the report writer). Goal setup and conversation or graph summaries send no marker. The first use of each distinct system prompt writes the cache at 1.25× the input price; later calls within the cache lifetime read it at the cached price. Worker prompts differ per intent, so each intent writes once. Marker placement is verified by tests; **the live saving is unverified** (no Claude key).
+- Claude: ScopeWeaver now always marks the system prompt, and the tool schemas before it, as cacheable in planner, worker, main-agent and chat sessions (including the report writer). Every other Anthropic-format request with a system prompt and no boundary now marks the whole system prompt: goal setup, conversation and graph summaries, side-question preparation and the approval judge. A prompt shorter than the model's minimum cacheable length is not cached even with a marker. The first use of each distinct system prompt writes the cache at 1.25× the input price; later calls within the cache lifetime read it at the cached price. Worker prompts differ per intent, so each intent writes once. Marker placement is verified by tests; **the live saving is unverified** (no Claude key).
 - DeepSeek, Kimi and Z.ai cache prefixes automatically. DeepSeek and Kimi document that their Anthropic-compatible endpoints ignore block markers. OpenAI, Qwen and OpenRouter (DeepSeek Flash) also cache matching prefixes automatically.
 - Tests confirm that consecutive tool turns in one session keep the same system prompt and tool schemas and only append history, for all three cloud formats. Compaction, wrap-up and newly unlocked deferred tools change the prefix. An edited prompt template that uses `{{.Now}}` changes the system prompt on each run.
 
@@ -120,35 +135,42 @@ GLM-5.3 always thinks, so these runs do not measure the effect of turning thinki
 - Planner: a new session on each wake (start, intent completion, new finding, idle heartbeat), with several turns each.
 - Goal decomposition runs before planning, up to 8 turns.
 - **Report writer:** a seeded custom agent with an enabled trigger on each `report_finding` tool call. Each finding starts its own conversation, up to 5 in parallel.
-- **DeepSeek web search:** each search is a separate DeepSeek call with the active profile's key (output cap 1024, up to 3 searches per call). **It is not recorded in `llm_usage` or LLM recordings**; check the DeepSeek console.
+- **DeepSeek web search:** each search is a separate DeepSeek call with the active profile's key (output cap 1024, up to 3 searches per call). Agent searches and the web search test in settings are now recorded in `llm_usage` with lane `web_search` and the active profile's name and model; they are not in LLM recordings. DeepSeek does not document the usage format of these search responses, so ScopeWeaver reads Anthropic-style usage fields. **A response with no usage frame is recorded with 0 tokens: the call is counted, its tokens are unknown.** Check the DeepSeek console for billed tokens.
 - Approval judge (off by default): one call per tool action without a matching rule. Side questions: on request only, with up to 12 summary calls before the answer.
 - **Test connection** makes a real call (output cap 8192) that is not recorded.
 - Fixed accounting error: Anthropic-format streams (Claude and Anthropic-compatible endpoints) over-counted output in `llm_usage`. A test stream with cumulative output counts 10 and 20 was recorded as 30 instead of 20. Only ScopeWeaver's numbers were inflated, not provider billing.
+- Fixed: ScopeWeaver's internal session and transcript totals also over-counted streamed output (the same 10-then-20 stream counted 30). They now count 20. These totals are not `llm_usage`; an over-count could only move compaction earlier.
+- Fixed: side questions on OpenAI Responses profiles were reported as interrupted because the stream had no stop event. A `response.completed` event now ends the answer normally; `response.incomplete` is still reported as interrupted.
 
 ### Checking where tokens go
 
-- **Tasks → task → Overview → LLM token usage (by model)**: calls, input, output and cache read per model, from the always-on `llm_usage` table. Only rows tagged with the task appear; report-writer rows have no task.
+- **Tasks → task → Overview → LLM token usage (by model)**: calls, input, output, **Reasoning (in output)** and cache read per model, from the always-on `llm_usage` table. Only rows tagged with the task appear; report-writer rows have no task. DeepSeek search rows appear under the active profile's model.
+- The **Dashboard** and **Interception rules → Approval token usage** also show **Reasoning (in output)**.
 - **LLM recordings**: one row per call with lane, tokens, latency and raw request/response. Off by default; turn on **Recording** before the task. It stores full prompts and responses.
-- SQL on `llm_usage` for one time window (lane is the `worker` column: `planner`, `worker`, `goals`, `compactor`, `judge`, `btw` for side questions, `mainagent`; empty for report-writer, retest and custom-agent conversations). Conversation summaries and wrap-up keep their agent's lane.
+- SQL on `llm_usage` for one time window (lane is the `worker` column: `planner`, `worker`, `goals`, `compactor`, `judge`, `btw` for side questions, `mainagent`, `web_search` for DeepSeek search; empty for report-writer, retest and custom-agent conversations). Conversation summaries and wrap-up keep their agent's lane.
 
 ```sql
 SELECT COALESCE(worker, '(none)') AS lane, model, COUNT(*) AS calls,
        SUM(input_tokens) AS input, SUM(cache_read) AS cache_read,
-       SUM(cache_write) AS cache_write, SUM(output_tokens) AS output
+       SUM(cache_write) AS cache_write, SUM(output_tokens) AS output,
+       SUM(reasoning_tokens) AS reasoning
 FROM llm_usage
 WHERE ts >= '2026-10-16 09:00' AND ts < '2026-10-16 10:00'  -- your task's time range
 GROUP BY 1, 2
 ORDER BY SUM(input_tokens) + SUM(output_tokens) DESC;
 ```
 
-`cache_read` and `cache_write` are already part of `input`; do not add them again.
+`cache_read` and `cache_write` are already part of `input`, and `reasoning` is already part of `output`; do not add them again.
+
+Cache reads are counted from `prompt_tokens_details.cached_tokens`, DeepSeek's top-level `prompt_cache_hit_tokens` and Kimi's legacy top-level `cached_tokens`. Cache writes are recorded for OpenAI Chat, OpenAI Responses, Kimi K3 and OpenRouter (`cache_write_tokens`) and Qwen (`cache_creation_input_tokens`), as well as Claude. These field mappings are verified with fixtures only.
 
 ### Accounting gaps and follow-ups
 
-- Cache writes are not recorded for OpenAI-format providers (OpenAI, Qwen explicit cache, Kimi K3, OpenRouter). Reasoning tokens are counted inside output with no separate figure. Both are follow-ups.
-- DeepSeek cache hits are counted only from `usage.prompt_tokens_details.cached_tokens`. A response with only the top-level `prompt_cache_hit_tokens` shows cache read 0; the same applies to Kimi's legacy top-level `cached_tokens`. A 0 cache read does not prove a cache miss.
+- Reasoning is 0 when a provider reports no separate figure; a 0 does not prove the model did not reason.
+- DeepSeek search usage field names are undocumented (see [Known causes of extra calls](#known-causes-of-extra-calls)).
 - Gemini has no template yet; it needs the Norma SDK v0.4.4 upgrade (follow-up).
-- Claude history caching and Sonnet/Opus adaptive thinking need SDK support (follow-up).
+- Claude history caching (a marker on the last message) needs SDK support (follow-up).
+- OpenRouter models that honor only the unified `reasoning.effort` may ignore the template's `reasoning_effort`, which is the only form the SDK can send (follow-up).
 
 ## Native Ollama (local inference)
 

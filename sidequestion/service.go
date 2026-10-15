@@ -35,11 +35,8 @@ func (s SideQuestionService) Answer(ctx context.Context, req llm.CompletionReque
 			case llm.SEToolUseStart:
 				out.ToolUse = true
 			case llm.SEMessageStart, llm.SEMessageDelta:
-				// Fields are cumulative within this call; preparation/recovery calls add separately.
-				out.Usage.InputTokens = max(out.Usage.InputTokens, ev.Usage.InputTokens)
-				out.Usage.OutputTokens = max(out.Usage.OutputTokens, ev.Usage.OutputTokens)
-				out.Usage.CacheReadTokens = max(out.Usage.CacheReadTokens, ev.Usage.CacheReadTokens)
-				out.Usage.CacheWriteTokens = max(out.Usage.CacheWriteTokens, ev.Usage.CacheWriteTokens)
+				// Recorder forwards deltas after metering cumulative provider usage.
+				out.Usage.Add(ev.Usage)
 			case llm.SEMessageStop:
 				complete = true
 			}

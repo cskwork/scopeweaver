@@ -488,6 +488,29 @@ export async function runOllamaProfileChecks({ base, token, step, check, openPag
           check(await card(localName).getByText(t.i.m1334, { exact: true }).count() === 0, "local compatible profile is mislabeled as missing a key");
           await card(publicName).getByText(t.i.m1334, { exact: true }).waitFor();
         });
+
+        await step(`[${locale}] adaptive thinking is labeled, saved verbatim and shown again after reload`, async () => {
+          const adaptiveName = `e2e adaptive ${locale}`;
+          const sheet = await newProfile();
+          await p.fill("#p-proxy", "");
+          await p.fill("#p-name", adaptiveName);
+          await p.fill("#p-model", "claude-sonnet-5-5");
+          await p.locator("#p-thinking").click();
+          for (const label of [t.i.m1329, t.i.m0211, t.i.m0210]) await p.getByRole("option", { name: label, exact: true }).waitFor();
+          await p.getByRole("option", { name: t.s.thinkingAdaptive, exact: true }).click();
+          check((await p.locator("#p-thinking").textContent())?.trim() === t.s.thinkingAdaptive, `adaptive selector shows "${await p.locator("#p-thinking").textContent()}"`);
+          await sheet.getByRole("button", { name: t.i.m0728, exact: true }).click();
+          await sheet.waitFor({ state: "hidden" });
+          const saved = (await (await p.request.get(`${base}/api/llm/profiles`, { headers: auth })).json()).profiles.find((x) => x.name === adaptiveName);
+          check(saved?.thinking_type === "adaptive", `adaptive saved as ${JSON.stringify(saved?.thinking_type)}`);
+          await p.reload();
+          await p.getByText(adaptiveName, { exact: true }).click();
+          await p.getByRole("dialog").waitFor();
+          await p.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          check((await p.locator("#p-thinking").textContent())?.trim() === t.s.thinkingAdaptive, `reloaded adaptive selector shows "${await p.locator("#p-thinking").textContent()}"`);
+          await p.screenshot({ path: `${out}/thinking-adaptive-${locale}.png` });
+          await p.keyboard.press("Escape");
+        });
       } finally {
         await p.context().close();
       }

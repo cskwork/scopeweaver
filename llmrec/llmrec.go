@@ -120,6 +120,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 	// llm_record setting. Lightweight usage metering always runs — it powers token
 	// stats and must be complete even for interrupted/failed runs, so it is NOT
 	// gated. Only body serialization + response accumulation are skipped when off.
+	ctx, metadata := NewUsageMetadata(ctx)
 	recordBodies := r.enabled == nil || r.enabled()
 	start := time.Now()
 	session := transcript.SessionIDFrom(ctx)
@@ -152,6 +153,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 			textBuf     strings.Builder
 			thinkingBuf strings.Builder
 			usage       llm.Usage
+			forwarded   llm.Usage
 			stopReason  string
 			streamErr   error
 		)
@@ -167,7 +169,11 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 				status = "error"
 			}
 			// Lightweight metering row — always written.
-			r.recordUsage(taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
+			usage, reasoning := metadata.Enrich(usage)
+			if err != nil {
+				usage = metadata.EnrichFailure(usage)
+			}
+			r.recordUsage(taskID, expID, worker, usage, reasoning, int(time.Since(start).Milliseconds()), status)
 			// Heavy trace row — only when body recording is on.
 			if recordBodies {
 				r.record(req, session, taskID, worker, reqBody, capt, start, textBuf.String(), thinkingBuf.String(), usage, stopReason, err)
@@ -205,6 +211,10 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 				usage.CacheReadTokens = max(usage.CacheReadTokens, ev.Usage.CacheReadTokens)
 				usage.CacheWriteTokens = max(usage.CacheWriteTokens, ev.Usage.CacheWriteTokens)
 			}
+			if ev.Type == llm.SEMessageStart || ev.Type == llm.SEMessageDelta {
+				ev.Usage = usageDelta(usage, forwarded)
+				forwarded = usage
+			}
 			if !yield(ev, err) {
 				return
 			}
@@ -218,6 +228,7 @@ func (r *Recorder) Stream(ctx context.Context, req llm.CompletionRequest) iter.S
 // Complete implements the atomic completion path while preserving the same
 // usage metering, normalized body recording and raw wire capture as Stream.
 func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+	ctx, metadata := NewUsageMetadata(ctx)
 	recordBodies := r.enabled == nil || r.enabled()
 	start := time.Now()
 	session := transcript.SessionIDFrom(ctx)
@@ -243,7 +254,11 @@ func (r *Recorder) Complete(ctx context.Context, req llm.CompletionRequest) (llm
 	if err != nil {
 		status = "error"
 	}
-	r.recordUsage(taskID, expID, worker, usage, int(time.Since(start).Milliseconds()), status)
+	usage, reasoning := metadata.Enrich(usage)
+	if err != nil {
+		usage = metadata.EnrichFailure(usage)
+	}
+	r.recordUsage(taskID, expID, worker, usage, reasoning, int(time.Since(start).Milliseconds()), status)
 	if recordBodies {
 		r.record(req, session, taskID, worker, reqBody, capt, start, msg.Text(), thinkingText(msg), usage, stopReason, err)
 	}
@@ -262,26 +277,27 @@ func thinkingText(msg llm.Message) string {
 
 // recordUsage appends one lightweight metering row to llm_usage (no bodies). Skips
 // zero-token calls with no model, which carry nothing worth metering.
-func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage llm.Usage, latencyMs int, status string) {
+func (r *Recorder) recordUsage(taskID string, expID int64, worker string, usage llm.Usage, reasoning, latencyMs int, status string) {
 	if r.pg == nil {
 		return
 	}
 	if r.model == "" && usage.InputTokens == 0 && usage.OutputTokens == 0 &&
-		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 && reasoning == 0 {
 		return
 	}
 	err := r.pg.InsertLLMUsage(&db.LLMUsage{
-		TaskID:        taskID,
-		ExplorationID: expID,
-		Worker:        worker,
-		Model:         r.model,
-		ProfileName:   r.prof,
-		LatencyMs:     latencyMs,
-		InputTokens:   usage.InputTokens,
-		OutputTokens:  usage.OutputTokens,
-		CacheRead:     usage.CacheReadTokens,
-		CacheWrite:    usage.CacheWriteTokens,
-		Status:        status,
+		TaskID:          taskID,
+		ExplorationID:   expID,
+		Worker:          worker,
+		Model:           r.model,
+		ProfileName:     r.prof,
+		LatencyMs:       latencyMs,
+		InputTokens:     usage.InputTokens,
+		OutputTokens:    usage.OutputTokens,
+		CacheRead:       usage.CacheReadTokens,
+		CacheWrite:      usage.CacheWriteTokens,
+		ReasoningTokens: reasoning,
+		Status:          status,
 	})
 	if err != nil {
 		log.Printf("[llmusage] insert: %v", err)
