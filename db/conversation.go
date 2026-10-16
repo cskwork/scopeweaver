@@ -1,6 +1,7 @@
 package db
 
 import (
+	"context"
 	"database/sql"
 	"time"
 )
@@ -167,6 +168,33 @@ func (d *DB) GetConversation(id int64) (*Conversation, error) {
 		return nil, err
 	}
 	return &c, nil
+}
+
+// ConversationExploration lazily creates a durable finding graph without starting a task.
+// Locking the conversation row makes concurrent tool calls share the same graph.
+func (d *DB) ConversationExploration(ctx context.Context, id int64) (*ExplorationStore, string, error) {
+	tx, err := d.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	defer tx.Rollback()
+	var expID sql.NullInt64
+	var agentKey, title string
+	if err := tx.QueryRowContext(ctx, `SELECT exploration_id, agent_key, title FROM conversations WHERE id=$1 FOR UPDATE`, id).Scan(&expID, &agentKey, &title); err != nil {
+		return nil, "", err
+	}
+	if !expID.Valid {
+		if err := tx.QueryRowContext(ctx, `INSERT INTO explorations(description,goal) VALUES($1,$1) RETURNING id`, title).Scan(&expID.Int64); err != nil {
+			return nil, "", err
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE conversations SET exploration_id=$2 WHERE id=$1`, id, expID.Int64); err != nil {
+			return nil, "", err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, "", err
+	}
+	return d.Exploration(expID.Int64), agentKey, nil
 }
 
 // UpdateConversation applies a partial title/pin mutation and returns the updated
