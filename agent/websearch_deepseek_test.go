@@ -8,6 +8,8 @@ import (
 	actool "github.com/Autumn-27/norma/tool"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -21,6 +23,67 @@ import (
 	"github.com/Autumn-27/norma/transcript"
 	"github.com/google/uuid"
 )
+
+func TestDeepSeekSearchInvalidProxyFailsClosed(t *testing.T) {
+	for _, proxy := range []string{"http://%", "http://fixture:dummy-password@%", "http://", "proxy.example:8080", "ftp://proxy.example"} {
+		t.Run(proxy, func(t *testing.T) {
+			assertDeepSeekSearchConfigError(t, actool.WebSearchConfig{Proxy: proxy}, "proxy")
+		})
+	}
+}
+
+func TestDeepSeekSearchInvalidCAFailsClosed(t *testing.T) {
+	badPEM := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(badPEM, []byte("not a certificate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{filepath.Join(t.TempDir(), "missing.pem"), badPEM} {
+		t.Run(filepath.Base(path), func(t *testing.T) {
+			assertDeepSeekSearchConfigError(t, actool.WebSearchConfig{CACert: path}, "CA")
+		})
+	}
+}
+
+func TestDeepSeekSearchInsecureTLSIgnoresBadCA(t *testing.T) {
+	// InsecureTLS wins and ignores CACert (Norma precedence); a bad CA must not fail here.
+	badPEM := filepath.Join(t.TempDir(), "invalid.pem")
+	if err := os.WriteFile(badPEM, []byte("not a certificate"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, ca := range []string{"", badPEM, filepath.Join(t.TempDir(), "missing.pem")} {
+		if err := deepSeekSearchClientErr(actool.WebSearchConfig{InsecureTLS: true, CACert: ca}); err != nil {
+			t.Errorf("InsecureTLS with CACert=%q: unexpected error %v", ca, err)
+		}
+	}
+}
+
+func assertDeepSeekSearchConfigError(t *testing.T, cfg actool.WebSearchConfig, want string) {
+	t.Helper()
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		fmt.Fprint(w, deepSeekHitFrame+deepSeekUsageFrame)
+	}))
+	defer srv.Close()
+	cfg.Backend, cfg.DeepSeekBaseURL, cfg.DeepSeekAPIKey, cfg.DeepSeekModel = "deepseek", srv.URL, "fixture", "fixture-model"
+	core, err := NewDeepSeekWebSearch(cfg, DeepSeekSearchMeter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := core.Call(t.Context(), json.RawMessage(`{"query":"fixture"}`), nil)
+	if err != nil || !result.IsError || !strings.Contains(result.Flatten(), "Error searching web via deepseek:") || !strings.Contains(result.Flatten(), want) {
+		t.Errorf("configuration must fail through tool error contract: result=%+v err=%v", result, err)
+	}
+	if strings.Contains(result.Flatten(), "dummy-password") {
+		t.Error("tool error exposed proxy password")
+	}
+	if _, err := DeepSeekWebSearchProbe(t.Context(), cfg, DeepSeekSearchMeter{}, "fixture", 1); err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("probe configuration error=%v, want %s", err, want)
+	}
+	if got := hits.Load(); got != 0 {
+		t.Errorf("invalid configuration made %d outbound requests, want 0", got)
+	}
+}
 
 // S9: hit-limit results precede usage, so returning at the first result loses
 // the metering frame. Exercise the existing production tool construction seam.

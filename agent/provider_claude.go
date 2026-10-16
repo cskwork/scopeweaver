@@ -91,18 +91,17 @@ func (c *claudeReplay) rewrite(req *http.Request) error {
 		thinking["display"] = "summarized"
 		body["thinking"], _ = json.Marshal(thinking)
 	}
-	var messages []struct {
-		Role    string            `json:"role"`
-		Content []json.RawMessage `json:"content"`
-	}
+	var messages []map[string]json.RawMessage
 	if active && json.Unmarshal(body["messages"], &messages) == nil {
 		c.mu.Lock()
-		for i, m := range messages {
-			if m.Role != "assistant" {
+		for _, m := range messages {
+			if string(m["role"]) != `"assistant"` {
 				continue
 			}
-
-			content := append([]json.RawMessage(nil), m.Content...)
+			var content []json.RawMessage
+			if json.Unmarshal(m["content"], &content) != nil || content == nil {
+				continue
+			}
 			for pos := 0; pos < len(content); pos++ {
 				var block struct{ Type, ID string }
 				json.Unmarshal(content[pos], &block)
@@ -142,7 +141,7 @@ func (c *claudeReplay) rewrite(req *http.Request) error {
 					}
 				}
 			}
-			messages[i].Content = content
+			m["content"], _ = json.Marshal(content)
 		}
 		c.mu.Unlock()
 		body["messages"], _ = json.Marshal(messages)
