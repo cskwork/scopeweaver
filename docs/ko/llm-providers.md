@@ -85,7 +85,7 @@ GLM-5.3은 항상 추론하므로 이 측정으로는 추론을 끈 효과를 �
 
 로컬 브리지 확인(Claude는 `claude -p`, OpenAI는 `codex exec`)은 로컬 브리지를 거친 모델 동작을 확인합니다. API 전송 형식이나 과금은 확인하지 않습니다.
 
-{KO}
+`codex exec` bridge로 OpenAI 템플릿(gpt-6-luna, Responses)을 한 작업 전체에 돌렸습니다. 도구 루프가 끝났고, 심어 둔 취약점을 찾아 보고서 작성자가 보고했으며, 이어진 side question도 정상 응답했습니다(중단으로 표시되지 않음). 그 실행의 `llm_usage`에는 reasoning 토큰과 cache-read 토큰이 기록됐고 side question(`btw`) 행도 포함됐습니다. 나머지 두 번은 bridge가 느려 제한시간 안에 끝나지 못했는데, 이는 코드가 아니라 bridge 속도 문제입니다. `claude -p` bridge는 도구 프로토콜을 따르지 않아 제외했습니다. Claude와 OpenAI의 요청·사용량 처리는 fixture로 증명합니다.
 
 ### 권장 설정
 
