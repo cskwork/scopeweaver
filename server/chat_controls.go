@@ -115,6 +115,10 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 		s.chatAttemptsHTTP(w, r, ref, parts)
 		return
 	}
+	if r.Method == http.MethodGet && rest == "context" {
+		s.chatContextHTTP(w, r, ref)
+		return
+	}
 	if r.Method == http.MethodGet && rest == "" {
 		state, err := s.m.pg.ChatControlState(r.Context(), ref)
 		if err != nil {

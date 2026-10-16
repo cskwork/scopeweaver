@@ -171,12 +171,13 @@ func (m *MainAgent) Chat(ctx context.Context, taskID int64, mainSeg int, as *db.
 		noaSession = fmt.Sprintf("exp%d-main-s%d", ts.ID(), mainSeg)
 	}
 	secureWebSearch(&opts, m.webSearch.PolicyResolver)
-	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: m.nativeOllamaFn != nil && m.nativeOllamaFn(), ContextWindow: m.compactionWindow()})
-	enableNoa(&opts, m.noaEnabledFn, m.workDir, chatNoaSession(ctx, noaSession), noaWarn(noaSession))
-	ctx = attachSideCapture(ctx, &opts)
 	if err := bindChatRunOptions(ctx, &opts); err != nil {
 		return "", err
 	}
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: m.nativeOllamaFn != nil && m.nativeOllamaFn(), ContextWindow: m.compactionWindow()})
+	noaSessionState := enableNoa(&opts, m.noaEnabledFn, m.workDir, chatNoaSession(ctx, noaSession), noaWarn(noaSession))
+	ctx = attachChatContext(ctx, &opts, def, noaSessionState)
+	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)
 	defer s.Close()
 	// reload the prior conversation from the transcript so the agent has context

@@ -4,6 +4,7 @@ package chatstate
 import (
 	"errors"
 	"fmt"
+	"github.com/Autumn-27/norma/llm"
 	"time"
 )
 
@@ -104,21 +105,28 @@ type ContextCategory struct {
 	Estimated bool   `json:"estimated"`
 }
 type ContextView struct {
-	HistoryRevision  int64             `json:"history_revision,string"`
-	Sequence         int64             `json:"sequence,string"`
-	ProfileID        int64             `json:"profile_id,string"`
-	Model            string            `json:"model"`
-	Compactor        string            `json:"compactor"`
-	Source           string            `json:"source"`
-	Summary          string            `json:"summary"`
-	UpdatedAt        time.Time         `json:"updated_at"`
-	Window           int               `json:"window"`
-	Used             int               `json:"used"`
-	OutputReserve    int               `json:"output_reserve"`
-	Headroom         int               `json:"headroom"`
-	CompressionCount int               `json:"compression_count"`
-	Estimated        bool              `json:"estimated"`
-	Categories       []ContextCategory `json:"categories"`
+	MeasuredInput    int                   `json:"measured_input"`
+	ReserveEstimated bool                  `json:"reserve_estimated"`
+	RunID            string                `json:"run_id,omitempty"`
+	ProfileIdentity  string                `json:"-"`
+	Request          llm.CompletionRequest `json:"-"`
+	BeforeTokens     int                   `json:"before_tokens,omitempty"`
+	AfterTokens      int                   `json:"after_tokens,omitempty"`
+	HistoryRevision  int64                 `json:"history_revision,string"`
+	Sequence         int64                 `json:"sequence,string"`
+	ProfileID        int64                 `json:"profile_id,string"`
+	Model            string                `json:"model"`
+	Compactor        string                `json:"compactor"`
+	Source           string                `json:"source"`
+	Summary          string                `json:"summary"`
+	UpdatedAt        time.Time             `json:"updated_at"`
+	Window           int                   `json:"window"`
+	Used             int                   `json:"used"`
+	OutputReserve    int                   `json:"output_reserve"`
+	Headroom         int                   `json:"headroom"`
+	CompressionCount int                   `json:"compression_count"`
+	Estimated        bool                  `json:"estimated"`
+	Categories       []ContextCategory     `json:"categories"`
 }
 type CompactOptions struct {
 	Focus      string `json:"focus"`

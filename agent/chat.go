@@ -174,12 +174,13 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	}
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
 	secureWebSearch(&opts, ws.PolicyResolver)
-	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: c.nativeOllamaFn != nil && c.nativeOllamaFn(), ContextWindow: c.window})
-	enableNoa(&opts, c.noaEnabledFn, c.workDir, chatNoaSession(ctx, "chat-"+sessionID), noaWarn("chat-"+sessionID))
-	ctx = attachSideCapture(ctx, &opts)
 	if err := bindChatRunOptions(ctx, &opts); err != nil {
 		return "", err
 	}
+	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: c.nativeOllamaFn != nil && c.nativeOllamaFn(), ContextWindow: c.window})
+	noaSessionState := enableNoa(&opts, c.noaEnabledFn, c.workDir, chatNoaSession(ctx, "chat-"+sessionID), noaWarn("chat-"+sessionID))
+	ctx = attachChatContext(ctx, &opts, def, noaSessionState)
+	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)
 	defer s.Close()
 	// reload prior conversation so the agent has context across turns (each Chat is

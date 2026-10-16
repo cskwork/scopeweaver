@@ -28,17 +28,18 @@ type ChatRunControl interface {
 	RecordBoundary(context.Context, string, string, string) error
 }
 type chatRunBinding struct {
-	mu        sync.Mutex
-	run       chatstate.Run
-	control   ChatRunControl
-	store     *transcript.Store
-	logicalID string
-	path      string
-	before    int
-	pending   map[string]string
-	fault     error
-	cancel    context.CancelCauseFunc
-	start     string
+	mu              sync.Mutex
+	run             chatstate.Run
+	control         ChatRunControl
+	store           *transcript.Store
+	logicalID       string
+	path            string
+	before          int
+	pending         map[string]string
+	fault           error
+	cancel          context.CancelCauseFunc
+	start           string
+	contextSequence int64
 }
 type chatRunKey struct{}
 

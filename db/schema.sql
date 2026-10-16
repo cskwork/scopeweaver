@@ -1493,3 +1493,13 @@ ALTER TABLE chat_history_changes ADD COLUMN IF NOT EXISTS input_id TEXT REFERENC
 
 ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS turn_ordinal BIGINT NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_current_attempt ON chat_control_runs(session_key,turn_id) WHERE active;
+
+CREATE TABLE IF NOT EXISTS chat_context_snapshots (
+ session_key TEXT PRIMARY KEY REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ run_id TEXT NOT NULL DEFAULT '',
+ history_revision BIGINT NOT NULL,
+ sequence BIGINT NOT NULL,
+ view JSONB NOT NULL,
+ request JSONB NOT NULL,
+ profile_identity TEXT NOT NULL DEFAULT ''
+);

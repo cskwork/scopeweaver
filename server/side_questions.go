@@ -31,18 +31,19 @@ type sideRun struct {
 	done   chan struct{}
 }
 type sideQuestionState struct {
-	mu           sync.Mutex
-	commands     sync.Mutex // short admission / clear operations only, never inference
-	pending      map[string]sidequestion.Snapshot
-	latest       map[string]sidequestion.Snapshot
-	seen         map[string][2]int64
-	runs         map[string]sideRun
-	done         chan struct{}
-	outputTokens int
+	mu             sync.Mutex
+	commands       sync.Mutex // short admission / clear operations only, never inference
+	contextPending map[string]pendingChatContext
+	pending        map[string]sidequestion.Snapshot
+	latest         map[string]sidequestion.Snapshot
+	seen           map[string][2]int64
+	runs           map[string]sideRun
+	done           chan struct{}
+	outputTokens   int
 }
 
 func sideModel(cfg agent.Config, id int64, name string) sidequestion.Model {
-	b, _ := json.Marshal([]any{cfg.Format, cfg.BaseURL, cfg.Model, cfg.ThinkingType, cfg.ReasoningEffort, cfg.Stream, cfg.MaxTokensField, cfg.SessionHeaderKey})
+	b, _ := json.Marshal([]any{cfg.Format, cfg.BaseURL, cfg.Model, cfg.ThinkingType, cfg.ReasoningEffort, cfg.Stream, cfg.MaxTokensField, cfg.SessionHeaderKey, cfg.MaxTokens, cfg.CompactionWindow()})
 	h := sha256.Sum256(b)
 	return sidequestion.Model{ProfileID: id, Name: name, Format: string(cfg.Format), Model: cfg.Model, Identity: hex.EncodeToString(h[:]), Streaming: cfg.Stream, WindowTokens: cfg.CompactionWindow()}
 }
@@ -52,7 +53,7 @@ func bindSideProvider(p llm.Provider, cfg agent.Config, id int64, name string) l
 }
 
 func (s *Server) initSideQuestions() {
-	s.side = &sideQuestionState{pending: map[string]sidequestion.Snapshot{}, latest: map[string]sidequestion.Snapshot{}, seen: map[string][2]int64{}, runs: map[string]sideRun{}, done: make(chan struct{})}
+	s.side = &sideQuestionState{contextPending: map[string]pendingChatContext{}, pending: map[string]sidequestion.Snapshot{}, latest: map[string]sidequestion.Snapshot{}, seen: map[string][2]int64{}, runs: map[string]sideRun{}, done: make(chan struct{})}
 	if n, err := strconv.Atoi(os.Getenv("ARTEX_BTW_MAX_OUTPUT_TOKENS")); err == nil && n >= 256 && n <= 32768 {
 		s.side.outputTokens = n
 	}
@@ -75,6 +76,7 @@ func (s *Server) initSideQuestions() {
 		s.side.seen[key] = [2]int64{snap.RunID, snap.Version}
 		s.side.pending[key] = snap
 	})
+	s.ctx = agent.WithChatContextObserver(s.ctx, s.captureChatContext)
 	go func() {
 		defer close(s.side.done)
 		tick := time.NewTicker(250 * time.Millisecond)
@@ -83,8 +85,10 @@ func (s *Server) initSideQuestions() {
 			select {
 			case <-tick.C:
 				s.flushSideSnapshots()
+				s.flushChatContexts()
 			case <-s.ctx.Done():
 				s.flushSideSnapshots()
+				s.flushChatContexts()
 				return
 			}
 		}
