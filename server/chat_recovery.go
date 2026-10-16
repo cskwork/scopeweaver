@@ -73,6 +73,7 @@ func (s *Server) discardUnknownChatRun(ctx context.Context, ref chatstate.Sessio
 	if err != nil {
 		return err
 	}
+	defer s.cleanupPreparedChatTranscript(revision)
 	_, err = s.m.pg.CommitChatContextChange(ctx, ref, token, reserved, revision, nil, inputID)
 	return err
 }

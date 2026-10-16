@@ -93,7 +93,20 @@ jobs:
         env:
           ARTEX_TEST_DSN: postgres://scopeweaver_test:test_only_password@localhost:5432/scopeweaver_test_chat_browser?sslmode=disable
           SCOPEWEAVER_CHAT_E2E: "1"
+          CHAT_E2E_SUITE: standard
         run: go test ./server -run '^TestChatControlsE2E$' -count=1 -timeout 12m -v
+      - name: Verify draft preservation with a separate disposable database
+        env:
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: scopeweaver_test
+          PGPASSWORD: test_only_password
+          ARTEX_TEST_DSN: postgres://scopeweaver_test:test_only_password@localhost:5432/scopeweaver_test_chat_draft?sslmode=disable
+          SCOPEWEAVER_CHAT_E2E: "1"
+          CHAT_E2E_SUITE: draft
+        run: |
+          createdb scopeweaver_test_chat_draft
+          go test ./server -run '^TestChatControlsE2E$' -count=1 -timeout 12m -v
       - if: always()
         uses: actions/upload-artifact@v7
         with:

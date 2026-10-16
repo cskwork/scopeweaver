@@ -14,13 +14,13 @@ const fixture={resetTools:()=>fixtureRequest("reset-tools"),holdNext:()=>fixture
 const browser=await chromium.launch();const errors=[];const pages=[];let failed=0;
 const helpers={base,token,fixture,check:assert.ok,step:async(name,fn)=>{try{await fn();console.log(`PASS ${name}`)}catch(error){failed++;console.error(`FAIL ${name}: ${error.stack}`);if(process.env.CHAT_QUEUE_RED||process.env.CHAT_CONTEXT_MUTATION)throw error}},openPage:async(locale,jwt)=>{const context=await browser.newContext();context.setDefaultTimeout(15000);await context.addInitScript(([locale,jwt])=>{localStorage.setItem("scopeweaver.locale",locale);localStorage.setItem("artex_token",jwt)},[locale,jwt]);const p=await context.newPage();p.on("pageerror",error=>errors.push(error.message));pages.push(p);return p}};
 export async function runChatControlsChecks({base,token,restart,fixture,step,check,openPage}){
- const options={base,token,fixture,step,check,openPage};const only=process.env.CHAT_E2E_SUITE;
- if(!only||only==="queue")await runChatQueueChecks({...options,recoverInput:restart});
- if(!only||only==="history")await runChatHistoryChecks(options);
- if(!only||only==="context")await runChatContextChecks(options);
- if(!only||only==="runtime")await runChatRuntimeChecks(options);
- if(!only||only==="paste")await runChatPasteChecks(options);
+ const options={base,token,fixture,step,check,openPage};const only=process.env.CHAT_E2E_SUITE;const standard=!only||only==="standard";
  if(!only||only==="draft")await runChatDraftRetentionChecks(options);
+ if(standard||only==="queue")await runChatQueueChecks({...options,recoverInput:restart});
+ if(standard||only==="history")await runChatHistoryChecks(options);
+ if(standard||only==="context")await runChatContextChecks(options);
+ if(standard||only==="runtime")await runChatRuntimeChecks(options);
+ if(standard||only==="paste")await runChatPasteChecks(options);
 }
 
 try{await runChatControlsChecks({...helpers,restart:id=>fixtureRequest("recover",{input_id:id})});assert.deepEqual(errors,[],"uncaught browser errors");console.log(`Chat browser gate: ${failed===0?"PASS":"FAIL"}`)}finally{await fixture.release();await browser.close();await api.dispose()}

@@ -88,6 +88,11 @@ which saves you from collecting the same data twice:
 
 ## Installation
 
+Run only one active ScopeWeaver server per PostgreSQL database. Its data directory must also
+have a single owner. Stop the previous server before starting a replacement; concurrent replicas
+sharing either resource are unsupported. Startup recovery treats unfinished chat work as
+interrupted and reconciles unpublished transcript files before resuming queues.
+
 ### GLM and other model providers
 
 The **LLM → New** form includes GLM-5.3 configuration templates for Z.ai's General API and a

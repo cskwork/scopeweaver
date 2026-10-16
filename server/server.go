@@ -145,9 +145,17 @@ type triggeredRun struct {
 }
 
 func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string) *Server {
+	s, err := newServer(ctx, m, skillDir, dataDir, keyDir)
+	if err != nil {
+		log.Fatalf("[server] startup: %v", err)
+	}
+	return s
+}
+
+func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDir string) (*Server, error) {
 	key, err := loadOrCreateJWTKey(keyDir, dataDir)
 	if err != nil {
-		log.Fatalf("[auth] JWT key: %v", err)
+		return nil, fmt.Errorf("JWT key: %w", err)
 	}
 	s := &Server{m: m, engine: NewEngine(m), ctx: ctx, skillDir: skillDir, jwtKey: key, chatBusy: map[string]bool{},
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
@@ -155,6 +163,10 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		profChatAgents: map[int64]*agent.ChatAgent{},
 		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
 		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	// Recovery must finish before any internal producer or task runtime starts.
+	if err := s.recoverChatControls(); err != nil {
+		return nil, fmt.Errorf("chat startup recovery: %w", err)
+	}
 	s.initSideQuestions()
 	// Circuit thresholds/cooldown are hot-path failure settings. Push the global retry policy into Registry
 	// at startup and again whenever saveLLMRetryPolicy saves changes.
@@ -230,8 +242,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			log.Printf("[retester] seed: %v", err)
 		}
 		go s.evidenceStore().RunGC(s.ctx)
-		s.seedPythonInterpreter()     // Detect and store the Python interpreter for custom scripts at startup, only when empty.
-		go newScheduler(s).Run(s.ctx) // P3 timer/finding/goal-event trigger scheduling for custom agents only.
+		s.seedPythonInterpreter() // Detect and store the Python interpreter for custom scripts at startup, only when empty.
 		// Finding notification delivery runs independently beside Scheduler: its three-second responsiveness
 		// differs from trigger scheduling, and a stuck delivery must not block agent triggers.
 		go newNotifier(s).Run(s.ctx)
@@ -257,11 +268,16 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 		log.Printf("[engine] no LLM provider configured — engine idle until set via /api/llm or env")
 	}
 	s.restoreTaskRuntimes()
+	if err := s.resumeChatControls(); err != nil {
+		log.Printf("[chat] %v", err)
+	}
 	go s.reconcileConcurrency()
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback approval judges commands that match no interception rule.
-	s.initChatControls()
-	return s
+	if m.pg != nil {
+		go newScheduler(s).Run(s.ctx) // Start admissions only after recovery and task restoration.
+	}
+	return s, nil
 }
 
 // Restored deadline and worker loops must inherit the same context as new tasks,
@@ -3816,7 +3832,7 @@ func (s *Server) chat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err)
 		return
 	}
-	if req.Seg != nil {
+	if req.Seg != nil && *req.Seg >= 0 {
 		seg = *req.Seg
 	}
 	id, _ := strconv.ParseInt(t.ID, 10, 64)

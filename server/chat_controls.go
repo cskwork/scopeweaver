@@ -1,18 +1,19 @@
 package server
 
 import (
-	"bytes"
+	"context"
 	"crypto/rand"
-	"encoding/json"
+	"database/sql"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/Autumn-27/artex/agent"
 	"github.com/Autumn-27/artex/chatstate"
 	"github.com/Autumn-27/artex/locale"
 )
@@ -261,44 +262,139 @@ func (s *Server) admitChatHTTP(w http.ResponseWriter, r *http.Request, ref chats
 	if !decodeConversationRequest(w, r, &req) {
 		return
 	}
-	if ref.TaskID > 0 && s.engine.IsDeleting(strconv.FormatInt(ref.TaskID, 10)) {
-		chatControlError(w, chatstate.ErrGone)
-		return
-	}
-	prompt := chatstate.Prompt{Text: req.Message, Attachments: req.Attachments}
-	if err := s.validateChatPrompt(ref, prompt); err != nil {
-		chatControlError(w, err)
-		return
-	}
-	if ref.ConversationID > 0 {
-		c, err := s.m.pg.GetConversation(ref.ConversationID)
-		if err != nil {
-			chatControlError(w, err)
-			return
-		}
-		if c == nil {
-			chatControlError(w, chatstate.ErrGone)
-			return
-		}
-		if s.resolveChatAgent(c) == nil {
-			writeErr(w, 503, s.chatUnavailableReason(locale.FromRequest(r)))
-			return
-		}
-	}
-	a, err := s.m.pg.AdmitChatInput(r.Context(), ref, req.ClientID, req.Mode, req.TargetRunID, prompt)
-	if err != nil {
-		chatControlError(w, err)
+	a, ok := s.admitChatPrompt(w, r, ref, req.ClientID, req.Mode, req.TargetRunID, chatstate.Prompt{Text: req.Message, Attachments: req.Attachments})
+	if !ok {
 		return
 	}
 	s.dispatchChatGate(ref.GateKey())
 	writeJSON(w, 202, a)
 }
 
+func (s *Server) admitChatPrompt(w http.ResponseWriter, r *http.Request, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt) (chatstate.Admission, bool) {
+	if ref.TaskID > 0 && s.engine.IsDeleting(strconv.FormatInt(ref.TaskID, 10)) {
+		chatControlError(w, chatstate.ErrGone)
+		return chatstate.Admission{}, false
+	}
+	if err := s.validateChatPrompt(ref, prompt); err != nil {
+		chatControlError(w, err)
+		return chatstate.Admission{}, false
+	}
+	if ref.ConversationID > 0 {
+		c, err := s.m.pg.GetConversation(ref.ConversationID)
+		if err != nil {
+			chatControlError(w, err)
+			return chatstate.Admission{}, false
+		}
+		if c == nil {
+			chatControlError(w, chatstate.ErrGone)
+			return chatstate.Admission{}, false
+		}
+		if s.resolveChatAgent(c) == nil {
+			writeErr(w, 503, s.chatUnavailableReason(locale.FromRequest(r)))
+			return chatstate.Admission{}, false
+		}
+	}
+	a, err := s.m.pg.AdmitChatInput(r.Context(), ref, clientID, mode, targetRunID, prompt)
+	if err != nil {
+		chatControlError(w, err)
+		return chatstate.Admission{}, false
+	}
+	return a, true
+}
+
 // Existing send endpoints enter exactly the same durable admission path. A
 // server-generated ID preserves their pre-idempotency compatibility contract.
 func (s *Server) admitCompatibilityChat(w http.ResponseWriter, r *http.Request, ref chatstate.SessionRef, message string, attachments []chatAttachment) {
-	body, _ := json.Marshal(map[string]any{"client_request_id": rand.Text(), "mode": "send", "message": message, "attachments": attachments})
-	next := r.Clone(r.Context())
-	next.Body = io.NopCloser(bytes.NewReader(body))
-	s.admitChatHTTP(w, next, ref)
+	rule := false
+	if ref.TaskID > 0 {
+		task := s.m.ResolveTask(strconv.FormatInt(ref.TaskID, 10))
+		rule = !s.taskRuntimeAvailable(task, "mainagent")
+	}
+	a, ok := s.admitChatPrompt(w, r, ref, rand.Text(), "send", "", chatstate.Prompt{Text: message, Attachments: attachments})
+	if !ok {
+		return
+	}
+	s.dispatchChatGate(ref.GateKey())
+	if ref.ConversationID > 0 {
+		writeJSON(w, 202, map[string]string{"status": "accepted"})
+		return
+	}
+	if !rule {
+		writeJSON(w, 202, map[string]string{"status": "accepted", "mode": "llm"})
+		return
+	}
+	reply, err := s.waitCompatibilityReply(r.Context(), a)
+	if err != nil {
+		if errors.Is(err, chatstate.ErrBusy) || errors.Is(err, chatstate.ErrGone) || errors.Is(err, chatstate.ErrUnknownRun) {
+			chatControlError(w, err)
+		} else if errors.Is(err, agent.ErrChatPersistence) {
+			writeError(w, 500, chatstate.ErrGone)
+		} else {
+			writeError(w, 500, err)
+		}
+		return
+	}
+	writeJSON(w, 200, map[string]string{"reply": reply, "mode": "rule"})
+}
+
+// Read the one durable run's reply; fallbackChat writes hints/intents and must
+// never be called again just to construct the legacy synchronous response.
+func (s *Server) waitCompatibilityReply(request context.Context, admission chatstate.Admission) (string, error) {
+	ctx, cancel := context.WithCancel(request)
+	stop := context.AfterFunc(s.ctx, cancel)
+	defer stop()
+	defer cancel()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		var status, reply string
+		var revision int64
+		var paused bool
+		err := s.m.pg.QueryRowContext(ctx, `SELECT i.status,i.revision,g.paused,COALESCE(a.summary,'')
+FROM chat_control_inputs i
+JOIN chat_control_gates g ON g.gate_key=i.gate_key
+LEFT JOIN chat_control_runs r ON r.input_id=i.id
+LEFT JOIN activity a ON a.run_id=r.id AND a.worker='mainagent' AND a.kind='text'
+WHERE i.id=$1 ORDER BY a.id DESC NULLS LAST LIMIT 1`, admission.ID).Scan(&status, &revision, &paused, &reply)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", chatstate.ErrGone
+		}
+		if err != nil {
+			return "", err
+		}
+		switch status {
+		case "completed":
+			if reply == "" {
+				return "", agent.ErrChatPersistence
+			}
+			return reply, nil
+		case "unknown":
+			return "", chatstate.ErrUnknownRun
+		case "stopped", "cancelled":
+			return "", chatstate.ErrBusy
+		case "failed":
+			return "", agent.ErrChatPersistence
+		case "queued":
+			if paused {
+				err = s.m.pg.CancelChatInput(ctx, admission.Session, admission.ID, revision)
+				if err == nil {
+					return "", chatstate.ErrBusy
+				}
+				if !errors.Is(err, chatstate.ErrConflict) {
+					if errors.Is(err, sql.ErrNoRows) {
+						return "", chatstate.ErrGone
+					}
+					return "", err
+				}
+			}
+		case "claimed":
+		default:
+			return "", agent.ErrChatPersistence
+		}
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

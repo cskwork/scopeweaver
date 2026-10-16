@@ -2,6 +2,17 @@ import { request } from "playwright";
 import { en } from "../web/src/i18n/messages/interface.ts";
 import { waitChatState } from "./chat-controls.mjs";
 
+async function bounded(promise, label) {
+  let timer;
+  try {
+    return await Promise.race([promise, new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`Timed out waiting for ${label}`)), 5000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function attachDocument(page, input, name) {
   await input.evaluate((element, name) => {
     const clipboardData = new DataTransfer();
@@ -13,7 +24,7 @@ async function attachDocument(page, input, name) {
 }
 
 export async function runChatDraftRetentionChecks({ base, token, fixture, step, check, openPage }) {
-  const api = await request.newContext({ baseURL: base, extraHTTPHeaders: { Authorization: `Bearer ${token}` } });
+  const api = await request.newContext({ baseURL: base, timeout: 5000, extraHTTPHeaders: { Authorization: `Bearer ${token}` } });
   try {
     const created = await api.post("/api/tasks", { data: { description: "Segment draft retention", goal: "Keep idle", seed_first_intent: false } });
     check(created.ok(), await created.text());
@@ -57,14 +68,25 @@ export async function runChatDraftRetentionChecks({ base, token, fixture, step, 
         await page.setViewportSize({ width: 1440, height: 900 });
         let release;
         const barrier = new Promise(resolve => { release = resolve; });
+        let routeTask = Promise.resolve();
+        let phase = "open conversation";
+        let routeFailure;
+        page.on("request", request => {
+          if (request.method() === "POST" && new URL(request.url()).pathname.includes("/controls/inputs")) {
+            console.log(`REQUEST pending ${mode} ${outcome}: ${request.url()} mode=${request.postDataJSON().mode}`);
+          }
+        });
         try {
           await step(`[en/1440/standalone] pending ${mode} ${outcome} protects composer and payload`, async () => {
+            console.log(`START pending ${mode} ${outcome}`);
             await page.goto(`${base}/chat?c=${conversation.id}`);
             const input = page.locator("textarea[data-chat-draft]").first();
+            phase = "start held run";
             await fixture.holdNext();
             await input.fill("hold the active run");
             await page.getByRole("button", { name: en.m0073, exact: true }).click();
             await waitChatState(api, path, state => !!state.active);
+            phase = "pause follow-ups";
             // Keep accepted follow-ups queued when the held model is released.
             const state = await (await api.get(path)).json();
             check((await api.post(`${path}/pause`, { data: { expected_revision: state.revision } })).ok(), "pending fixture queue pause failed");
@@ -73,26 +95,40 @@ export async function runChatDraftRetentionChecks({ base, token, fixture, step, 
             const text = `${mode} original ${outcome}`;
             await input.fill(text);
             if (mode === "queue") await attachDocument(page, input, "pending-document.txt");
-            let began;
-            const started = new Promise(resolve => { began = resolve; });
+            let enter;
+            const entered = new Promise(resolve => { enter = resolve; });
             let posted;
             await page.route(`**${path}/inputs`, async route => {
               posted = route.request().postDataJSON();
-              const response = outcome === "success" ? await route.fetch() : null;
-              began();
-              await barrier;
-              if (response) await route.fulfill({ response });
-              else await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Admission unavailable fixture" }) });
+              enter();
+              routeTask = (async () => {
+                const response = outcome === "success" ? await route.fetch({ timeout: 5000 }) : null;
+                await bounded(barrier, "admission response release");
+                if (response) await route.fulfill({ response });
+                else await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: "Admission unavailable fixture" }) });
+              })().catch(async error => {
+                routeFailure = error;
+                console.error(`Pending ${mode} ${outcome} route failed: ${error.stack}`);
+                await route.abort("failed").catch(() => {});
+              });
+              await routeTask;
             });
-            const responseReady = page.waitForResponse(response => new URL(response.url()).pathname === `${path}/inputs` && response.request().method() === "POST");
-            await submit.click();
-            await started;
+            phase = "intercept admission";
+            await Promise.all([
+              page.waitForRequest(request => new URL(request.url()).pathname === `${path}/inputs` && request.method() === "POST", { timeout: 5000 }),
+              submit.click({ timeout: 5000 }),
+            ]);
+            await bounded(entered, "admission route interception");
+            phase = "assert pending composer";
             check(await input.isDisabled(), "pending admission leaves the standalone composer editable");
             check(await input.inputValue() === text, "pending admission changed the original draft");
             check(posted.mode === mode && posted.message === text, "admission payload differs from the original draft");
             check(posted.attachments.length === (mode === "queue" ? 1 : 0), "admission attachment payload changed");
+            const responseReady = page.waitForResponse(response => new URL(response.url()).pathname === `${path}/inputs` && response.request().method() === "POST", { timeout: 5000 });
+            phase = "release admission response";
             release();
             await responseReady;
+            check(!routeFailure, `admission route failed: ${routeFailure?.message}`);
             await page.waitForFunction(() => !document.querySelector("textarea[data-chat-draft]")?.disabled);
             const after = await (await api.get(path)).json();
             const accepted = after.inputs.filter(item => item.client_request_id === posted.client_request_id);
@@ -108,8 +144,10 @@ export async function runChatDraftRetentionChecks({ base, token, fixture, step, 
             }
           });
         } finally {
+          console.log(`CLEANUP pending ${mode} ${outcome} after ${phase}`);
           release();
-          await page.unrouteAll({ behavior: "wait" });
+          await bounded(routeTask, "admission route cleanup");
+          await page.unrouteAll({ behavior: "ignoreErrors" });
           await api.post(`/api/conversations/${conversation.id}/stop`);
           await fixture.release();
           await waitChatState(api, path, state => !state.active);
