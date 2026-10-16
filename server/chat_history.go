@@ -207,6 +207,7 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 	if err != nil {
 		return out, err
 	}
+	defer s.cleanupPreparedChatTranscript(revision)
 	revision.SourceRunID = selected.ID
 	revision.ImportedPrompts = copied
 	// Use the original request fingerprint; copied replacement manifests are handed

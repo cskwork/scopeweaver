@@ -548,7 +548,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [olderIntentsHasMore, setOlderIntentsHasMore] = React.useState(false);
   const [hasLoadedOlderIntentsPage, setHasLoadedOlderIntentsPage] = React.useState(false);
   const [loadingOlderIntents, setLoadingOlderIntents] = React.useState(false);
-  const draftKey = `task:${taskId}:${activeId}:${activeId === MAIN_ID ? currentSeg : 0}`;
+  const draftKey = `task:${taskId}:${activeId}`;
   const [input, setInput] = useChatDraft(draftKey);
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);

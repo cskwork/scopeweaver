@@ -134,15 +134,7 @@ func (d *DB) CommitChatContextChange(ctx context.Context, ref chatstate.SessionR
 			view.HistoryRevision = out.HistoryRevision
 			view.Sequence++
 			view.RunID = ""
-			body, e := json.Marshal(view)
-			if e != nil {
-				return e
-			}
-			request, e := chatContextRequestJSON(*view)
-			if e != nil {
-				return e
-			}
-			if _, e = tx.ExecContext(ctx, `INSERT INTO chat_context_snapshots(session_key,run_id,history_revision,sequence,view,request,profile_identity) VALUES($1,'',$2,$3,$4,$5,$6) ON CONFLICT(session_key) DO UPDATE SET run_id='',history_revision=EXCLUDED.history_revision,sequence=EXCLUDED.sequence,view=EXCLUDED.view,request=EXCLUDED.request,profile_identity=EXCLUDED.profile_identity`, ref.Key(), view.HistoryRevision, view.Sequence, body, request, view.ProfileIdentity); e != nil {
+			if e = saveChatContextTx(ctx, tx, ref, "", *view); e != nil {
 				return e
 			}
 		}

@@ -88,6 +88,7 @@ func (s *Server) compactChatContext(ctx context.Context, ref chatstate.SessionRe
 	if err != nil {
 		return out, err
 	}
+	defer s.cleanupPreparedChatTranscript(revision)
 	// Profile selection may change while the summary is in flight.
 	if cfg, id, ok := s.chatContextBudget(ref); ok && sideModel(cfg, id, "").Identity != runtime.Model.Identity {
 		return out, chatstate.ErrConflict

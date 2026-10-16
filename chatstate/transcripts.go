@@ -99,10 +99,18 @@ func PrepareTranscript(ctx context.Context, store *transcript.Store, session Ses
 	if err != nil {
 		return out, err
 	}
+	renamed, manifestCreated := false, false
 	defer func() {
 		file.Close()
 		if err != nil {
-			os.Remove(temp)
+			owned := temp
+			if renamed {
+				owned = path
+			}
+			err = errors.Join(err, removeChatFile(owned))
+			if manifestCreated {
+				err = errors.Join(err, removeChatFile(path+".manifest.json"))
+			}
 		}
 	}()
 	if _, err = file.Write(data.Bytes()); err != nil {
@@ -120,6 +128,7 @@ func PrepareTranscript(ctx context.Context, store *transcript.Store, session Ses
 	if err = os.Rename(temp, path); err != nil {
 		return
 	}
+	renamed = true
 	manifest, err := json.Marshal(out)
 	if err != nil {
 		return out, err
@@ -127,18 +136,24 @@ func PrepareTranscript(ctx context.Context, store *transcript.Store, session Ses
 	if err = writeChatManifest(path+".manifest.json", manifest); err != nil {
 		return
 	}
+	manifestCreated = true
 	if err = syncChatDirectory(out.Directory); err != nil {
 		return
 	}
 	err = ValidateTranscriptRevision(store, out)
 	return
 }
-func writeChatManifest(path string, data []byte) error {
+func writeChatManifest(path string, data []byte) (err error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		f.Close()
+		if err != nil {
+			err = errors.Join(err, removeChatFile(path))
+		}
+	}()
 	if _, err = f.Write(data); err != nil {
 		return err
 	}

@@ -1495,15 +1495,27 @@ ALTER TABLE chat_history_changes ADD COLUMN IF NOT EXISTS input_id TEXT REFERENC
 ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS turn_ordinal BIGINT NOT NULL DEFAULT 0;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_current_attempt ON chat_control_runs(session_key,turn_id) WHERE active;
 
-CREATE TABLE IF NOT EXISTS chat_context_snapshots (
- session_key TEXT PRIMARY KEY REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
- run_id TEXT NOT NULL DEFAULT '',
- history_revision BIGINT NOT NULL,
- sequence BIGINT NOT NULL,
- view JSONB NOT NULL,
- request JSONB NOT NULL,
- profile_identity TEXT NOT NULL DEFAULT ''
-);
+-- One current observation belongs to the session; NULL means unobserved.
+ALTER TABLE chat_control_sessions ADD COLUMN IF NOT EXISTS context_snapshot JSONB;
+DO $$
+BEGIN
+    IF to_regclass('chat_context_snapshots') IS NOT NULL THEN
+        LOCK TABLE chat_context_snapshots IN ACCESS EXCLUSIVE MODE;
+        -- Refuse ambiguous partial upgrades rather than discard either payload.
+        IF EXISTS (
+            SELECT 1 FROM chat_context_snapshots c
+            LEFT JOIN chat_control_sessions s USING(session_key)
+            WHERE s.session_key IS NULL OR
+                (s.context_snapshot IS NOT NULL AND s.context_snapshot <> to_jsonb(c)-'session_key')
+        ) THEN
+            RAISE EXCEPTION 'chat context snapshot migration has a missing session or conflicting payload';
+        END IF;
+        UPDATE chat_control_sessions s SET context_snapshot=to_jsonb(c)-'session_key'
+        FROM chat_context_snapshots c
+        WHERE s.session_key=c.session_key AND s.context_snapshot IS NULL;
+        DROP TABLE chat_context_snapshots;
+    END IF;
+END $$;
 ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS main_seg INTEGER;
 ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS history_revision BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE side_question_requests ADD COLUMN IF NOT EXISTS history_revision BIGINT NOT NULL DEFAULT 0;

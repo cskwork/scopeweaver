@@ -18,14 +18,16 @@ import (
 	"github.com/Autumn-27/norma/transcript"
 )
 
-func (s *Server) initChatControls() {
+func (s *Server) recoverChatControls() error {
 	if s.m.pg == nil {
-		return
+		return nil
+	}
+	if err := s.recoverChatTranscripts(s.ctx); err != nil {
+		return fmt.Errorf("transcript recovery: %w", err)
 	}
 	abandoned, err := s.m.pg.RecoverChatPreparations(s.ctx)
 	if err != nil {
-		log.Printf("[chat] preparation recovery failed: %v", err)
-		return
+		return fmt.Errorf("preparation recovery: %w", err)
 	}
 	for _, ref := range abandoned {
 		if ref.ConversationID > 0 {
@@ -35,17 +37,30 @@ func (s *Server) initChatControls() {
 		}
 	}
 	if err := s.m.pg.RecoverChatRuns(s.ctx); err != nil {
-		log.Printf("[chat] recovery failed: %v", err)
-		return
+		return fmt.Errorf("run recovery: %w", err)
+	}
+	return nil
+}
+
+func (s *Server) resumeChatControls() error {
+	if s.m.pg == nil {
+		return nil
 	}
 	keys, err := s.m.pg.PendingChatGates(s.ctx)
 	if err != nil {
-		log.Printf("[chat] pending queues: %v", err)
-		return
+		return fmt.Errorf("pending chat queues: %w", err)
 	}
 	for _, key := range keys {
 		s.dispatchChatGate(key)
 	}
+	return nil
+}
+
+func (s *Server) initChatControls() error {
+	if err := s.recoverChatControls(); err != nil {
+		return err
+	}
+	return s.resumeChatControls()
 }
 func chatBusyKey(ref chatstate.SessionRef) string {
 	if ref.ConversationID > 0 {

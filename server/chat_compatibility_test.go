@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -209,5 +210,227 @@ func TestChatCompatibilityQueuedAndDeletingTask(t *testing.T) {
 	nodes, err := task.Store.ListByKind(db.KindHint, 100)
 	if err != nil || len(nodes) != 1 || !strings.Contains(string(nodes[0].Payload), `"queued-once"`) {
 		t.Fatalf("rejected or queued work executed extra side effects: %+v err=%v", nodes, err)
+	}
+}
+
+func TestChatCompatibilityCompletionFailures(t *testing.T) {
+	s, task, _ := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	for _, tc := range []struct {
+		status string
+		want   error
+	}{
+		{"failed", agent.ErrChatPersistence},
+		{"stopped", chatstate.ErrBusy},
+		{"unknown", chatstate.ErrUnknownRun},
+		{"completed", agent.ErrChatPersistence}, // No persisted reply must not become a successful empty response.
+	} {
+		t.Run(tc.status, func(t *testing.T) {
+			if err := s.m.pg.ResumeChatGate(t.Context(), ref, -1); err != nil {
+				t.Fatal(err)
+			}
+			a, err := s.m.pg.AdmitChatInput(t.Context(), ref, "terminal-"+tc.status, "send", "", chatstate.Prompt{Text: "terminal status fixture"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			run, err := s.m.pg.ClaimNextChatInput(t.Context(), ref.GateKey())
+			if err != nil || run == nil {
+				t.Fatal(run, err)
+			}
+			if err = s.m.pg.FinishChatRun(t.Context(), run.ID, tc.status); err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+			defer cancel()
+			if _, err = s.waitCompatibilityReply(ctx, a); !errors.Is(err, tc.want) {
+				t.Fatalf("terminal %s: %v; want %v", tc.status, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestChatCompatibilityPauseDuringAdmission(t *testing.T) {
+	s, task, _ := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	a, err := s.m.pg.AdmitChatInput(t.Context(), ref, "pause-before-claim", "send", "", chatstate.Prompt{Text: "hint must-not-survive-rejection"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.m.pg.PauseChatGate(t.Context(), ref, -1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err = s.waitCompatibilityReply(ctx, a); !errors.Is(err, chatstate.ErrBusy) {
+		t.Fatalf("paused admitted request: %v; want busy", err)
+	}
+	var status string
+	if err = s.m.pg.QueryRow(`SELECT status FROM chat_control_inputs WHERE id=$1`, a.ID).Scan(&status); err != nil || status != "cancelled" {
+		t.Fatalf("paused legacy prompt remained queued: %s %v", status, err)
+	}
+	state, err := s.m.pg.ChatControlState(t.Context(), ref)
+	if err != nil || state.Active != nil || len(state.Inputs) != 0 || !state.Paused {
+		t.Fatalf("pause/cancellation readback: %+v %v", state, err)
+	}
+}
+
+func TestChatCompatibilityWaitCancellationAndDeletion(t *testing.T) {
+	s, task, _ := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	a, err := s.m.pg.AdmitChatInput(t.Context(), ref, "wait-cancellation", "send", "", chatstate.Prompt{Text: "no claim"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err = s.waitCompatibilityReply(ctx, a); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled HTTP wait: %v", err)
+	}
+	if _, err = s.m.DeleteTask(task.ID, DeleteTaskOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel = context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err = s.waitCompatibilityReply(ctx, a); !errors.Is(err, chatstate.ErrGone) {
+		t.Fatalf("deleted request wait: %v; want gone", err)
+	}
+}
+
+func TestChatCompatibilityBlankTaskPrompts(t *testing.T) {
+	for _, llmMode := range []bool{false, true} {
+		t.Run(fmt.Sprintf("llm-%t", llmMode), func(t *testing.T) {
+			s, task, h := compatibilityTask(t)
+			if llmMode {
+				p := retestProvider{complete: func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+					return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("done")}}, "end_turn", llm.Usage{}, nil
+				}}
+				main := agent.NewMainAgent(p, "compatibility", s.m.dir, transcript.NewStore(filepath.Join(s.m.dir, "transcripts")), 10000, 1)
+				main.SetNonStreaming(func() bool { return true })
+				s.llmOn, s.llmProv = true, p
+				s.taskAgents = map[string]*taskAgentBundle{task.ID: {main: main}}
+			}
+			for _, tc := range []struct{ body, text string }{
+				{`{}`, ""},
+				{`{"message":""}`, ""},
+				{`{"message":"  \t\n"}`, "  \t\n"},
+			} {
+				w := compatibilityRequest(h, "/api/chat?task="+task.ID, tc.body)
+				if llmMode {
+					compatibilityJSON(t, w, 202, map[string]string{"status": "accepted", "mode": "llm"})
+				} else {
+					var out map[string]string
+					if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != 200 || len(out) != 2 || out["mode"] != "rule" || !strings.HasPrefix(out["reply"], "(Rule mode, no LLM configured) Assets:") {
+						t.Errorf("blank task %s: HTTP %d %s; want legacy rule summary", tc.body, w.Code, w.Body.String())
+					}
+				}
+				waitRetestIdle(t, s)
+				var stored string
+				if err := s.m.pg.QueryRow(`SELECT prompt->>'text' FROM chat_control_inputs WHERE gate_key=$1 ORDER BY ordinal DESC LIMIT 1`, (chatstate.SessionRef{TaskID: mustTaskID(t, task.ID)}).GateKey()).Scan(&stored); err != nil || stored != tc.text {
+					t.Errorf("blank task prompt changed or was not persisted: %q %v; want %q", stored, err, tc.text)
+				}
+			}
+		})
+	}
+}
+
+func TestChatCompatibilityBlankControlAndConversationRejected(t *testing.T) {
+	s, task, h := compatibilityTask(t)
+	setRetestProvider(s, retestProvider{complete: func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("unused")}}, "end_turn", llm.Usage{}, nil
+	}})
+	c, err := s.m.pg.CreateConversation("auto", "blank rejection", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { s.m.pg.DeleteConversation(c.ID) })
+	for _, path := range []string{
+		"/api/tasks/" + task.ID + "/chat/controls/inputs?seg=0",
+		fmt.Sprintf("/api/conversations/%d/messages", c.ID),
+	} {
+		w := compatibilityRequest(h, path, `{"client_request_id":"blank-is-invalid","mode":"send","message":" \t"}`)
+		if w.Code != 400 {
+			t.Errorf("nonlegacy blank prompt %s: HTTP %d %s; want 400", path, w.Code, w.Body.String())
+		}
+	}
+}
+
+func compatibilityStatusFault(t *testing.T, s *Server, table, keyColumn, key, from, to string) func() {
+	t.Helper()
+	name := fmt.Sprintf("compat_fault_%d", time.Now().UnixNano())
+	_, err := s.m.pg.Exec(fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN
+IF NEW.%s='%s' AND OLD.status='%s' AND NEW.status='%s' THEN RAISE EXCEPTION 'injected compatibility status failure'; END IF;
+RETURN NEW; END $$;
+CREATE TRIGGER %s BEFORE UPDATE ON %s FOR EACH ROW EXECUTE FUNCTION %s()`, name, keyColumn, key, from, to, name, table, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var once atomic.Bool
+	remove := func() {
+		if once.CompareAndSwap(false, true) {
+			if _, err := s.m.pg.Exec(fmt.Sprintf(`DROP TRIGGER %s ON %s; DROP FUNCTION %s()`, name, table, name)); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(remove)
+	return remove
+}
+
+func TestChatCompatibilityClaimFailureCancelsQueuedInput(t *testing.T) {
+	s, task, h := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	remove := compatibilityStatusFault(t, s, "chat_control_inputs", "gate_key", ref.GateKey(), "queued", "claimed")
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	r := httptest.NewRequest(http.MethodPost, "/api/chat?task="+task.ID, strings.NewReader(`{"message":"hint rejected-claim"}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	start := time.Now()
+	h.ServeHTTP(w, r)
+	if w.Code != 500 || time.Since(start) >= 500*time.Millisecond {
+		t.Errorf("claim failure waited for request cancellation: HTTP %d after %s %s", w.Code, time.Since(start), w.Body.String())
+	}
+	var status string
+	if err := s.m.pg.QueryRow(`SELECT status FROM chat_control_inputs WHERE gate_key=$1`, ref.GateKey()).Scan(&status); err != nil || status != "cancelled" {
+		t.Errorf("rejected claim retained runnable work: %s %v", status, err)
+	}
+	remove()
+	s.dispatchChatGate(ref.GateKey())
+	waitRetestIdle(t, s)
+	nodes, err := task.Store.ListByKind(db.KindHint, 10)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("failed HTTP request executed later: %+v %v", nodes, err)
+	}
+}
+
+func TestChatCompatibilityFinishFailureHasFiniteWait(t *testing.T) {
+	s, task, h := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	remove := compatibilityStatusFault(t, s, "chat_control_runs", "session_key", ref.Key(), "running", "completed")
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	r := httptest.NewRequest(http.MethodPost, "/api/chat?task="+task.ID, strings.NewReader(`{"message":"hint completed-once"}`)).WithContext(ctx)
+	w := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { h.ServeHTTP(w, r); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(7 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("rule response has no finite wait after final-status persistence failed")
+	}
+	if w.Code != 500 {
+		t.Errorf("failed final status: HTTP %d %s; want 500", w.Code, w.Body.String())
+	}
+	remove()
+	s.dispatchChatGate(ref.GateKey())
+	waitRetestIdle(t, s)
+	var status string
+	if err := s.m.pg.QueryRow(`SELECT status FROM chat_control_inputs WHERE gate_key=$1`, ref.GateKey()).Scan(&status); err != nil || status != "claimed" {
+		t.Errorf("ambiguous claimed work was changed/replayed: %s %v", status, err)
+	}
+	nodes, err := task.Store.ListByKind(db.KindHint, 10)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("ambiguous execution was replayed: %+v %v", nodes, err)
 	}
 }
