@@ -28,16 +28,17 @@ type ChatRunControl interface {
 	RecordBoundary(context.Context, string, string, string) error
 }
 type chatRunBinding struct {
-	mu      sync.Mutex
-	run     chatstate.Run
-	control ChatRunControl
-	store   *transcript.Store
-	path    string
-	before  int
-	pending map[string]string
-	fault   error
-	cancel  context.CancelCauseFunc
-	start   string
+	mu        sync.Mutex
+	run       chatstate.Run
+	control   ChatRunControl
+	store     *transcript.Store
+	logicalID string
+	path      string
+	before    int
+	pending   map[string]string
+	fault     error
+	cancel    context.CancelCauseFunc
+	start     string
 }
 type chatRunKey struct{}
 
@@ -65,6 +66,7 @@ func bindChatRunOptions(ctx context.Context, opts *agentcore.Options) error {
 		return nil
 	}
 	b.store = opts.Transcript
+	b.logicalID = opts.SessionID
 	if b.run.TranscriptID != "" {
 		opts.SessionID = b.run.TranscriptID
 	}
@@ -202,7 +204,7 @@ func (p chatRunProvider) Complete(ctx context.Context, req llm.CompletionRequest
 		failChatRun(ctx, err)
 		return llm.Message{}, "", llm.Usage{}, err
 	}
-	return p.inner.Complete(ctx, req)
+	return p.inner.Complete(transcript.WithSessionID(ctx, p.binding.logicalID), req)
 }
 func (p chatRunProvider) Stream(ctx context.Context, req llm.CompletionRequest) iter.Seq2[llm.StreamEvent, error] {
 	return func(yield func(llm.StreamEvent, error) bool) {
@@ -211,7 +213,7 @@ func (p chatRunProvider) Stream(ctx context.Context, req llm.CompletionRequest) 
 			yield(llm.StreamEvent{}, err)
 			return
 		}
-		for ev, err := range p.inner.Stream(ctx, req) {
+		for ev, err := range p.inner.Stream(transcript.WithSessionID(ctx, p.binding.logicalID), req) {
 			if !yield(ev, err) {
 				return
 			}
@@ -226,4 +228,11 @@ func chatHasToolResult(m llm.Message) bool {
 		}
 	}
 	return false
+}
+
+func chatNoaSession(ctx context.Context, logical string) string {
+	if b := chatRunFrom(ctx); b != nil && b.run.HistoryRevision > 0 {
+		return fmt.Sprintf("%s-h%d", logical, b.run.HistoryRevision)
+	}
+	return logical
 }

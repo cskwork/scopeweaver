@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/locale"
+	"github.com/Autumn-27/norma/transcript"
 )
 
 func (s *Server) initChatControls() {
@@ -121,6 +123,18 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 	}
 	if err := s.validateChatPrompt(run.Session, run.Prompt); err != nil {
 		return err
+	}
+	if run.HistoryRevision > 0 {
+		revision, err := s.m.pg.ActiveChatTranscript(ctx, run.Session)
+		if err != nil {
+			return err
+		}
+		if revision.TranscriptID != run.TranscriptID {
+			return agent.ErrChatPersistence
+		}
+		if err = chatstate.ValidateTranscriptRevision(transcript.NewStore(filepath.Join(s.m.dir, "transcripts")), *revision); err != nil {
+			return fmt.Errorf("%w: %v", agent.ErrChatPersistence, err)
+		}
 	}
 	ctx = agent.WithChatRun(ctx, run, s.m.pg)
 	message, err := composeChatMentionMessageForLanguage(s.m.pg, run.Prompt.Text, locale.FromContext(ctx))

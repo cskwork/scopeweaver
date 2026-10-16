@@ -141,3 +141,46 @@ func TestChatUnpersistedTerminalRetainsBilledUsage(t *testing.T) {
 	}
 	assertCapturedResultUsage(t, activities, 11, 7, 0, 0)
 }
+
+func TestChatTranscriptLogicalIdentity(t *testing.T) {
+	dir := t.TempDir()
+	store := transcript.NewStore(filepath.Join(dir, "transcripts"))
+	ref := chatstate.SessionRef{ConversationID: 42}
+	revision, err := chatstate.PrepareTranscript(t.Context(), store, ref, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logical := ""
+	p := captureUsageProvider{stream: func(ctx context.Context, y func(llm.StreamEvent, error) bool) {
+		logical = transcript.SessionIDFrom(ctx)
+		if !y(llm.StreamEvent{Type: llm.SETextDelta, Text: "answer"}, nil) {
+			return
+		}
+		if !y(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "end_turn"}, nil) {
+			return
+		}
+		y(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+	}}
+	ca := NewChatAgent(p, "fixture", dir, store, 10000)
+	run := chatstate.Run{ID: "run", Session: ref, TranscriptID: revision.TranscriptID, HistoryRevision: 1}
+	ctx := WithChatRun(t.Context(), run, &fakeChatControl{})
+	_, err = ca.Chat(ctx, "auto", "conv-42", "test", 2, 0, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if logical != "conv-42" {
+		t.Fatalf("physical ID leaked into gateway identity: %q", logical)
+	}
+}
+
+func TestChatTranscriptNoaRevisionIsolation(t *testing.T) {
+	ref := chatstate.SessionRef{ConversationID: 42}
+	a := WithChatRun(t.Context(), chatstate.Run{Session: ref, HistoryRevision: 1}, nil)
+	b := WithChatRun(t.Context(), chatstate.Run{Session: ref, HistoryRevision: 2}, nil)
+	if chatNoaSession(a, "chat-conv-42") == chatNoaSession(b, "chat-conv-42") {
+		t.Fatal("Noa archives overlap history revisions")
+	}
+	if chatNoaSession(t.Context(), "legacy") != "legacy" {
+		t.Fatal("legacy identity changed")
+	}
+}

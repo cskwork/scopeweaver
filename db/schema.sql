@@ -1456,3 +1456,16 @@ ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS turn_id TEXT;
 ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS run_id TEXT;
 ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS active_attempt BOOLEAN;
 ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS history_mutable BOOLEAN;
+
+CREATE TABLE IF NOT EXISTS chat_transcript_revisions (
+ id TEXT PRIMARY KEY,
+ session_key TEXT NOT NULL REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ transcript_id TEXT NOT NULL UNIQUE,
+ history_revision BIGINT NOT NULL,
+ end_record_uuid TEXT NOT NULL,
+ sha256 TEXT NOT NULL,
+ byte_length BIGINT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(session_key,history_revision)
+);
+ALTER TABLE chat_control_sessions ADD COLUMN IF NOT EXISTS active_revision_id TEXT REFERENCES chat_transcript_revisions(id) ON DELETE SET NULL;
