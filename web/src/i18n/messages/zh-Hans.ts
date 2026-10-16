@@ -201,6 +201,28 @@ export const english: Record<keyof typeof englishSource, string> = {
 };
 import type { en as interfaceSource } from './interface.ts';
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  chatQueue: "队列",
+  chatSteer: "引导",
+  chatPauseQueue: "暂停队列",
+  chatResumeQueue: "恢复队列",
+  chatTaskQueuePause: "暂停此任务所有 MainAgent 会话的后续消息。",
+  chatQueuePaused: "后续消息已暂停",
+  chatQueueEdit: "编辑排队消息",
+  chatQueueRemove: "移除排队消息",
+  chatMoveUp: "向前移动",
+  chatMoveDown: "向后移动",
+  chatDiscardLost: "确认并放弃丢失的运行",
+  chatLostRun: "此运行因重启而中断，已执行的操作未知。请确认后再恢复队列。",
+  chatSteerUndelivered: "运行结束前未能传递引导。",
+  chatCommandInvalid: "聊天命令或保留数量无效。",
+  chatControlUnavailable: "此会话暂不支持该操作。",
+  chatQueueSave: "保存排队消息",
+  chatCancelEdit: "取消编辑",
+  chatReloadControls: "重新加载聊天控制",
+  chatSteerHint: "在下一次工具操作前应用文本。附件请加入队列。",
+  chatStop: "停止运行",
+  chatQueueSegment: "MainAgent 会话",
+
   chatPastedContent: "粘贴内容",
   chatUploadRetry: "重试上传",
   chatInsertAsText: "作为文本插入",

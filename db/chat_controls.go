@@ -192,6 +192,11 @@ func (d *DB) ChatControlState(ctx context.Context, ref chatstate.SessionRef) (ou
 			}
 			out.Active = &run
 		}
+		var approval bool
+		if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intercept_pending WHERE status='pending' AND (conversation_id=$1 OR task_id=$2))`, nullableID(ref.ConversationID), fmt.Sprint(ref.TaskID)).Scan(&approval); e != nil {
+			return e
+		}
+		out.Capabilities["steer"] = out.Active != nil && out.Active.Session.Key() == ref.Key() && !approval
 		rows, e := tx.QueryContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status IN ('queued','claimed','unknown','undelivered') ORDER BY i.ordinal,i.id`, ref.GateKey())
 		if e != nil {
 			return e

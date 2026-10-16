@@ -1659,3 +1659,12 @@ export interface JudgeUsage {
   cache_write_tokens: number;
   daily: JudgeDayUsage[];
 }
+
+// New chat control identifiers/revisions are decimal strings, including zero.
+export type ChatSessionRef={conversation_id:string;task_id:string;exploration_id:string;main_seg:number};
+export type ChatPrompt={text:string;attachments:ChatAttachment[]};
+export type ChatAdmission={id:string;client_request_id:string;kind:"turn"|"steer";target_run_id?:string;status:"queued"|"claimed"|"delivered"|"completed"|"failed"|"cancelled"|"undelivered"|"unknown";session:ChatSessionRef;prompt:ChatPrompt;revision:string;ordinal:string};
+export type ChatRun={id:string;input_id:string;turn_id:string;supersedes_run_id?:string;transcript_id:string;start_record_uuid:string;end_record_uuid?:string;status:string;session:ChatSessionRef;history_revision:string;prompt:ChatPrompt};
+export type ChatControlState={session:ChatSessionRef;revision:string;history_revision:string;paused:boolean;active:ChatRun|null;inputs:ChatAdmission[];capabilities:Record<string,boolean>};
+export type ChatContextView={history_revision:string;sequence:string;profile_id:string;model:string;compactor:string;source:string;summary:string;updated_at:string;window:number;used:number;output_reserve:number;headroom:number;compression_count:number;estimated:boolean;categories:{name:string;tokens:number;estimated:boolean}[]};
+export type ChatCompactOptions={focus:string;keep_recent:number};

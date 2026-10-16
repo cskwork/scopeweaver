@@ -32,6 +32,9 @@ import { toast } from "sonner";
 
 import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
+import { useChatControls } from "@/hooks/use-chat-controls";
+import { parseChatCommand } from "@/lib/chat-commands";
+import { ChatQueue } from "@/components/chat-queue";
 import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
@@ -1274,6 +1277,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   };
 
   const active = sessions.find((s) => s.id === activeId) ?? MAIN_SESSION;
+  const controls=useChatControls(active.role==="mainagent"&&!active.inherited?{conversation_id:"0",task_id:taskId,exploration_id:"0",main_seg:active.seg??0}:null);
+  const queueMode=!!(mainChatRunning||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"));
   const side = useSideQuestions(
     active.role === "mainagent"
       ? `/api/tasks/${taskId}/chat`
@@ -1294,7 +1299,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const activeLast = activeItems[activeItems.length - 1];
   const activeSettled =
     !!activeLast && (activeLast.kind === "result" || (activeLast.kind === "text" && activeLast.is_error));
-  const mainBusy = isMain && (sending || (!activeSettled && (mainChatRunning ?? recentLive(activeKey))));
+  const mainBusy = isMain && (!!controls.state?.active || sending || (!activeSettled && (mainChatRunning ?? recentLive(activeKey))));
   // The collapsed mobile header shows the active session name and other sessions' unread total,
   // so users retain context and awareness of new messages elsewhere.
   const activeDisplayTitle = (active.role === "worker" ? sessionMeta.get(active.id)?.title : "") || active.title;
@@ -1506,31 +1511,18 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     void api.stopChat(taskId).finally(() => setStopping(false));
   }
 
-  function send() {
-    const text = input.trim();
-    const atts = attachments;
-    if (side.handleCommand(text, () => setInput(""))) return;
-    if ((!text && atts.length === 0) || sending || mainBusy || !attachmentState.canSubmit) return;
-    // No optimistic echo: the backend persists+broadcasts the human turn before it
-    // returns, so it streams back over SSE (worker="mainagent") with its real DB
-    // seq — the transcript renders it from server data like every other step. Clear
-    // the composer eagerly for responsiveness; restore it if the send fails.
-    setInput("");
-    setSending(true);
-    chatStatusRequestRef.current++;
-    api
-      .chat(text, taskId, atts.length > 0 ? atts : undefined, active.seg ?? 0)
-      .then(({ mode }) => {
-        attachmentState.clear();
-        chatStatusRequestRef.current++;
-        setMainChatRunning(mode === "llm");
-      })
-      .catch((e) => {
-        setInput(text); // restore so the user doesn't lose their text / attachments
-        // The original uploaded files and paste previews remain available.
-        toast.error(swt("interface.m0714", { p0: (e as Error).message || swt("interface.m0715") }));
-      })
-      .finally(() => setSending(false));
+  async function send(explicit?:"send"|"queue"|"steer"){
+    const original=input;let text=input.trim();const atts=attachments;
+    if(side.handleCommand(text,()=>setInput("")))return;
+    const command=parseChatCommand(text);
+    if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
+    let mode=explicit??(queueMode?"queue":"send");
+    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;text=command.text}else{toast.error(swt("interface.chatControlUnavailable"));return}}
+    if((!text&&!atts.length)||sending||!attachmentState.canSubmit)return;
+    if(mode==="steer"&&(!controls.state?.active||attachmentState.items.length)){toast.error(swt("interface.chatControlUnavailable"));return}
+    setSending(true);chatStatusRequestRef.current++;
+    try{await controls.submit(mode,{text,attachments:atts},mode==="steer"?controls.state?.active?.id:undefined);attachmentState.clear();setInput("");chatStatusRequestRef.current++;if(mode==="send")setMainChatRunning(true)}
+    catch(error){setInput(original);toast.error((error as Error).message)}finally{setSending(false)}
   }
 
   function sendWorkerChat() {
@@ -1912,6 +1904,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
             </ScrollArea>
             {isMain ? (
               <div className="border-t p-3">
+                <ChatQueue controls={controls}/>
                 <ChatAttachmentChips attachments={attachmentState} />
                 <input
                   ref={fileInputRef}
@@ -1945,42 +1938,23 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                       size="icon-xs"
                       variant="ghost"
                       onClick={() => fileInputRef.current?.click()}
-                      disabled={mainBusy || uploading}
+                      disabled={uploading || sending}
                       title={swt("interface.m0070")}
                       aria-label={swt("interface.m0070")}
                     >
                       {uploading ? <Loader2Icon className="animate-spin" /> : <PaperclipIcon />}
                     </InputGroupButton>
-                    {mainBusy && isBtwCommand(input) && (
-                      <InputGroupButton size="icon-xs" onClick={send} aria-label={swt("interface.m0071")}>
+                    {mainBusy && isBtwCommand(input) && !controls.state?.capabilities.queue && (
+                      <InputGroupButton size="icon-xs" onClick={()=>void send()} aria-label={swt("interface.m0071")}>
                         <ArrowUpIcon />
                       </InputGroupButton>
                     )}
-                    {mainBusy ? (
-                      <InputGroupButton
-                        className="ml-auto"
-                        size="icon-xs"
-                        variant="destructive"
-                        onClick={stop}
-                        disabled={stopping}
-                        title={swt("interface.m0751")}
-                        aria-label={swt("interface.m0751")}
-                      >
-                        {stopping ? <Loader2Icon className="animate-spin" /> : <SquareIcon />}
-                      </InputGroupButton>
-                    ) : (
-                      <InputGroupButton
-                        className="ml-auto"
-                        size="icon-xs"
-                        variant="default"
-                        onClick={send}
-                        disabled={(!input.trim() && attachments.length === 0) || sending || !attachmentState.canSubmit}
-                        title={swt("interface.m0073")}
-                        aria-label={swt("interface.m0073")}
-                      >
-                        {sending ? <Loader2Icon className="animate-spin" /> : <ArrowUpIcon />}
-                      </InputGroupButton>
-                    )}
+                    {mainBusy&&controls.state?.capabilities.steer&&<InputGroupButton size="xs" variant="outline" onClick={()=>void send("steer")} disabled={sending||attachmentState.items.length>0||!input.trim()} title={swt("interface.chatSteerHint")}>{swt("interface.chatSteer")}</InputGroupButton>}
+                    <InputGroupButton className="ml-auto" size="xs" variant="default" onClick={()=>void send()} disabled={(!input.trim()&&!attachments.length)||sending||!attachmentState.canSubmit} aria-label={swt(queueMode?"interface.chatQueue":"interface.m0073")}>
+                      {queueMode?swt("interface.chatQueue"):<ArrowUpIcon/>}
+                    </InputGroupButton>
+                    {mainBusy&&<InputGroupButton size="icon-xs" variant="destructive" onClick={stop} disabled={stopping} aria-label={swt("interface.chatStop")}><SquareIcon/></InputGroupButton>}
+
                   </InputGroupAddon>
                 </InputGroup>
               </div>

@@ -38,7 +38,7 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
           if (r.method() !== "POST") return;
           const path = new URL(r.url()).pathname;
           if (path === "/api/conversations") owners++;
-          if (/\/conversations\/\d+\/messages$/.test(path) || path === "/api/chat") messages.push(path);
+          if (/\/conversations\/\d+\/messages$/.test(path) || path === "/api/chat" || path.includes("/controls/inputs")) messages.push(path);
         });
         await step(`[${locale}/${width}/${surface}] document paste retains files and editable text`, async () => {
           await p.goto(surface === "standalone" ? `${base}/chat` : `${base}/function/tasks/detail?id=${task.id}`);

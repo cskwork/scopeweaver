@@ -26,6 +26,9 @@ import {
 import { toast } from "sonner";
 
 import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
+import { useChatControls, submitChatAdmission } from "@/hooks/use-chat-controls";
+import { parseChatCommand } from "@/lib/chat-commands";
+import { ChatQueue } from "@/components/chat-queue";
 import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
@@ -164,6 +167,8 @@ function Composer({
   attachmentState,
   draftKey,
   allowBtw,
+  queueMode,
+  onSteer,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -177,6 +182,8 @@ function Composer({
   attachmentState: ReturnType<typeof useChatAttachments>;
   draftKey: string;
   allowBtw?: boolean;
+  queueMode?: boolean;
+  onSteer?: () => void;
 }) {
   "use no memo";
   const { t: swt, locale: swLocale } = useI18n();
@@ -234,28 +241,15 @@ function Composer({
           onValueChange={onChange}
           onKeyDown={onKeyDown}
         />
-        {running && allowBtw && isBtwCommand(value) && (
+        {running && allowBtw && isBtwCommand(value) && !queueMode && (
           <Button size="icon" onClick={onSend} aria-label={swt("interface.m0071")} title={swt("interface.m0071")}>
             <ArrowUpIcon />
           </Button>
         )}
-        {running ? (
-          // while a run is in flight the send button becomes a stop button —
-          // aborts just this session (the trigger queue keeps going).
-          <Button size="icon" variant="destructive" onClick={onStop} disabled={stopDisabled} title={swt("interface.m0072")}>
-            <Square className="size-3.5 fill-current" />
-          </Button>
-        ) : (
-          <Button
-            size="icon"
-            onClick={onSend}
-            disabled={disabled || !attachmentState.canSubmit || (!value.trim() && atts.length === 0)}
-            title={swt("interface.m0073")}
-            aria-label={swt("interface.m0073")}
-          >
-            <ArrowUpIcon />
-          </Button>
-        )}
+        {running && onSteer && <Button variant="outline" onClick={onSteer} disabled={disabled || attachmentState.items.length>0 || !value.trim()} title={swt("interface.chatSteerHint")}>{swt("interface.chatSteer")}</Button>}
+        {(!running || queueMode) && <Button onClick={onSend} disabled={disabled || !attachmentState.canSubmit || (!value.trim() && atts.length === 0)} title={swt(queueMode?"interface.chatQueue":"interface.m0073")} aria-label={swt(queueMode?"interface.chatQueue":"interface.m0073")}>{queueMode?swt("interface.chatQueue"):<ArrowUpIcon/>}</Button>}
+        {running && <Button size="icon" variant="destructive" onClick={onStop} disabled={stopDisabled} aria-label={swt("interface.chatStop")} title={swt("interface.chatStop")}><Square className="size-3.5 fill-current"/></Button>}
+
       </div>
     </div>
   );
@@ -384,14 +378,18 @@ function DraftChat({
   const agent = agents.find((a) => a.key === agentKey);
 
   async function send() {
-    const msg = input.trim();
+    let msg = input.trim();
+    const command=parseChatCommand(msg);
+    if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
+    if(command&&command.kind!=="queue"){toast.error(swt("interface.chatControlUnavailable"));return}
+    if(command?.kind==="queue")msg=command.text;
     if ((!msg && attachmentState.uploaded.length === 0) || !agentKey || sending || !attachmentState.canSubmit) return;
     setSending(true);
     try {
       const owner = await attachmentState.owner();
       const c = (await api.conversations()).find((item) => `conv-${item.id}` === owner.id);
       if (!c) throw new Error(swt("interface.chatOwnerMissing"));
-      await api.sendConversationMessage(c.id, msg, attachmentState.uploaded);
+      await submitChatAdmission({conversation_id:String(c.id),task_id:"0",exploration_id:"0",main_seg:0},command?.kind==="queue"?"queue":"send",{text:msg,attachments:attachmentState.uploaded});
       attachmentState.clear();
       setInput("");
       onStarted(c);
@@ -487,6 +485,7 @@ function ChatView({
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   // Uploaded attachments live in sessions/conv-<id>/uploads/ and accompany the next message.
+  const controls=useChatControls({conversation_id:String(conv.id),task_id:"0",exploration_id:"0",main_seg:0});
   const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => ({ scope: "session", id: `conv-${conv.id}` }) });
   React.useEffect(() => { if (initial?.attachments?.length && !attachmentState.items.length) attachmentState.loadUploaded(initial.attachments); }, [initial?.attachments]);
   const cursorRef = React.useRef(0); // newest loaded id — incremental-tail anchor
@@ -693,26 +692,21 @@ function ChatView({
     return { i: I, o: O, cr: CR, turns, any: I + O + CR > 0 };
   }, [swLocale, messages]);
 
-  async function send() {
-    const msg = input.trim();
-    const atts = attachmentState.uploaded;
+  async function send(explicit?: "send"|"queue"|"steer") {
+    const original=input;let msg=input.trim();const atts=attachmentState.uploaded;
     if (side.handleCommand(msg, () => setInput(""))) return;
-    if ((!msg && atts.length === 0) || sending || running || !attachmentState.canSubmit) return;
+    const command=parseChatCommand(msg);
+    if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
+    let mode=explicit??(running||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued")?"queue":"send");
+    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;msg=command.text}else{toast.error(swt("interface.chatControlUnavailable"));return}}
+    if ((!msg && !atts.length) || sending || !attachmentState.canSubmit) return;
+    if(mode==="steer"&&(!controls.state?.active||attachmentState.items.length)){toast.error(swt("interface.chatControlUnavailable"));return}
     setSending(true);
-    setInput("");
     try {
-      await api.sendConversationMessage(conv.id, msg, atts.length ? atts : undefined);
-      attachmentState.clear();
-      // The live loop pulls the persisted human turn immediately. Sharing that
-      // fetch avoids racing a separate post-send request against the poller.
-      setRunning(true);
-    } catch (e) {
-      toast.error(swt("interface.m0078") + (e as Error).message);
-      setInput(msg); // restore so the user doesn't lose their text
-      // Uploaded files and paste previews remain in the draft on failure.
-    } finally {
-      setSending(false);
-    }
+      await controls.submit(mode,{text:msg,attachments:atts},mode==="steer"?controls.state?.active?.id:undefined);
+      attachmentState.clear();setInput("");
+      if(mode==="send")setRunning(true);
+    } catch(e){toast.error(swt("interface.m0078")+(e as Error).message);setInput(original)}finally{setSending(false)}
   }
 
   // stop aborts the in-flight run for this conversation. running flips to false on
@@ -778,14 +772,17 @@ function ChatView({
         </div>
       </ScrollArea>
 
+      <ChatQueue controls={controls}/>
       <Composer
         value={input}
         onChange={setInput}
-        onSend={send}
-        disabled={running || sending}
+        onSend={()=>void send()}
+        disabled={sending}
+        queueMode={!!(running||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"))}
+        onSteer={controls.state?.capabilities.steer?()=>void send("steer"):undefined}
         allowBtw
         placeholder={running ? swt("interface.m0090") : swt("interface.m0084")}
-        running={running}
+        running={running||!!controls.state?.active}
         onStop={stop}
         stopDisabled={stopping}
         attachmentState={attachmentState}
