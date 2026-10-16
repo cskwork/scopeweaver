@@ -3,6 +3,7 @@ import {chromium,request} from "playwright";
 import {runChatQueueChecks,runChatHistoryChecks,waitChatState} from "./chat-controls.mjs";
 import {runChatPasteChecks} from "./chat-paste.mjs";
 import {runChatContextChecks,runChatRuntimeChecks} from "./chat-context.mjs";
+import {runChatDraftRetentionChecks} from "./chat-draft-retention.mjs";
 
 const base=process.env.SCOPEWEAVER_E2E_URL;assert.ok(base?.startsWith("http://127.0.0.1:"),"loopback test listener required");
 const api=await request.newContext({baseURL:base});
@@ -19,6 +20,7 @@ export async function runChatControlsChecks({base,token,restart,fixture,step,che
  if(!only||only==="context")await runChatContextChecks(options);
  if(!only||only==="runtime")await runChatRuntimeChecks(options);
  if(!only||only==="paste")await runChatPasteChecks(options);
+ if(!only||only==="draft")await runChatDraftRetentionChecks(options);
 }
 
 try{await runChatControlsChecks({...helpers,restart:id=>fixtureRequest("recover",{input_id:id})});assert.deepEqual(errors,[],"uncaught browser errors");console.log(`Chat browser gate: ${failed===0?"PASS":"FAIL"}`)}finally{await fixture.release();await browser.close();await api.dispose()}
