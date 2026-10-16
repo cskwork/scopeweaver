@@ -241,7 +241,7 @@ function Composer({
           onPaste={attachmentState.onPaste}
           placeholder={placeholder}
           value={value}
-          disabled={disabled && !(running && allowBtw)}
+          disabled={disabled}
           onValueChange={onChange}
           onKeyDown={onKeyDown}
         />
