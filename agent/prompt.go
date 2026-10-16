@@ -3,6 +3,7 @@ package agent
 import (
 	"bytes"
 	"github.com/Autumn-27/artex/locale"
+	"log"
 	"text/template"
 	"time"
 )
@@ -53,6 +54,8 @@ func renderSystem(agentKey, def string, vars any, langs ...locale.Lang) string {
 	}
 	if out, err := renderTmpl(tmpl, vars); err == nil {
 		return out
+	} else {
+		log.Printf(locale.Text(lang, "[prompt] agent=%q: template rendering failed; using role default: %v"), agentKey, err)
 	}
 	// DB template broke (e.g. references an out-of-catalog var) → code default.
 	if out, err := renderTmpl(def, vars); err == nil {
