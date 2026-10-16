@@ -819,6 +819,9 @@ export interface ProfileUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  // Reasoning/thinking tokens (llm_usage.reasoning_tokens): a subset of output_tokens, never added to it.
+  // Absent from older responses; read as 0.
+  reasoning_tokens?: number;
 }
 
 // One (profile, UTC day) token bucket for the dashboard's daily chart (new source).
@@ -828,6 +831,9 @@ export interface ProfileDayUsage {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  // Reasoning/thinking tokens (llm_usage.reasoning_tokens): a subset of output_tokens, never added to it.
+  // Absent from older responses; read as 0.
+  reasoning_tokens?: number;
 }
 
 // Response of GET /api/tokens/usage — the dashboard's "new" (llm_usage) token view.
@@ -845,6 +851,9 @@ export interface ModelTokenStat {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  // Reasoning/thinking tokens (llm_usage.reasoning_tokens): a subset of output_tokens, never added to it.
+  // Absent from older responses; read as 0.
+  reasoning_tokens?: number;
 }
 
 export interface Session {
@@ -1044,7 +1053,7 @@ export interface LLMProfile {
   rate_per_second: number;
   rate_per_minute: number;
   context_window_k?: number;
-  // thinking.type: empty omits (default), disabled turns off, enabled turns on.
+  // thinking.type: empty omits (default), disabled turns off, enabled turns on, adaptive lets the model decide.
   thinking_type?: string;
   // Reasoning effort: empty omits (default), or low/medium/high/xhigh/max.
   reasoning_effort?: string;
@@ -1651,6 +1660,9 @@ export interface JudgeDayUsage {
   calls: number;
   input_tokens: number;
   output_tokens: number;
+  // Reasoning/thinking tokens (llm_usage.reasoning_tokens): a subset of output_tokens, never added to it.
+  // Absent from older responses; read as 0.
+  reasoning_tokens?: number;
 }
 export interface JudgeUsage {
   calls: number;
@@ -1658,6 +1670,9 @@ export interface JudgeUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  // Reasoning/thinking tokens (llm_usage.reasoning_tokens): a subset of output_tokens, never added to it.
+  // Absent from older responses; read as 0.
+  reasoning_tokens?: number;
   daily: JudgeDayUsage[];
 }
 

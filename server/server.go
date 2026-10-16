@@ -3733,7 +3733,18 @@ func (s *Server) testWebSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.Text(responseLanguage(w), agent.WebSearchLocalOnlyMessage), "backend": backend, "local_llm_only": true})
 		return
 	}
-	results, err := actool.WebSearchProbe(ctx, cfg, probeQuery, 3)
+	var results []actool.SearchResult
+	var err error
+	if strings.EqualFold(strings.TrimSpace(backend), deepSeekWebSearchBackend) {
+		meter := agent.DeepSeekSearchMeter{Store: s.m.PG()}
+		if profile, profileErr := s.m.pg.ActiveProfile(); profileErr == nil && profile != nil {
+			cfg.DeepSeekBaseURL, cfg.DeepSeekAPIKey, cfg.DeepSeekModel = profile.BaseURL, profile.APIKey, profile.Model
+			meter.ProfileName = profile.Name
+		}
+		results, err = agent.DeepSeekWebSearchProbe(ctx, cfg, meter, probeQuery, 3)
+	} else {
+		results, err = actool.WebSearchProbe(ctx, cfg, probeQuery, 3)
+	}
 	if err != nil {
 		writeJSON(w, 200, map[string]any{"ok": false, "error": locale.ErrorMessage(responseLanguage(w), err), "backend": backend})
 		return

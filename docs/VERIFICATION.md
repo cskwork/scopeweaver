@@ -4,16 +4,16 @@
 
 ## Chat controls and context (2026-10-16)
 
-I implemented the [approved design](superpowers/specs/2026-10-16-chat-controls-design.md) in an isolated worktree based on `51e6e39`. I used Hermes commit `4e59ac2b883b4133ea8a2d299abac45189781c09` as the behavior reference.
+I implemented the [approved design](superpowers/specs/2026-10-16-chat-controls-design.md) in an isolated worktree based on `51e6e39`. I used Hermes commit `4e59ac2b883b4133ea8a2d299abac45189781c09` as the behavior reference. Before opening the PR, I merged upstream `6366429` and reran the checks below.
 
 | Check | Result |
 | --- | --- |
-| Disposable PostgreSQL 17 race suites (`db`, `server`, `agent`) | 635 top-level tests passed; no race reports |
+| Disposable PostgreSQL 17 race suites (`db`, `server`, `agent`) | 667 top-level tests passed; no race reports |
 | Go packages and static analysis | `go test ./... -count=1` and `go vet ./...` passed |
-| Frontend tests, translations, audit and static export | 62 tests passed; 3,249 EN/KO/zh-Hans keys passed parity checks; 0 audit findings; TypeScript and 31 pages passed |
+| Frontend tests, translations, audit and static export | 65 tests passed; 3,263 EN/KO/zh-Hans keys passed parity checks; 0 audit findings; TypeScript and 31 pages passed |
 | Backend translations | 1,978 production keys passed completeness, parity and printf checks in three languages |
 | Chat browser gate | 60 scenarios passed across EN/KO/zh-Hans, 1440/390 px and standalone/task chat; no uncaught page errors |
-| Embedded-app smoke and dashboard | Smoke E2E and 12 dashboard scenarios passed; no uncaught browser errors |
+| Embedded-app smoke and dashboard | Smoke E2E and 14 dashboard scenarios passed; no uncaught browser errors |
 | Agent adapter | 7 unit tests, syntax checks and 3 MCP/Pi scenarios passed |
 | Installer and packaging | 8 installer fixtures, 11 Compose cases, 5 packaging archives per language (EN/KO), and 6 release-notice tests passed |
 
@@ -21,7 +21,7 @@ The chat browser cases cover queue edits and ordering, restart acknowledgement, 
 
 You can inspect the model's current context apart from billed conversation usage. Compression keeps the recent completed exchanges you select; you retain the full display history and usage from previous attempts.
 
-The reviewer found six integration defects. I fixed generated-input admission and retest recovery, attachment paths in branches after compaction, legacy display history, and steering delivery controls. The attachment test deletes the parent before the child's next prompt. Another test checks that rebasing preserves literal manifest text you wrote. For each finding, I ran a failing regression, fixed the code and reran the full local gate. I used one reviewer pass.
+The reviewer found six integration defects. I fixed generated-input admission and retest recovery, attachment paths in branches after compaction, legacy display history, and steering delivery controls. The attachment test deletes the parent before the child's next prompt. Another test checks that rebasing preserves literal manifest text you wrote. For each finding, I ran a failing regression, fixed the code and reran the full local gate. I used one reviewer pass. During upstream merge checks, I scoped the dashboard reasoning-total assertion to the summary row because the hover tooltip uses the same label. The rerun passed 14 dashboard scenarios.
 
 I used loopback models and disposable databases for inference tests. These results cover local Linux checks; Windows runtime, paid providers and remote CI require separate verification. I ran the notice fixture with Python 3 ahead of the host's Python 2 `python` executable, matching CI's interpreter requirement.
 

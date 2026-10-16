@@ -316,10 +316,12 @@ function JudgeCard() {
                 {swt("common.refresh")}
               </Button>
             </div>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
               <JudgeStat label={swt("settings.judgeUsageCalls")} value={fmt.number(usage.calls)} />
               <JudgeStat label={swt("settings.judgeUsageInput")} value={compactTokens(usage.input_tokens)} />
               <JudgeStat label={swt("settings.judgeUsageOutput")} value={compactTokens(usage.output_tokens)} />
+              {/* Reasoning is a subset of output; older servers omit it. */}
+              <JudgeStat label={swt("app.reasoningInOutput")} value={compactTokens(usage.reasoning_tokens ?? 0)} />
               <JudgeStat label={swt("settings.judgeUsageCacheRead")} value={compactTokens(usage.cache_read_tokens)} />
               <JudgeStat label={swt("settings.judgeUsageCacheWrite")} value={compactTokens(usage.cache_write_tokens)} />
             </div>

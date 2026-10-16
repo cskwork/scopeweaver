@@ -83,6 +83,7 @@ LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 +
 있습니다. API 키는 직접 입력하며, 템플릿을 선택하는 것만으로 저장·활성화하거나 제공자에 연결하지
 않습니다. Coding Plan은 공식 지원 도구에서만 사용할 수 있으며 ScopeWeaver는 목록에 없습니다.
 [제공자 설정과 지원 범위](docs/ko/llm-providers.md)를 확인하세요.
+클라우드 토큰 사용량은 [토큰 사용량 줄이기](docs/ko/llm-providers.md#토큰-사용량-줄이기)를 참고하세요.
 
 선택 사항인 **기본 Ollama** 프로필은 API 키 없이 동작합니다. 같은 컴퓨터의 Ollama, Docker에서
 접근하는 호스트 Ollama, 선택형 `docker compose --profile local-llm` 서비스용 템플릿 세 개를

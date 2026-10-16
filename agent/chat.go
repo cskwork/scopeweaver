@@ -173,7 +173,7 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 		opts.SessionID = sessionID
 	}
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
-	secureWebSearch(&opts, ws.PolicyResolver)
+	secureWebSearch(&opts, ws.PolicyResolver, ws.DeepSeekMeter)
 	if err := bindChatRunOptions(ctx, &opts); err != nil {
 		return "", err
 	}
