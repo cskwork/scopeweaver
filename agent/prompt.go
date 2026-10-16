@@ -55,7 +55,12 @@ func renderSystem(agentKey, def string, vars any, langs ...locale.Lang) string {
 	if out, err := renderTmpl(tmpl, vars); err == nil {
 		return out
 	} else {
-		log.Printf(locale.Text(lang, "[prompt] agent=%q: template rendering failed; using role default: %v"), agentKey, err)
+		// Template errors contain prompt expressions; log only a fixed category.
+		message := "[prompt] agent=%q: template parsing failed; using role default"
+		if _, ok := err.(template.ExecError); ok {
+			message = "[prompt] agent=%q: template execution failed; using role default"
+		}
+		log.Printf(locale.Text(lang, message), agentKey)
 	}
 	// DB template broke (e.g. references an out-of-catalog var) → code default.
 	if out, err := renderTmpl(def, vars); err == nil {

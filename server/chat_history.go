@@ -306,13 +306,7 @@ func CopyChatAttachments(ctx context.Context, sourceDir, targetDir string, promp
 			if e != nil {
 				return out, e
 			}
-			directory, e := os.Open(filepath.Dir(target))
-			if e != nil {
-				return out, e
-			}
-			e = directory.Sync()
-			directory.Close()
-			if e != nil {
+			if e = syncChatUploadDirectory(filepath.Dir(target)); e != nil {
 				return out, e
 			}
 		}

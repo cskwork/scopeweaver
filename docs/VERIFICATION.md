@@ -4,7 +4,7 @@
 
 ## Chat controls and context (2026-10-16)
 
-The chat controls were verified against upstream `6366429` with the checks below.
+The author of [PR #29](https://github.com/cskwork/scopeweaver/pull/29) reported the checks below against upstream `6366429`. These are the contributor's historical Linux results, before the combined PR #29/#30 review; they do not establish the later candidate's status or Windows attachment-copy behavior.
 
 | Check | Result |
 | --- | --- |
@@ -21,9 +21,9 @@ The chat browser cases cover queue edits and ordering, restart acknowledgement, 
 
 You can inspect the model's current context apart from billed conversation usage. Compression keeps the recent completed exchanges you select; you retain the full display history and usage from previous attempts.
 
-The reviewer found six integration defects. I fixed generated-input admission and retest recovery, attachment paths in branches after compaction, legacy display history, and steering delivery controls. The attachment test deletes the parent before the child's next prompt. Another test checks that rebasing preserves literal manifest text you wrote. For each finding, I ran a failing regression, fixed the code and reran the full local gate. I used one reviewer pass. During upstream merge checks, I scoped the dashboard reasoning-total assertion to the summary row because the hover tooltip uses the same label. The rerun passed 14 dashboard scenarios.
+The contributor reported one reviewer pass that found six integration defects, followed by repairs to generated-input admission and retest recovery, attachment paths after compaction, legacy display history, and steering delivery controls. The attachment test deletes the parent before the child's next prompt; another checks that rebasing preserves literal manifest text. The contributor reported a failing regression before each repair and a full local rerun. The dashboard reasoning-total assertion was scoped to the summary row because the hover tooltip uses the same label; the reported rerun passed 14 dashboard scenarios.
 
-I used loopback models and disposable databases for inference tests. These results cover local Linux checks; Windows runtime, paid providers and remote CI require separate verification. I ran the notice fixture with Python 3 ahead of the host's Python 2 `python` executable, matching CI's interpreter requirement.
+The reported inference tests used loopback models and disposable databases. Windows runtime, paid providers and remote CI require separate verification. The contributor used Python 3 for the notice fixture, matching CI's interpreter requirement.
 
 ## Native hardening candidate — 2026-10-15
 
