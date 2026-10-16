@@ -221,7 +221,7 @@ func New(ctx context.Context, m *Manager, skillDir string, dataDir string, keyDi
 			return a.TaskTimeoutWrapupMaxTurns, true
 		}
 		wireAgentAugment(m.pg, s.skillDir, s.hostTools) // Assemble visible skills/MCP and traffic/orchestration host tools into agent toolsets.
-		domainReg := buildDomainReg(m.Assets())
+		domainReg := s.domainToolRegistry()
 		wireTools(m.pg, domainReg, s.knownToolLanguages()) // Built-in tools: filter by agent, override descriptions/schemas, and inject defaults.
 		seedPrompts(m.pg)                                  // Seed built-in agent prompt bodies into agent_prompts only when empty.
 		s.seedOrchestrationTools()                         // Seed P2 cross-task orchestration tools for per-agent bindings.
