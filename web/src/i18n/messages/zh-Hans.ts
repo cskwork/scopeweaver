@@ -201,6 +201,11 @@ export const english: Record<keyof typeof englishSource, string> = {
 };
 import type { en as interfaceSource } from './interface.ts';
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  chatPastedContent: "粘贴内容",
+  chatUploadRetry: "重试上传",
+  chatInsertAsText: "作为文本插入",
+  chatOwnerMissing: "附件所属对话不可用，请新建对话。",
+
   "m0001": "无法连接到后端服务",
   "m0002": "请先阅读并同意《使用须知》",
   "m0003": "用户名或密码错误",

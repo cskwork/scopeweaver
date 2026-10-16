@@ -1,5 +1,10 @@
 // Source-level interface messages. Both languages must be authored explicitly.
 export const en = {
+  chatPastedContent: "Pasted content",
+  chatUploadRetry: "Retry upload",
+  chatInsertAsText: "Insert as text",
+  chatOwnerMissing: "The attachment conversation is unavailable. Start a new conversation.",
+
   "m0001": "Cannot connect to the backend service",
   "m0002": "Please read and accept the Terms of Use first",
   "m0003": "Incorrect username or password",
@@ -2884,6 +2889,11 @@ export const en = {
   "m2882": "Details"
 };
 export const ko: Record<keyof typeof en, string> = {
+  chatPastedContent: "붙여넣은 내용",
+  chatUploadRetry: "업로드 재시도",
+  chatInsertAsText: "텍스트로 삽입",
+  chatOwnerMissing: "첨부 파일 대화를 사용할 수 없습니다. 새 대화를 시작하세요.",
+
   "m0001": "백엔드 서비스에 연결할 수 없습니다",
   "m0002": "먼저 이용 안내를 읽고 동의해 주세요",
   "m0003": "사용자 이름 또는 비밀번호가 올바르지 않습니다",

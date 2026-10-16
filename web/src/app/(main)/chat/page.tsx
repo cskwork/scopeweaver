@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
+import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
@@ -159,10 +161,8 @@ function Composer({
   running,
   onStop,
   stopDisabled,
-  attachments,
-  onPickFiles,
-  onRemoveAttachment,
-  uploading,
+  attachmentState,
+  draftKey,
   allowBtw,
 }: {
   value: string;
@@ -174,18 +174,17 @@ function Composer({
   running?: boolean;
   onStop?: () => void;
   stopDisabled?: boolean;
-  // File upload mode: show the attachment button and preview chips only when onPickFiles is supplied.
-  attachments?: ChatAttachment[];
-  onPickFiles?: (files: File[]) => void;
-  onRemoveAttachment?: (path: string) => void;
-  uploading?: boolean;
+  attachmentState: ReturnType<typeof useChatAttachments>;
+  draftKey: string;
   allowBtw?: boolean;
 }) {
   "use no memo";
   const { t: swt, locale: swLocale } = useI18n();
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const atts = attachments ?? [];
+  const atts = attachmentState.uploaded;
+  const uploading = attachmentState.uploading;
+  const onPickFiles = attachmentState.addFiles;
   // The send shortcut follows localStorage settings; Enter sends by default.
   const sendMode = useChatSendMode();
   function onKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -195,31 +194,7 @@ function Composer({
   }
   return (
     <div className="border-t p-3">
-      {atts.length > 0 && (
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          {atts.map((a) => (
-            <div
-              key={a.path}
-              className="flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 text-xs"
-              title={a.path}
-            >
-              <PaperclipIcon className="size-3 shrink-0 text-primary" />
-              <span className="max-w-[160px] truncate">{a.name}</span>
-              <span className="text-muted-foreground">{fmtBytes(a.size)}</span>
-              {onRemoveAttachment && (
-                <button
-                  type="button"
-                  className="ml-0.5 text-muted-foreground hover:text-foreground"
-                  onClick={() => onRemoveAttachment(a.path)}
-                  title={swt("interface.m0069")}
-                >
-                  <XIcon className="size-3" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <ChatAttachmentChips attachments={attachmentState} />
       <div className="flex flex-wrap items-center gap-2">
         {leftSlot ? <div className="w-full sm:w-auto">{leftSlot}</div> : null}
         {onPickFiles && (
@@ -251,6 +226,8 @@ function Composer({
         <MentionTextarea
           className="max-h-40 min-h-10 min-w-0 flex-1 resize-none"
           rows={1}
+          data-chat-draft={draftKey}
+          onPaste={attachmentState.onPaste}
           placeholder={placeholder}
           value={value}
           disabled={disabled && !(running && allowBtw)}
@@ -272,7 +249,7 @@ function Composer({
           <Button
             size="icon"
             onClick={onSend}
-            disabled={disabled || (!value.trim() && atts.length === 0)}
+            disabled={disabled || !attachmentState.canSubmit || (!value.trim() && atts.length === 0)}
             title={swt("interface.m0073")}
             aria-label={swt("interface.m0073")}
           >
@@ -386,11 +363,18 @@ function DraftChat({
   "use no memo";
   const { t: swt, locale: swLocale } = useI18n();
 
-  const [agentKey, setAgentKey] = React.useState("");
-  const [llmProfileId, setLlmProfileId] = React.useState<number | null>(null);
-  const [input, setInput] = React.useState("");
+  const [agentKey, setAgentKey] = useChatDraft("chat:draft:agent");
+  const [profileDraft, setProfileDraft] = useChatDraft("chat:draft:profile");
+  const llmProfileId = profileDraft ? Number(profileDraft) : null;
+  const setLlmProfileId = (id: number | null) => setProfileDraft(id == null ? "" : String(id));
+  const draftKey = "chat:draft";
+  const [input, setInput] = useChatDraft(draftKey);
   const [sending, setSending] = React.useState(false);
-  const [uploading, setUploading] = React.useState(false);
+  const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => {
+    const conversation = await api.createConversation(agentKey, "", llmProfileId);
+    return { scope: "session", id: `conv-${conversation.id}` };
+  } });
+  const uploading = attachmentState.uploading;
 
   // default the agent to Auto once agents load.
   React.useEffect(() => {
@@ -401,11 +385,15 @@ function DraftChat({
 
   async function send() {
     const msg = input.trim();
-    if (!msg || !agentKey || sending) return;
+    if ((!msg && attachmentState.uploaded.length === 0) || !agentKey || sending || !attachmentState.canSubmit) return;
     setSending(true);
     try {
-      const c = await api.createConversation(agentKey, "", llmProfileId);
-      await api.sendConversationMessage(c.id, msg);
+      const owner = await attachmentState.owner();
+      const c = (await api.conversations()).find((item) => `conv-${item.id}` === owner.id);
+      if (!c) throw new Error(swt("interface.chatOwnerMissing"));
+      await api.sendConversationMessage(c.id, msg, attachmentState.uploaded);
+      attachmentState.clear();
+      setInput("");
       onStarted(c);
     } catch (e) {
       toast.error(swt("interface.m0078") + (e as Error).message);
@@ -413,26 +401,8 @@ function DraftChat({
     }
   }
 
-  // Attachments need a conversation to own the uploads dir (sessions/conv-<id>/),
-  // and a draft has none yet — so picking a file CREATES the conversation, uploads
-  // into it, then hands off to ChatView carrying the typed text + attachments (the
-  // user sends from there). Mirrors the task main-agent console's upload, adapted to
-  // the ChatGPT-style lazy-create flow.
-  async function pickFiles(files: File[]) {
-    if (files.length === 0 || !agentKey || uploading || sending) return;
-    setUploading(true);
-    try {
-      const c = await api.createConversation(agentKey, "", llmProfileId);
-      const r = await api.chatUpload("session", `conv-${c.id}`, files);
-      onStarted(c, { input, attachments: r.attachments });
-    } catch (e) {
-      toast.error(swt("interface.m0079") + (e as Error).message);
-      setUploading(false);
-    }
-  }
-
   const agentPicker = (
-    <Select value={agentKey} onValueChange={setAgentKey}>
+    <Select value={agentKey} onValueChange={(key) => { attachmentState.clear(); setAgentKey(key); }} disabled={attachmentState.items.length > 0}>
       <SelectTrigger className="w-full sm:w-40">
         <SelectValue placeholder={swt("interface.m0080")} />
       </SelectTrigger>
@@ -473,14 +443,14 @@ function DraftChat({
         disabled={sending || uploading || !agentKey}
         placeholder={swt("interface.m0084")}
         leftSlot={agentPicker}
-        onPickFiles={pickFiles}
-        uploading={uploading}
+        attachmentState={attachmentState}
+        draftKey={draftKey}
       />
       <LLMProfileRow
         profiles={profiles}
         selected={llmProfileId}
-        onChange={setLlmProfileId}
-        disabled={sending || uploading}
+        onChange={(id) => { attachmentState.clear(); setLlmProfileId(id); }}
+        disabled={sending || uploading || attachmentState.items.length > 0}
       />
     </>
   );
@@ -512,12 +482,13 @@ function ChatView({
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [running, setRunning] = React.useState(false);
-  const [input, setInput] = React.useState(initial?.input ?? "");
+  const draftKey = `chat:conv-${conv.id}`;
+  const [input, setInput] = useChatDraft(draftKey, initial?.input ?? "");
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   // Uploaded attachments live in sessions/conv-<id>/uploads/ and accompany the next message.
-  const [attachments, setAttachments] = React.useState<ChatAttachment[]>(initial?.attachments ?? []);
-  const [uploading, setUploading] = React.useState(false);
+  const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => ({ scope: "session", id: `conv-${conv.id}` }) });
+  React.useEffect(() => { if (initial?.attachments?.length && !attachmentState.items.length) attachmentState.loadUploaded(initial.attachments); }, [initial?.attachments]);
   const cursorRef = React.useRef(0); // newest loaded id — incremental-tail anchor
   const earliestRef = React.useRef(0); // earliest loaded id — reverse-pagination anchor
   const hasMoreRef = React.useRef(false); // older history remains above the loaded window
@@ -722,38 +693,23 @@ function ChatView({
     return { i: I, o: O, cr: CR, turns, any: I + O + CR > 0 };
   }, [swLocale, messages]);
 
-  // pickFiles uploads into this conversation's session dir (sessions/conv-<id>/
-  // uploads/) and queues the returned metadata to send with the next message.
-  async function pickFiles(files: File[]) {
-    if (files.length === 0) return;
-    setUploading(true);
-    try {
-      const r = await api.chatUpload("session", `conv-${conv.id}`, files);
-      setAttachments((prev) => [...prev, ...r.attachments]);
-    } catch (e) {
-      toast.error(swt("interface.m0079") + (e as Error).message);
-    } finally {
-      setUploading(false);
-    }
-  }
-
   async function send() {
     const msg = input.trim();
-    const atts = attachments;
+    const atts = attachmentState.uploaded;
     if (side.handleCommand(msg, () => setInput(""))) return;
-    if ((!msg && atts.length === 0) || sending || running) return;
+    if ((!msg && atts.length === 0) || sending || running || !attachmentState.canSubmit) return;
     setSending(true);
     setInput("");
-    setAttachments([]);
     try {
       await api.sendConversationMessage(conv.id, msg, atts.length ? atts : undefined);
+      attachmentState.clear();
       // The live loop pulls the persisted human turn immediately. Sharing that
       // fetch avoids racing a separate post-send request against the poller.
       setRunning(true);
     } catch (e) {
       toast.error(swt("interface.m0078") + (e as Error).message);
       setInput(msg); // restore so the user doesn't lose their text
-      setAttachments(atts); // and their attachments
+      // Uploaded files and paste previews remain in the draft on failure.
     } finally {
       setSending(false);
     }
@@ -832,10 +788,8 @@ function ChatView({
         running={running}
         onStop={stop}
         stopDisabled={stopping}
-        attachments={attachments}
-        onPickFiles={pickFiles}
-        onRemoveAttachment={(path) => setAttachments((p) => p.filter((x) => x.path !== path))}
-        uploading={uploading}
+        attachmentState={attachmentState}
+        draftKey={draftKey}
       />
       <LLMProfileRow
         profiles={profiles}

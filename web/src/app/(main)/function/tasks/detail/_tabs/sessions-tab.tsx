@@ -31,6 +31,8 @@ import {
 import { toast } from "sonner";
 
 import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
+import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
+import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
 import { SideQuestionButton, SideQuestionWorkspace } from "@/components/side-question-workspace";
 import { TodoPopover } from "@/components/todo-popover";
@@ -539,7 +541,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [olderIntentsHasMore, setOlderIntentsHasMore] = React.useState(false);
   const [hasLoadedOlderIntentsPage, setHasLoadedOlderIntentsPage] = React.useState(false);
   const [loadingOlderIntents, setLoadingOlderIntents] = React.useState(false);
-  const [input, setInput] = React.useState("");
+  const draftKey = `task:${taskId}:${activeId}:${activeId === MAIN_ID ? currentSeg : 0}`;
+  const [input, setInput] = useChatDraft(draftKey);
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   const [mainChatRunning, setMainChatRunning] = React.useState<boolean | null>(null);
@@ -551,24 +554,11 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [workerMessage, setWorkerMessage] = React.useState("");
   const [workerMessageRequestId, setWorkerMessageRequestId] = React.useState("");
   const [workerMessageSending, setWorkerMessageSending] = React.useState(false);
-  // Attachments saved in the task working directory's uploads/ accompany the next message.
-  const [attachments, setAttachments] = React.useState<ChatAttachment[]>([]);
-  const [uploading, setUploading] = React.useState(false);
+  const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => ({ scope: "task", id: taskId }) });
+  const attachments = attachmentState.uploaded;
+  const uploading = attachmentState.uploading;
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-
-  async function pickFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    try {
-      const r = await api.chatUpload("task", taskId, Array.from(files));
-      setAttachments((prev) => [...prev, ...r.attachments]);
-    } catch (e) {
-      toast.error(swt("interface.m0704", { p0: (e as Error).message }));
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  }
+  function pickFiles(files: FileList | null) { if (files) attachmentState.addFiles(Array.from(files)); }
 
   // Start a fresh main-agent session: only the segment counter advances — the task's
   // graph/assets/goal are untouched, so the agent continues over the same task with a
@@ -584,7 +574,6 @@ export function SessionsTab({ taskId }: { taskId: string }) {
       setStore((prev) => ({ ...prev, [mainSessionKey(r.seq)]: { ...emptyState(), loaded: true } }));
       setActiveId(mainSessionId(r.seq));
       setListOpen(false);
-      setInput("");
     } catch (e) {
       toast.error(swt("interface.m0705", { p0: (e as Error).message }));
     } finally {
@@ -1521,24 +1510,24 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     const text = input.trim();
     const atts = attachments;
     if (side.handleCommand(text, () => setInput(""))) return;
-    if ((!text && atts.length === 0) || sending || mainBusy) return;
+    if ((!text && atts.length === 0) || sending || mainBusy || !attachmentState.canSubmit) return;
     // No optimistic echo: the backend persists+broadcasts the human turn before it
     // returns, so it streams back over SSE (worker="mainagent") with its real DB
     // seq — the transcript renders it from server data like every other step. Clear
     // the composer eagerly for responsiveness; restore it if the send fails.
     setInput("");
-    setAttachments([]);
     setSending(true);
     chatStatusRequestRef.current++;
     api
       .chat(text, taskId, atts.length > 0 ? atts : undefined, active.seg ?? 0)
       .then(({ mode }) => {
+        attachmentState.clear();
         chatStatusRequestRef.current++;
         setMainChatRunning(mode === "llm");
       })
       .catch((e) => {
         setInput(text); // restore so the user doesn't lose their text / attachments
-        setAttachments(atts);
+        // The original uploaded files and paste previews remain available.
         toast.error(swt("interface.m0714", { p0: (e as Error).message || swt("interface.m0715") }));
       })
       .finally(() => setSending(false));
@@ -1923,41 +1912,21 @@ export function SessionsTab({ taskId }: { taskId: string }) {
             </ScrollArea>
             {isMain ? (
               <div className="border-t p-3">
-                {attachments.length > 0 && (
-                  <div className="mb-2 flex flex-wrap gap-1.5">
-                    {attachments.map((a) => (
-                      <div
-                        key={a.path}
-                        className="flex items-center gap-1.5 rounded-md border bg-muted/50 px-2 py-1 text-xs"
-                        title={a.path}
-                      >
-                        <PaperclipIcon className="size-3 shrink-0 text-primary" />
-                        <span className="max-w-[160px] truncate">{a.name}</span>
-                        <span className="text-muted-foreground">{fmtBytes(a.size)}</span>
-                        <button
-                          type="button"
-                          className="ml-0.5 text-muted-foreground hover:text-foreground"
-                          onClick={() => setAttachments((p) => p.filter((x) => x.path !== a.path))}
-                          title={swt("interface.m0069")}
-                        >
-                          <XIcon className="size-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <ChatAttachmentChips attachments={attachmentState} />
                 <input
                   ref={fileInputRef}
                   type="file"
                   multiple
                   className="hidden"
-                  onChange={(e) => void pickFiles(e.target.files)}
+                  onChange={(e) => { pickFiles(e.target.files); e.target.value = ""; }}
                 />
                 <InputGroup className="min-h-9 has-disabled:opacity-100">
                   <MentionTextarea
                     inputGroup
                     rows={1}
                     aria-label={swt("interface.m0748")}
+                    data-chat-draft={draftKey}
+                    onPaste={attachmentState.onPaste}
                     placeholder={
                       mainBusy ? swt("interface.m0749") : swt("interface.m0750")
                     }
@@ -2005,7 +1974,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                         size="icon-xs"
                         variant="default"
                         onClick={send}
-                        disabled={(!input.trim() && attachments.length === 0) || sending}
+                        disabled={(!input.trim() && attachments.length === 0) || sending || !attachmentState.canSubmit}
                         title={swt("interface.m0073")}
                         aria-label={swt("interface.m0073")}
                       >
