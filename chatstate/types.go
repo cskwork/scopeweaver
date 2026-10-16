@@ -67,21 +67,24 @@ type Admission struct {
 	Ordinal     int64      `json:"ordinal,string"`
 }
 type Run struct {
-	TurnOrdinal     int64      `json:"turn_ordinal,string"`
-	Active          bool       `json:"active"`
-	Imported        bool       `json:"imported"`
-	SourceRunID     string     `json:"source_run_id,omitempty"`
-	ID              string     `json:"id"`
-	InputID         string     `json:"input_id"`
-	TurnID          string     `json:"turn_id"`
-	SupersedesRunID string     `json:"supersedes_run_id,omitempty"`
-	TranscriptID    string     `json:"transcript_id"`
-	StartRecordUUID string     `json:"start_record_uuid"`
-	EndRecordUUID   string     `json:"end_record_uuid,omitempty"`
-	Status          string     `json:"status"`
-	Session         SessionRef `json:"session"`
-	HistoryRevision int64      `json:"history_revision,string"`
-	Prompt          Prompt     `json:"prompt"`
+	BaselineRecorded bool       `json:"-"`
+	BeforeRecordUUID string     `json:"-"`
+	SourceKind       string     `json:"source_kind"`
+	TurnOrdinal      int64      `json:"turn_ordinal,string"`
+	Active           bool       `json:"active"`
+	Imported         bool       `json:"imported"`
+	SourceRunID      string     `json:"source_run_id,omitempty"`
+	ID               string     `json:"id"`
+	InputID          string     `json:"input_id"`
+	TurnID           string     `json:"turn_id"`
+	SupersedesRunID  string     `json:"supersedes_run_id,omitempty"`
+	TranscriptID     string     `json:"transcript_id"`
+	StartRecordUUID  string     `json:"start_record_uuid"`
+	EndRecordUUID    string     `json:"end_record_uuid,omitempty"`
+	Status           string     `json:"status"`
+	Session          SessionRef `json:"session"`
+	HistoryRevision  int64      `json:"history_revision,string"`
+	Prompt           Prompt     `json:"prompt"`
 }
 type ControlState struct {
 	LatestTurnID    string          `json:"latest_turn_id,omitempty"`
@@ -129,8 +132,9 @@ type ContextView struct {
 	Categories       []ContextCategory     `json:"categories"`
 }
 type CompactOptions struct {
-	Focus      string `json:"focus"`
-	KeepRecent int    `json:"keep_recent"`
+	TurnStarts []string `json:"-"`
+	Focus      string   `json:"focus"`
+	KeepRecent int      `json:"keep_recent"`
 }
 type HistoryChange struct {
 	ClientID         string  `json:"client_request_id"`

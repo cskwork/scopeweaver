@@ -78,6 +78,17 @@ func bindChatRunOptions(ctx context.Context, opts *agentcore.Options) error {
 			return err
 		}
 		b.before = len(records)
+		if recorder, ok := b.control.(interface {
+			RecordChatTranscriptBaseline(context.Context, string, string) error
+		}); ok {
+			last := ""
+			if len(records) > 0 {
+				last = records[len(records)-1].UUID
+			}
+			if err = recorder.RecordChatTranscriptBaseline(ctx, b.run.ID, last); err != nil {
+				return err
+			}
+		}
 	}
 	opts.Hooks = wrapChatSteering(opts.Hooks, b.run, b.control)
 	opts.Provider = chatRunProvider{inner: opts.Provider, binding: b}

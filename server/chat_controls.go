@@ -115,6 +115,10 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 		s.chatAttemptsHTTP(w, r, ref, parts)
 		return
 	}
+	if r.Method == http.MethodPost && rest == "compact" {
+		s.chatCompactHTTP(w, r, ref)
+		return
+	}
 	if r.Method == http.MethodGet && rest == "context" {
 		s.chatContextHTTP(w, r, ref)
 		return
@@ -179,7 +183,7 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 			if !decodeConversationRequest(w, r, &req) {
 				return
 			}
-			if err := s.m.pg.DiscardUnknownChatRun(r.Context(), ref, id, req.Expected); err != nil {
+			if err := s.discardUnknownChatRun(r.Context(), ref, id, req.Expected); err != nil {
 				chatControlError(w, err)
 				return
 			}

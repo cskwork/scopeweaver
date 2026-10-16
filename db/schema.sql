@@ -1503,3 +1503,20 @@ CREATE TABLE IF NOT EXISTS chat_context_snapshots (
  request JSONB NOT NULL,
  profile_identity TEXT NOT NULL DEFAULT ''
 );
+ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS main_seg INTEGER;
+ALTER TABLE side_question_sessions ADD COLUMN IF NOT EXISTS history_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE side_question_requests ADD COLUMN IF NOT EXISTS history_revision BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE side_question_requests ADD COLUMN IF NOT EXISTS source_run_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE chat_control_gates ADD COLUMN IF NOT EXISTS operation_id TEXT NOT NULL DEFAULT '';
+CREATE TABLE IF NOT EXISTS chat_context_changes (
+ session_key TEXT NOT NULL REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ client_id TEXT NOT NULL,
+ token TEXT NOT NULL UNIQUE,
+ fingerprint TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('preparing','published','aborted')),
+ result JSONB,
+ PRIMARY KEY(session_key,client_id)
+);
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS baseline_recorded BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS before_record_uuid TEXT NOT NULL DEFAULT '';
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT 'user';

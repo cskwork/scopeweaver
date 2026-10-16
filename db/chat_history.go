@@ -29,7 +29,10 @@ func publishChatRevision(ctx context.Context, tx *sql.Tx, ref chatstate.SessionR
 		return err
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE chat_control_sessions SET transcript_id=$2,history_revision=$3,active_revision_id=$4 WHERE session_key=$1`, ref.Key(), revision.TranscriptID, history, revision.ID)
-	return err
+	if err != nil {
+		return err
+	}
+	return invalidateSideSnapshotTx(ctx, tx, chatSideParent(ref), history)
 }
 func (d *DB) PublishChatHistory(ctx context.Context, ref chatstate.SessionRef, expected int64, revision chatstate.TranscriptRevision) error {
 	if err := validatePreparedChatRevision(ref, revision); err != nil {
@@ -193,7 +196,7 @@ func (d *DB) NewMainSessionBranch(ctx context.Context, ref chatstate.SessionRef,
 	return d.PrepareChatHistoryTarget(ctx, ref, chatstate.HistoryChange{Kind: "branch", ClientID: clientID, TurnID: parentTurnID, ExpectedRevision: state.Revision}, true, parentTurnID)
 }
 func (d *DB) ChatHistoryRuns(ctx context.Context, ref chatstate.SessionRef) ([]chatstate.Run, error) {
-	rows, err := d.QueryContext(ctx, `SELECT `+runCols+` FROM chat_control_runs r JOIN chat_control_sessions s ON s.session_key=r.session_key JOIN chat_control_inputs i ON i.id=r.input_id WHERE r.session_key=$1 AND r.active ORDER BY r.turn_ordinal,r.created_at,r.id`, ref.Key())
+	rows, err := d.QueryContext(ctx, `SELECT `+runCols+` FROM chat_control_runs r JOIN chat_control_sessions s ON s.session_key=r.session_key JOIN chat_control_inputs i ON i.id=r.input_id WHERE r.session_key=$1 AND r.active AND r.source_kind='user' ORDER BY r.turn_ordinal,r.created_at,r.id`, ref.Key())
 	if err != nil {
 		return nil, err
 	}

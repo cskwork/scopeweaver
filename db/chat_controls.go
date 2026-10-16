@@ -131,9 +131,13 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 			return e
 		}
 		var paused bool
+		var operation string
 		var active sql.NullString
-		if e = tx.QueryRowContext(ctx, `SELECT paused,active_run_id FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&paused, &active); e != nil {
+		if e = tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&paused, &active, &operation); e != nil {
 			return e
+		}
+		if mode == "send" && operation != "" {
+			return chatstate.ErrBusy
 		}
 		if mode == "send" {
 			var pending bool
@@ -196,7 +200,7 @@ func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRe
 			}
 			out.Active = &run
 		}
-		e := tx.QueryRowContext(ctx, `SELECT turn_id,id,status FROM chat_control_runs WHERE session_key=$1 AND active ORDER BY turn_ordinal DESC,created_at DESC,id DESC LIMIT 1`, ref.Key()).Scan(&out.LatestTurnID, &out.LatestRunID, &out.LatestRunStatus)
+		e := tx.QueryRowContext(ctx, `SELECT turn_id,id,status FROM chat_control_runs WHERE session_key=$1 AND active AND source_kind='user' ORDER BY turn_ordinal DESC,created_at DESC,id DESC LIMIT 1`, ref.Key()).Scan(&out.LatestTurnID, &out.LatestRunID, &out.LatestRunStatus)
 		if e != nil && !errors.Is(e, sql.ErrNoRows) {
 			return e
 		}
@@ -268,8 +272,12 @@ func (d *DB) UpdateChatInput(ctx context.Context, ref chatstate.SessionRef, id s
 }
 func chatExpected(ctx context.Context, tx *sql.Tx, gate string, expected int64) error {
 	var revision int64
-	if err := tx.QueryRowContext(ctx, `SELECT revision FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&revision); err != nil {
+	var operation string
+	if err := tx.QueryRowContext(ctx, `SELECT revision,operation_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&revision, &operation); err != nil {
 		return err
+	}
+	if operation != "" {
+		return chatstate.ErrBusy
 	}
 	if revision != expected {
 		return chatstate.ErrConflict
@@ -324,11 +332,11 @@ func (d *DB) ReorderChatInputs(ctx context.Context, ref chatstate.SessionRef, ex
 	})
 }
 
-const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,r.turn_ordinal,r.active,r.imported,COALESCE(r.source_run_id,''),COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
+const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,r.turn_ordinal,r.active,r.imported,COALESCE(r.source_run_id,''),r.baseline_recorded,r.before_record_uuid,r.source_kind,COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
 
 func scanChatRun(row interface{ Scan(...any) error }) (r chatstate.Run, err error) {
 	var prompt []byte
-	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.TurnOrdinal, &r.Active, &r.Imported, &r.SourceRunID, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
+	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.TurnOrdinal, &r.Active, &r.Imported, &r.SourceRunID, &r.BaselineRecorded, &r.BeforeRecordUUID, &r.SourceKind, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
 	if err == nil {
 		err = json.Unmarshal(prompt, &r.Prompt)
 	}
@@ -361,11 +369,12 @@ func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *ch
 	}
 	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
 		var paused bool
+		var operation string
 		var active sql.NullString
-		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active); e != nil {
+		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active, &operation); e != nil {
 			return e
 		}
-		if (paused && selected == "") || active.Valid {
+		if (paused && selected == "") || active.Valid || operation != "" {
 			return nil
 		}
 		a, e := scanChatAdmission(tx.QueryRowContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status='queued' AND i.kind='turn' AND ($2='' OR i.id=$2) ORDER BY i.ordinal,i.id LIMIT 1 FOR UPDATE OF i`, gate, selected))
@@ -507,6 +516,12 @@ func (d *DB) mutateChatInputStatus(ctx context.Context, ref chatstate.SessionRef
 	})
 }
 func (d *DB) RecoverChatRuns(ctx context.Context) error {
+	if _, err := d.ExecContext(ctx, `UPDATE chat_context_changes SET status='aborted' WHERE status='preparing'`); err != nil {
+		return err
+	}
+	if _, err := d.ExecContext(ctx, `UPDATE chat_control_gates SET operation_id='',revision=revision+1 WHERE operation_id<>''`); err != nil {
+		return err
+	}
 	rows, e := d.QueryContext(ctx, `SELECT id FROM chat_control_runs WHERE status='running'`)
 	if e != nil {
 		return e

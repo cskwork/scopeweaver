@@ -1296,7 +1296,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   async function historyChanged(result:ChatHistoryResult){const key=mainSessionKey(result.session.main_seg);reqTokenRef.current[key]=(reqTokenRef.current[key]??0)+1;patchStore(key,()=>emptyState());if(result.session.main_seg!==(active.seg??0))await navigateHistory(result.session);else loadSession(key,true);if(result.run_id)setMainChatRunning(true);void controls.reload()}
   const side = useSideQuestions(
     active.role === "mainagent"
-      ? `/api/tasks/${taskId}/chat`
+      ? `/api/tasks/${taskId}/chat?seg=${active.seg??0}`
       : active.role === "worker" && !active.inherited && active.intent_id
         ? `/api/tasks/${taskId}/intents/${active.intent_id}`
         : null,

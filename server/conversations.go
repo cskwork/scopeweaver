@@ -470,13 +470,21 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 			go s.dispatchChatGate(busyKey)
 		}
 	}()
+	if id, ok := ctx.Value(externalChatRunKey{}).(string); ok {
+		run, err := s.m.pg.ChatRun(ctx, id)
+		if err != nil {
+			_ = s.m.pg.FinishChatRun(context.Background(), id, "unknown")
+			return
+		}
+		ctx = agent.WithChatRun(ctx, run, s.m.pg)
+	}
 	// Only the first turn executes a historical retest. Follow-up conversation
 	// turns may explain the sealed result; the result tool refuses to overwrite it.
 	finishStatus, finishReason := "failed", locale.Text(locale.FromContext(ctx), "Retest could not start")
 	defer func() {
 		if id, ok := ctx.Value(externalChatRunKey{}).(string); ok {
 			status := finishStatus
-			if ctx.Err() != nil {
+			if ctx.Err() != nil && status != "unknown" {
 				status = "stopped"
 			}
 			_ = s.m.pg.FinishChatRun(context.Background(), id, status)
@@ -540,6 +548,9 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 	// step, so skip the raw-error entry — only surface genuine failures.
 	if _, err := ca.Chat(ctx, c.AgentKey, sessionID, msg, maxTurns, maxDuration, webSearch, emit); err != nil {
 		finishReason = locale.ErrorMessage(locale.FromContext(ctx), err)
+		if errors.Is(err, agent.ErrChatPersistence) {
+			finishStatus = "unknown"
+		}
 		if ctx.Err() == nil {
 			_, _ = pg.AppendConvActivity(c.ID, db.Activity{Worker: c.AgentKey, Kind: "text", IsError: true,
 				Summary: locale.Text(locale.FromContext(ctx), "(Error: %s)", locale.ErrorMessage(locale.FromContext(ctx), err)), Detail: locale.ErrorMessage(locale.FromContext(ctx), err)})

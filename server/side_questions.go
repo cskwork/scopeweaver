@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/chatstate"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/locale"
@@ -110,7 +111,7 @@ func (s *Server) flushSideSnapshots() {
 		err := s.m.pg.SaveSideSnapshot(ctx, snap)
 		cancel()
 		s.side.mu.Lock()
-		if err == nil || errors.Is(err, db.ErrSideParentGone) {
+		if err == nil || errors.Is(err, chatstate.ErrConflict) || errors.Is(err, db.ErrSideParentGone) {
 			if cur, ok := s.side.latest[key]; ok && cur.RunID == snap.RunID && cur.Version == snap.Version {
 				delete(s.side.latest, key)
 			}
@@ -129,7 +130,11 @@ func (s *Server) sideSnapshot(ctx context.Context, p sidequestion.Parent) (*side
 	snap, ok := s.side.latest[p.Key()]
 	s.side.mu.Unlock()
 	if ok {
-		return &snap, nil
+		if err := s.m.pg.ValidateSideSnapshot(ctx, snap); err == nil {
+			return &snap, nil
+		} else if !errors.Is(err, chatstate.ErrConflict) && !errors.Is(err, db.ErrSideParentGone) {
+			return nil, err
+		}
 	}
 	return s.m.pg.SideSnapshot(ctx, p.Key())
 }
@@ -251,6 +256,22 @@ func (s *Server) sideParent(w http.ResponseWriter, r *http.Request, kind string)
 		return p, false
 	}
 	p.TaskID, p.ExplorationID = id, t.ExpID
+	if kind == "main" {
+		seg := 0
+		if raw := r.URL.Query().Get("seg"); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				writeErr(w, 400, "invalid seg")
+				return p, false
+			}
+			seg = n
+		}
+		if visible, err := s.m.pg.MainChatSegmentAvailable(r.Context(), t.ExpID, seg); err != nil || !visible {
+			chatControlError(w, chatstate.ErrGone)
+			return p, false
+		}
+		p.MainSeg = &seg
+	}
 	if kind == "worker" {
 		iid, err := strconv.ParseInt(r.PathValue("iid"), 10, 64)
 		if err != nil || iid <= 0 {

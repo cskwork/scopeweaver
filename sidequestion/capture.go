@@ -16,6 +16,7 @@ import (
 )
 
 type Parent struct {
+	MainSeg        *int  `json:"main_seg,omitempty"`
 	ConversationID int64 `json:"conversation_id,omitempty"`
 	TaskID         int64 `json:"task_id,omitempty"`
 	ExplorationID  int64 `json:"exploration_id,omitempty"`
@@ -28,6 +29,9 @@ func (p Parent) Key() string {
 	}
 	if p.IntentID > 0 {
 		return fmt.Sprintf("task-%d-exp-%d-worker-i%d", p.TaskID, p.ExplorationID, p.IntentID)
+	}
+	if p.MainSeg != nil && *p.MainSeg > 0 {
+		return fmt.Sprintf("task-%d-exp-%d-main-s%d", p.TaskID, p.ExplorationID, *p.MainSeg)
 	}
 	return fmt.Sprintf("task-%d-exp-%d-main", p.TaskID, p.ExplorationID)
 }
@@ -44,12 +48,14 @@ type Model struct {
 }
 
 type Snapshot struct {
-	Parent     Parent                `json:"parent"`
-	RunID      int64                 `json:"run_id"`
-	Version    int64                 `json:"version"`
-	CapturedAt time.Time             `json:"captured_at"`
-	Model      Model                 `json:"model"`
-	Request    llm.CompletionRequest `json:"request"`
+	HistoryRevision int64                 `json:"history_revision,string"`
+	SourceRunID     string                `json:"source_run_id,omitempty"`
+	Parent          Parent                `json:"parent"`
+	RunID           int64                 `json:"run_id"`
+	Version         int64                 `json:"version"`
+	CapturedAt      time.Time             `json:"captured_at"`
+	Model           Model                 `json:"model"`
+	Request         llm.CompletionRequest `json:"request"`
 }
 
 func CloneRequest(req llm.CompletionRequest) (llm.CompletionRequest, error) {
@@ -82,6 +88,23 @@ func WithRequestObserver(ctx context.Context, observer RequestObserver) context.
 	return context.WithValue(ctx, observerKey{}, next)
 }
 
+type workingSetProjector func(context.Context, []llm.Message) []llm.Message
+type projectorKey struct{}
+
+func WithWorkingSetProjector(ctx context.Context, project func(context.Context, []llm.Message) []llm.Message) context.Context {
+	return context.WithValue(ctx, projectorKey{}, workingSetProjector(project))
+}
+
+type historyKey struct{}
+type historyStamp struct {
+	revision int64
+	runID    string
+}
+
+func WithHistory(ctx context.Context, revision int64, runID string) context.Context {
+	return context.WithValue(ctx, historyKey{}, historyStamp{revision, runID})
+}
+
 type publisherKey struct{}
 type captureKey struct{}
 type attemptKey struct{}
@@ -97,6 +120,7 @@ type Capture struct {
 	version   int64
 	publish   Publisher
 	last      *Snapshot
+	project   workingSetProjector
 	observers []RequestObserver
 	ctx       context.Context
 }
@@ -109,7 +133,8 @@ func Attach(ctx context.Context, parent Parent, deps harness.QueryDeps, provider
 	if publish == nil && len(observers) == 0 {
 		return ctx, deps
 	}
-	c := &Capture{parent: parent, runID: time.Now().UnixNano(), publish: publish, observers: observers, ctx: ctx}
+	project, _ := ctx.Value(projectorKey{}).(workingSetProjector)
+	c := &Capture{project: project, parent: parent, runID: time.Now().UnixNano(), publish: publish, observers: observers, ctx: ctx}
 	stream, complete := deps.CallModel, deps.CallModelSync
 	if stream == nil {
 		stream = provider.Stream
@@ -133,7 +158,8 @@ func (c *Capture) save(req llm.CompletionRequest, model Model) {
 	} // Observability must not break the main run.
 	c.mu.Lock()
 	c.version++
-	s := Snapshot{Parent: c.parent, RunID: c.runID, Version: c.version, CapturedAt: time.Now().UTC(), Model: model, Request: copy}
+	stamp, _ := c.ctx.Value(historyKey{}).(historyStamp)
+	s := Snapshot{HistoryRevision: stamp.revision, SourceRunID: stamp.runID, Parent: c.parent, RunID: c.runID, Version: c.version, CapturedAt: time.Now().UTC(), Model: model, Request: copy}
 	c.last = &s
 	c.mu.Unlock()
 	if c.publish != nil {
@@ -165,7 +191,11 @@ func Finish(ctx context.Context, messages []llm.Message) {
 	if len(req.Messages) > 0 && strings.HasPrefix(req.Messages[0].Text(), "<system-reminder>") {
 		prefix = append(prefix, req.Messages[0])
 	}
-	req.Messages = append(prefix, llm.MessagesForAPI(messages)...)
+	working := llm.MessagesForAPI(messages)
+	if c.project != nil {
+		working = c.project(ctx, messages)
+	}
+	req.Messages = append(prefix, working...)
 	c.save(req, s.Model)
 	c.observe(req, llm.CompletionRequest{}, s.Model, llm.Usage{}, "working_set")
 }

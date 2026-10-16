@@ -160,6 +160,15 @@ func syncChatDirectory(path string) error {
 	return err
 }
 func ValidateTranscriptRevision(store *transcript.Store, revision TranscriptRevision) error {
+	return validateTranscriptRevision(store, revision, false)
+}
+
+// ValidateTranscriptPrefix verifies the immutable prepared bytes, allowing a
+// lost run's damaged appended suffix to be discarded from a known baseline.
+func ValidateTranscriptPrefix(store *transcript.Store, revision TranscriptRevision) error {
+	return validateTranscriptRevision(store, revision, true)
+}
+func validateTranscriptRevision(store *transcript.Store, revision TranscriptRevision, prefixOnly bool) error {
 	if store == nil || revision.ID == "" || revision.TranscriptID != "chat-rev-"+revision.ID || strings.ContainsAny(revision.ID, "/\\.") || revision.ByteLength < 0 {
 		return fmt.Errorf("invalid transcript manifest")
 	}
@@ -188,9 +197,28 @@ func ValidateTranscriptRevision(store *transcript.Store, revision TranscriptRevi
 	if hex.EncodeToString(h.Sum(nil)) != revision.SHA256 {
 		return fmt.Errorf("transcript checksum mismatch")
 	}
-	records, err := store.Load(path)
-	if err != nil {
-		return err
+	var records []transcript.Record
+	if prefixOnly {
+		if _, err = f.Seek(0, io.SeekStart); err != nil {
+			return err
+		}
+		decoder := json.NewDecoder(io.LimitReader(f, revision.ByteLength))
+		for {
+			var r transcript.Record
+			err = decoder.Decode(&r)
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if err != nil {
+				return err
+			}
+			records = append(records, r)
+		}
+	} else {
+		records, err = store.Load(path)
+		if err != nil {
+			return err
+		}
 	}
 	if err = ValidateChatRecords(records); err != nil {
 		return err
@@ -320,4 +348,90 @@ func MapLegacyChatTurns(records []transcript.Record, prompts []string) ([]string
 		ids[i] = candidates[i].UUID
 	}
 	return ids, nil
+}
+
+// CanonicalChatRecords strips recorded working-set copies while retaining every
+// original birth record. Unknown or inconsistent legacy snapshots fail closed.
+func CanonicalChatRecords(records []transcript.Record) ([]transcript.Record, error) {
+	var births []transcript.Record
+	var working []llm.Message
+	for i := 0; i < len(records); i++ {
+		r := records[i]
+		if r.Type == "boundary" {
+			continue
+		}
+		if r.Message == nil {
+			births = append(births, r)
+			continue
+		}
+		if !llm.IsBoundaryMarker(*r.Message) {
+			births = append(births, r)
+			working = append(working, *r.Message)
+			continue
+		}
+		meta, ok := llm.ParseBoundaryMeta(*r.Message)
+		if !ok {
+			return nil, ErrAmbiguousHistory
+		}
+		var host struct {
+			Count int `json:"host_working_set_count"`
+		}
+		_ = json.Unmarshal(r.Message.Content[0].Input, &host)
+		count := host.Count
+		if count == 0 {
+			if meta.MessagesSummarized <= 0 {
+				return nil, ErrAmbiguousHistory
+			}
+			count = 2 + len(meta.ActiveSkills) + len(working) - meta.MessagesSummarized
+		}
+		if count < 2 || i+count > len(records) {
+			return nil, ErrAmbiguousHistory
+		}
+		snapshot := make([]llm.Message, 0, count-1)
+		for j := i + 1; j < i+count; j++ {
+			m := records[j].Message
+			if records[j].Type != "message" || m == nil || llm.IsBoundaryMarker(*m) {
+				return nil, ErrAmbiguousHistory
+			}
+			snapshot = append(snapshot, *m)
+		}
+		tail := count - 2 - len(meta.ActiveSkills)
+		if tail < 0 || tail > len(working) {
+			return nil, ErrAmbiguousHistory
+		}
+		a, _ := json.Marshal(working[len(working)-tail:])
+		b, _ := json.Marshal(snapshot[len(snapshot)-tail:])
+		if !bytes.Equal(a, b) {
+			return nil, ErrAmbiguousHistory
+		}
+		working = snapshot
+		i += count - 1
+	}
+	return births, nil
+}
+
+func LoadChatTranscriptThrough(store *transcript.Store, sessionID, endUUID string) ([]transcript.Record, error) {
+	if endUUID == "" {
+		return nil, nil
+	}
+	file, err := os.Open(store.MainPath(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	decoder := json.NewDecoder(file)
+	var records []transcript.Record
+	for {
+		var r transcript.Record
+		if err = decoder.Decode(&r); err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, ErrAmbiguousHistory
+			}
+			return nil, err
+		}
+		records = append(records, r)
+		if r.UUID == endUUID {
+			return records, ValidateChatRecords(records)
+		}
+	}
 }

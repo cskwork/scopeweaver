@@ -232,12 +232,6 @@ func (c *chatContextCapture) observe(ctx context.Context, event sidequestion.Req
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	req := event.Request
-	// Noa projects rather than replacing raw history. Finish must keep that view.
-	if event.Source == "working_set" && c.compactor == "noa" {
-		if view, ok := c.opts.Compactor.(harness.ContextView); ok {
-			req.Messages = view.View(ctx, req.Messages)
-		}
-	}
 	if c.identity != event.Model.Identity {
 		c.measured, c.anchorEstimate = 0, 0
 		c.identity = event.Model.Identity

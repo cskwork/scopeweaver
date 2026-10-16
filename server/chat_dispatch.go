@@ -232,6 +232,9 @@ func (s *Server) reserveExternalChat(ctx context.Context, c *db.Conversation, me
 	if run == nil {
 		return "", chatstate.ErrBusy
 	}
+	if _, err = s.m.pg.ExecContext(ctx, `UPDATE chat_control_runs SET source_kind='external' WHERE id=$1`, run.ID); err != nil {
+		return "", err
+	}
 	return run.ID, nil
 }
 
