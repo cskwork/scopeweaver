@@ -28,6 +28,9 @@ import { toast } from "sonner";
 import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
 import { useChatControls, submitChatAdmission } from "@/hooks/use-chat-controls";
 import { parseChatCommand } from "@/lib/chat-commands";
+import {ChatMessageActions,ChatParentLink} from "@/components/chat-message-actions";
+import type {ChatHistoryResult,ChatSessionRef} from "@/lib/types";
+import {newChatID} from "@/lib/chat-attachment-state";
 import { ChatQueue } from "@/components/chat-queue";
 import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
@@ -464,6 +467,7 @@ function ChatView({
   initial,
   onTitleMaybeChanged,
   onConvUpdated,
+  onNavigate,
 }: {
   conv: Conversation;
   agents: Agent[];
@@ -473,11 +477,16 @@ function ChatView({
   initial?: { input?: string; attachments?: ChatAttachment[] };
   onTitleMaybeChanged: () => void;
   onConvUpdated: () => void;
+  onNavigate:(ref:ChatSessionRef)=>Promise<void>;
 }) {
   "use no memo";
   const { t: swt, locale: swLocale } = useI18n();
 
   const approvalFocus = useApprovalFocus({ conversationId: conv.id });
+  const [historyVersion,setHistoryVersion]=React.useState(0);
+  const historyEpoch=React.useRef(0);
+  const knownHistory=React.useRef<string|null>(null);
+  const knownTerminal=React.useRef("");
   const [messages, setMessages] = React.useState<Activity[]>([]);
   const [running, setRunning] = React.useState(false);
   const draftKey = `chat:conv-${conv.id}`;
@@ -510,6 +519,14 @@ function ChatView({
   // conversation-scoped detail fetcher for the reused Transcript renderer.
   const fetchDetail = React.useCallback((seq: number) => api.conversationMsgDetail(conv.id, seq), [conv.id]);
 
+  React.useEffect(()=>{
+   const revision=controls.state?.history_revision;if(revision===undefined)return;
+   const terminal=controls.state?.latest_run_id&&controls.state.latest_run_status!=="running"?`${controls.state.latest_run_id}:${controls.state.latest_run_status}`:"";
+   if(knownHistory.current!==null&&knownHistory.current!==revision||terminal&&terminal!==knownTerminal.current){historyEpoch.current++;setHistoryVersion(value=>value+1)}
+   knownHistory.current=revision;knownTerminal.current=terminal;
+  },[controls.state?.history_revision,controls.state?.latest_run_id,controls.state?.latest_run_status]);
+
+  async function historyChanged(result:ChatHistoryResult){if(result.session.conversation_id!==String(conv.id)){await onNavigate(result.session);return}historyEpoch.current++;setHistoryVersion(value=>value+1);setRunning(!!result.run_id);onTitleMaybeChanged();void controls.reload()}
   // seq of the most-recent TodoWrite tool call (for the Todo popover); null if none.
   const latestTodoSeq = React.useMemo(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -553,7 +570,7 @@ function ChatView({
     return () => {
       live = false;
     };
-  }, [conv.id]);
+  }, [conv.id,historyVersion]);
 
   // A trigger or another tab may start a turn while this conversation is open.
   // A false list snapshot must not stop the tail before its final messages load.
@@ -590,7 +607,7 @@ function ChatView({
       live = false;
       clearTimeout(timer);
     };
-  }, [running, conv.id, onTitleMaybeChanged]);
+  }, [running, conv.id, onTitleMaybeChanged,historyVersion]);
 
   const loadFocusPage = React.useCallback((before: number) => api.conversationHistory(conv.id, before, HISTORY_PAGE), [conv.id]);
   const mergeFocusPage = React.useCallback((page: { items: Activity[]; hasMore: boolean }) => {
@@ -618,7 +635,9 @@ function ChatView({
     const prevH = vp.scrollHeight;
     const prevTop = vp.scrollTop;
     try {
-      const r = await api.conversationHistory(conv.id, earliestRef.current, HISTORY_PAGE);
+      const epoch=historyEpoch.current;
+ const r = await api.conversationHistory(conv.id, earliestRef.current, HISTORY_PAGE);
+ if(epoch!==historyEpoch.current)return;
       if (r.items.length) {
         setMessages((prev) => mergeActivities(r.items, prev));
         earliestRef.current = r.items[0].seq;
@@ -698,7 +717,7 @@ function ChatView({
     const command=parseChatCommand(msg);
     if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
     let mode=explicit??(running||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued")?"queue":"send");
-    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;msg=command.text}else{toast.error(swt("interface.chatControlUnavailable"));return}}
+    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;msg=command.text}else if(command.kind==="retry"){if(!controls.state?.capabilities.retry){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.retry(newChatID());await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else if(command.kind==="branch"){if(!controls.state?.capabilities.branch){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.branch({kind:"branch",client_request_id:newChatID(),turn_id:controls.state.latest_turn_id,title:command.title,expected_revision:controls.state.revision});await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else{toast.error(swt("interface.chatControlUnavailable"));return}}
     if ((!msg && !atts.length) || sending || !attachmentState.canSubmit) return;
     if(mode==="steer"&&(!controls.state?.active||attachmentState.items.length)){toast.error(swt("interface.chatControlUnavailable"));return}
     setSending(true);
@@ -756,6 +775,7 @@ function ChatView({
       <ApprovalExecutionFocus focus={approvalFocus} history={focusHistory} />
 
       {/* messages */}
+      <ChatParentLink controls={controls} onNavigate={onNavigate}/>
       <ScrollArea type="auto" className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
         <div className="min-w-0 max-w-full px-4 py-3" ref={contentRef}>
           {messages.length === 0 && !running ? (
@@ -766,7 +786,7 @@ function ChatView({
               {hasMore && (
                 <div className="text-muted-foreground/70 pb-2 text-center text-[11px]">{swt("interface.m0089")}</div>
               )}
-              <Transcript activity={messages} live={running} chat fetchDetail={fetchDetail} focusedSeq={focusHistory.ready ? approvalFocus.state?.source?.seq : undefined} />
+              <Transcript renderActions={activity=><ChatMessageActions activity={activity} controls={controls} onChanged={historyChanged}/>} activity={messages} live={running} chat fetchDetail={fetchDetail} focusedSeq={focusHistory.ready ? approvalFocus.state?.source?.seq : undefined} />
             </>
           )}
         </div>
@@ -1478,6 +1498,7 @@ export default function ChatPage() {
               initial={pendingByConv[selected.id]}
               onTitleMaybeChanged={reloadConvs}
               onConvUpdated={reloadConvs}
+              onNavigate={async ref=>{await reloadConvs();selectConversation(Number(ref.conversation_id))}}
             />
           ) : sourceRequested ? (
             <div role="status" className="p-6 text-sm text-muted-foreground">

@@ -196,6 +196,10 @@ func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRe
 			}
 			out.Active = &run
 		}
+		e := tx.QueryRowContext(ctx, `SELECT turn_id,id,status FROM chat_control_runs WHERE session_key=$1 AND active ORDER BY turn_ordinal DESC,created_at DESC,id DESC LIMIT 1`, ref.Key()).Scan(&out.LatestTurnID, &out.LatestRunID, &out.LatestRunStatus)
+		if e != nil && !errors.Is(e, sql.ErrNoRows) {
+			return e
+		}
 		for _, capability := range []string{"retry", "edit", "branch"} {
 			out.Capabilities[capability] = out.Active == nil
 		}

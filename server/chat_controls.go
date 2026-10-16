@@ -102,6 +102,15 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 	}
 	rest := strings.Trim(r.PathValue("rest"), "/")
 	parts := strings.Split(rest, "/")
+	if r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "turns" && parts[2] == "prompt" {
+		prompt, err := s.m.pg.ChatTurnPrompt(r.Context(), ref, parts[1])
+		if err != nil {
+			chatControlError(w, err)
+			return
+		}
+		writeJSON(w, 200, prompt)
+		return
+	}
 	if r.Method == http.MethodGet && parts[0] == "attempts" {
 		s.chatAttemptsHTTP(w, r, ref, parts)
 		return

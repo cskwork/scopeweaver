@@ -201,6 +201,28 @@ export const english: Record<keyof typeof englishSource, string> = {
 };
 import type { en as interfaceSource } from './interface.ts';
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  chatRetry: "重试",
+  chatEdit: "编辑消息",
+  chatBranch: "分支会话",
+  chatSaveAndRun: "保存并运行",
+  chatRetryEffect: "这会开始新的尝试，可能再次执行工具。以前的尝试及用量仍保留在历史记录中。",
+  chatEditEarlier: "编辑较早的消息会创建子会话。",
+  chatBranchEffect: "在此已完成的交流处创建子会话，新会话初始为空闲状态。",
+  chatSharedTask: "此分支共享任务状态和文件，不会回滚任务。",
+  chatBranchTitle: "分支标题",
+  chatParentConversation: "父会话",
+  chatParentUnavailable: "父会话不可用",
+  chatCopiedDocuments: "上传的文档已复制到此子会话，其他生成文件仍属于原会话。",
+  chatPreviousAttempts: "以前的尝试",
+  chatNoPreviousAttempts: "没有以前的尝试",
+  chatHistoryUnavailable: "无法确定此旧消息的轮次边界，历史操作已禁用。",
+  chatReadAttempt: "查看尝试",
+  chatAttemptCompleted: "已完成",
+  chatAttemptFailed: "失败",
+  chatAttemptStopped: "已停止",
+  chatAttemptUnknown: "执行情况未知",
+  chatAttemptRunning: "运行中",
+
   chatQueue: "队列",
   chatSteer: "引导",
   chatPauseQueue: "暂停队列",

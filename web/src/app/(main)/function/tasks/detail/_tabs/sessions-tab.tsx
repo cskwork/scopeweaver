@@ -34,6 +34,9 @@ import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/
 import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
 import { useChatControls } from "@/hooks/use-chat-controls";
 import { parseChatCommand } from "@/lib/chat-commands";
+import {ChatMessageActions,ChatParentLink} from "@/components/chat-message-actions";
+import type {ChatHistoryResult,ChatSessionRef} from "@/lib/types";
+import {newChatID} from "@/lib/chat-attachment-state";
 import { ChatQueue } from "@/components/chat-queue";
 import { useChatAttachments, useChatDraft } from "@/hooks/use-chat-attachments";
 import { MentionTextarea } from "@/components/mention-textarea";
@@ -668,7 +671,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   // Load a session's LATEST page (before=0) on first open. Keyed + request-token
   // guarded so a switch away can't corrupt the view.
   const loadSession = React.useCallback(
-    (key: string) => {
+    (key: string,replace=false) => {
+      if (replace) loadingKeysRef.current.delete(key);
       if (MOCK) return; // MOCK preloads everything up front
       if (loadingKeysRef.current.has(key)) return; // already in flight (e.g. main on mount)
       loadingKeysRef.current.add(key);
@@ -715,7 +719,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
               error: (error as Error).message || swt("interface.m0713"),
             }));
           })
-          .finally(() => loadingKeysRef.current.delete(key));
+          .finally(() => {if(reqTokenRef.current[key]===token)loadingKeysRef.current.delete(key)});
         return;
       }
 
@@ -725,7 +729,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
           if (reqTokenRef.current[key] !== token) return; // superseded
           if (r.snapshotCursor > snapshotRef.current) snapshotRef.current = r.snapshotCursor;
           patchStore(key, (s) => {
-            const items = mergeBySeq(r.items, s.items); // keep any live frames arrived meanwhile
+            const items = replace?mergeBySeq(r.items,s.items.filter(item=>item.seq>r.snapshotCursor)):mergeBySeq(r.items, s.items); // retain newer live frames
             return {
               ...s,
               items,
@@ -742,7 +746,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
           if (reqTokenRef.current[key] !== token) return;
           patchStore(key, (s) => ({ ...s, loading: false, error: (e as Error).message || swt("interface.m0713") }));
         })
-        .finally(() => loadingKeysRef.current.delete(key));
+        .finally(() => {if(reqTokenRef.current[key]===token)loadingKeysRef.current.delete(key)});
     },
     [swLocale, taskId, patchStore],
   );
@@ -1279,6 +1283,17 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const active = sessions.find((s) => s.id === activeId) ?? MAIN_SESSION;
   const controls=useChatControls(active.role==="mainagent"&&!active.inherited?{conversation_id:"0",task_id:taskId,exploration_id:"0",main_seg:active.seg??0}:null);
   const queueMode=!!(mainChatRunning||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"));
+  const knownHistory=React.useRef<Record<string,string>>({});
+  const knownTerminal=React.useRef<Record<string,string>>({});
+  React.useEffect(()=>{
+   const revision=controls.state?.history_revision;if(revision===undefined||active.role!=="mainagent")return;
+   const key=mainSessionKey(active.seg??0);const terminal=controls.state?.latest_run_id&&controls.state.latest_run_status!=="running"?`${controls.state.latest_run_id}:${controls.state.latest_run_status}`:"";
+   if(knownHistory.current[key]!==undefined&&knownHistory.current[key]!==revision||terminal&&terminal!==knownTerminal.current[key]){reqTokenRef.current[key]=(reqTokenRef.current[key]??0)+1;patchStore(key,()=>emptyState());loadSession(key,true)}
+   knownHistory.current[key]=revision;knownTerminal.current[key]=terminal;
+  },[controls.state?.history_revision,controls.state?.latest_run_id,controls.state?.latest_run_status,active.id]);
+
+  async function navigateHistory(ref:ChatSessionRef){if(ref.task_id!==taskId)return;const sessions=await api.mainSessions(taskId);setMainSegs(sessions.sessions);setCurrentSeg(sessions.current);setActiveId(mainSessionId(ref.main_seg));loadSession(mainSessionKey(ref.main_seg),true)}
+  async function historyChanged(result:ChatHistoryResult){const key=mainSessionKey(result.session.main_seg);reqTokenRef.current[key]=(reqTokenRef.current[key]??0)+1;patchStore(key,()=>emptyState());if(result.session.main_seg!==(active.seg??0))await navigateHistory(result.session);else loadSession(key,true);if(result.run_id)setMainChatRunning(true);void controls.reload()}
   const side = useSideQuestions(
     active.role === "mainagent"
       ? `/api/tasks/${taskId}/chat`
@@ -1517,7 +1532,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     const command=parseChatCommand(text);
     if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
     let mode=explicit??(queueMode?"queue":"send");
-    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;text=command.text}else{toast.error(swt("interface.chatControlUnavailable"));return}}
+    if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;text=command.text}else if(command.kind==="retry"){if(!controls.state?.capabilities.retry){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.retry(newChatID());await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else if(command.kind==="branch"){if(!controls.state?.capabilities.branch){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.branch({kind:"branch",client_request_id:newChatID(),turn_id:controls.state.latest_turn_id,title:command.title,expected_revision:controls.state.revision});await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else{toast.error(swt("interface.chatControlUnavailable"));return}}
     if((!text&&!atts.length)||sending||!attachmentState.canSubmit)return;
     if(mode==="steer"&&(!controls.state?.active||attachmentState.items.length)){toast.error(swt("interface.chatControlUnavailable"));return}
     setSending(true);chatStatusRequestRef.current++;
@@ -1864,6 +1879,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
             to block so wide/unbreakable steps (long commands, code, URLs) can't blow
             out the width and defeat the truncation below — the transcript wraps to
             the panel instead of overflowing horizontally. */}
+            {isMain&&<ChatParentLink controls={controls} onNavigate={navigateHistory}/>}
             <ScrollArea type="auto" className="min-h-0 min-w-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!">
               <div className="min-w-0 max-w-full p-4" ref={contentRef}>
                 {activeState?.loadingMore && (
@@ -1889,6 +1905,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                   </div>
                 ) : activity.length ? (
                   <Transcript
+                    renderActions={isMain?activity=><ChatMessageActions activity={activity} controls={controls} onChanged={historyChanged}/>:undefined}
                     activity={activity}
                     live={active.live}
                     taskId={taskId}

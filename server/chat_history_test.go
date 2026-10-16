@@ -375,3 +375,13 @@ func TestChatRetryKeepsPausedFollowups(t *testing.T) {
 		t.Fatal("retry released parked follow-ups", state)
 	}
 }
+
+func TestChatActionsLatestIdentity(t *testing.T) {
+	f := newHistoryFixture(t)
+	f.turn(t, "same prompt")
+	last := f.turn(t, "same prompt")
+	state, err := f.s.m.pg.ChatControlState(t.Context(), f.ref)
+	if err != nil || state.LatestTurnID != last.TurnID || state.LatestRunID != last.ID || state.LatestRunStatus != "completed" {
+		t.Fatal(state, err)
+	}
+}

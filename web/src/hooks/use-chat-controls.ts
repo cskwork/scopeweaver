@@ -4,7 +4,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { chatControlsBase, chatControlsURL } from "@/lib/chat-commands";
 import { newChatID } from "@/lib/chat-attachment-state";
 import { http, HTTPError } from "@/lib/api";
-import type { ChatAdmission, ChatControlState, ChatPrompt, ChatSessionRef } from "@/lib/types";
+import type {
+  ChatAdmission,
+  ChatControlState,
+  ChatPrompt,
+  ChatSessionRef,
+  ChatHistoryChange,
+  ChatHistoryResult,
+  ChatAttempt,
+  Activity,
+} from "@/lib/types";
 
 // Uncertain responses retain the request identity across component lifetimes.
 const requests = new Map<string, string>();
@@ -100,6 +109,17 @@ export function useChatControls(ref: ChatSessionRef | null) {
   }
   const targetFor = (id: string) => state?.inputs.find((item) => item.id === id)?.session ?? ref;
   return {
+    prompt: (turnID: string) => http<ChatPrompt>(chatControlsURL(ref!, `turns/${encodeURIComponent(turnID)}/prompt`)),
+    retry: (clientID: string) =>
+      mutate<ChatHistoryResult>("retry", "POST", { client_request_id: clientID, expected_revision: state?.revision }),
+    edit: (change: ChatHistoryChange) => mutate<ChatHistoryResult>("edit", "POST", change),
+    branch: (change: ChatHistoryChange) => mutate<ChatHistoryResult>("branch", "POST", change),
+    attempts: (turnID: string) =>
+      http<{ attempts: ChatAttempt[] }>(chatControlsURL(ref!, "attempts", `turn_id=${encodeURIComponent(turnID)}`)),
+    attemptActivities: (runID: string, before = 0) =>
+      http<{ items: Activity[]; has_more: boolean }>(
+        chatControlsURL(ref!, `attempts/${encodeURIComponent(runID)}/activities`, `before=${before}`),
+      ),
     state,
     error,
     reload,

@@ -83,6 +83,9 @@ type Run struct {
 	Prompt          Prompt     `json:"prompt"`
 }
 type ControlState struct {
+	LatestTurnID    string          `json:"latest_turn_id,omitempty"`
+	LatestRunID     string          `json:"latest_run_id,omitempty"`
+	LatestRunStatus string          `json:"latest_run_status,omitempty"`
 	StartInputID    string          `json:"-"`
 	Parent          *SessionRef     `json:"parent,omitempty"`
 	ParentTurnID    string          `json:"parent_turn_id,omitempty"`

@@ -638,6 +638,7 @@ export interface ChatAttachment {
 }
 
 export interface Activity {
+turn_id?: string;run_id?:string;active_attempt?:boolean;history_mutable?:boolean;
   seq: number;
   intent_id?: string;
   worker: string; // session owner: planner | mainagent | work#1 ...
@@ -1665,6 +1666,10 @@ export type ChatSessionRef={conversation_id:string;task_id:string;exploration_id
 export type ChatPrompt={text:string;attachments:ChatAttachment[]};
 export type ChatAdmission={id:string;client_request_id:string;kind:"turn"|"steer";target_run_id?:string;status:"queued"|"claimed"|"delivered"|"completed"|"failed"|"cancelled"|"undelivered"|"unknown";session:ChatSessionRef;prompt:ChatPrompt;revision:string;ordinal:string};
 export type ChatRun={id:string;input_id:string;turn_id:string;supersedes_run_id?:string;transcript_id:string;start_record_uuid:string;end_record_uuid?:string;status:string;session:ChatSessionRef;history_revision:string;prompt:ChatPrompt};
-export type ChatControlState={session:ChatSessionRef;revision:string;history_revision:string;paused:boolean;active:ChatRun|null;inputs:ChatAdmission[];capabilities:Record<string,boolean>};
+export type ChatControlState={latest_turn_id?:string;latest_run_id?:string;latest_run_status?:string;parent?:ChatSessionRef;parent_turn_id?:string;parent_available?:boolean;session:ChatSessionRef;revision:string;history_revision:string;paused:boolean;active:ChatRun|null;inputs:ChatAdmission[];capabilities:Record<string,boolean>};
 export type ChatContextView={history_revision:string;sequence:string;profile_id:string;model:string;compactor:string;source:string;summary:string;updated_at:string;window:number;used:number;output_reserve:number;headroom:number;compression_count:number;estimated:boolean;categories:{name:string;tokens:number;estimated:boolean}[]};
 export type ChatCompactOptions={focus:string;keep_recent:number};
+
+export type ChatHistoryChange={client_request_id:string;kind:"retry"|"edit"|"branch";turn_id?:string;title?:string;expected_revision:string;replacement?:ChatPrompt};
+export type ChatHistoryResult={session:ChatSessionRef;history_revision:string;run_id?:string};
+export type ChatAttempt={run_id:string;status:string;active:boolean;created_at:string};

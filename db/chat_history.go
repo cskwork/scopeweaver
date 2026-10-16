@@ -521,3 +521,16 @@ func (d *DB) ChatConversationExists(ctx context.Context, id int64) (bool, error)
 	err := d.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM conversations WHERE id=$1)`, id).Scan(&exists)
 	return exists, err
 }
+
+func (d *DB) ChatTurnPrompt(ctx context.Context, ref chatstate.SessionRef, turnID string) (prompt chatstate.Prompt, err error) {
+	var data []byte
+	err = d.QueryRowContext(ctx, `SELECT prompt FROM chat_control_runs WHERE session_key=$1 AND turn_id=$2 AND active ORDER BY created_at DESC LIMIT 1`, ref.Key(), turnID).Scan(&data)
+	if errors.Is(err, sql.ErrNoRows) {
+		return prompt, chatstate.ErrGone
+	}
+	if err != nil {
+		return
+	}
+	err = json.Unmarshal(data, &prompt)
+	return
+}
