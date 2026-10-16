@@ -191,3 +191,67 @@ func TestChatSendCannotImplicitlyQueue(t *testing.T) {
 		t.Fatalf("send overtook admission: %v", err)
 	}
 }
+
+func TestChatSteerTargetsRun(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "one")
+	r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if e != nil {
+		t.Fatal(e)
+	}
+	a, e := d.AdmitChatInput(t.Context(), ref, "correction", "steer", r.ID, chatstate.Prompt{Text: "focus auth"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	again, e := d.AdmitChatInput(t.Context(), ref, "correction", "steer", r.ID, chatstate.Prompt{Text: "focus auth"})
+	if e != nil || again.ID != a.ID {
+		t.Fatal(again, e)
+	}
+	if other, e := d.TakeSteer(t.Context(), "later-run"); e != nil || other != nil {
+		t.Fatal(other, e)
+	}
+	take, e := d.TakeSteer(t.Context(), r.ID)
+	if e != nil || take == nil || take.ID != a.ID {
+		t.Fatal(take, e)
+	}
+	if second, e := d.TakeSteer(t.Context(), r.ID); e != nil || second != nil {
+		t.Fatal(second, e)
+	}
+	if e = d.SteerDelivered(t.Context(), r.ID, a.ID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = d.AdmitChatInput(t.Context(), ref, "file", "steer", r.ID, chatstate.Prompt{Text: "x", Attachments: []chatstate.Attachment{{Path: "uploads/a"}}}); !errors.Is(e, chatstate.ErrConflict) {
+		t.Fatal("steer accepted file", e)
+	}
+	if _, e = d.Exec(`INSERT INTO intercept_pending(conversation_id,tool_name) VALUES($1,'Read')`, ref.ConversationID); e != nil {
+		t.Fatal(e)
+	}
+	if _, e = d.AdmitChatInput(t.Context(), ref, "approval", "steer", r.ID, chatstate.Prompt{Text: "x"}); !errors.Is(e, chatstate.ErrBusy) {
+		t.Fatal("approval accepted steer", e)
+	}
+}
+func TestChatSteerUndeliveredAfterFinish(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "one")
+	r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if e != nil {
+		t.Fatal(e)
+	}
+	a, e := d.AdmitChatInput(t.Context(), ref, "correction", "steer", r.ID, chatstate.Prompt{Text: "focus"})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = d.FinishChatRun(t.Context(), r.ID, "completed"); e != nil {
+		t.Fatal(e)
+	}
+	state, e := d.ChatControlState(t.Context(), ref)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, input := range state.Inputs {
+		if input.ID == a.ID && input.Status == "undelivered" {
+			return
+		}
+	}
+	t.Fatal("steer not visibly undelivered")
+}

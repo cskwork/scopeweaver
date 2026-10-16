@@ -108,6 +108,9 @@ func (s *Server) dispatchChatGate(gate string) {
 		if err := s.executeChatRun(ctx, *run); err == nil {
 			status = "completed"
 		} else {
+			if errors.Is(err, agent.ErrChatPersistence) {
+				status = "unknown"
+			}
 			log.Printf("[chat %s] run: %v", run.ID, err)
 		}
 	}()
@@ -119,6 +122,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 	if err := s.validateChatPrompt(run.Session, run.Prompt); err != nil {
 		return err
 	}
+	ctx = agent.WithChatRun(ctx, run, s.m.pg)
 	message, err := composeChatMentionMessageForLanguage(s.m.pg, run.Prompt.Text, locale.FromContext(ctx))
 	if err != nil {
 		return err
@@ -139,7 +143,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 			return fmt.Errorf("chat model unavailable")
 		}
 		ctx = intercept.WithConvID(ctx, c.ID)
-		ua := userActivityWithAttachments(c.AgentKey, run.Prompt.Text, run.Prompt.Attachments)
+		ua := chatRunActivity(run, userActivityWithAttachments(c.AgentKey, run.Prompt.Text, run.Prompt.Attachments))
 		if _, err = s.m.pg.AppendConvActivity(c.ID, ua); err != nil {
 			return err
 		}
@@ -155,6 +159,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 		}
 		var writeErr error
 		emit := func(rec db.Activity) {
+			rec = chatRunActivity(run, rec)
 			if _, err := s.m.pg.AppendConvActivity(c.ID, rec); err != nil {
 				writeErr = err
 			}
@@ -172,7 +177,11 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 		return chatstate.ErrGone
 	}
 	seg := run.Session.MainSeg
-	emit := func(rec db.Activity) { rec.MainSeg = &seg; s.engine.emitActivity(t, rec) }
+	emit := func(rec db.Activity) {
+		rec = chatRunActivity(run, rec)
+		rec.MainSeg = &seg
+		s.engine.emitActivity(t, rec)
+	}
 	emit(userActivityWithAttachments("mainagent", run.Prompt.Text, run.Prompt.Attachments))
 	if !s.taskRuntimeAvailable(t, "mainagent") {
 		emit(db.Activity{Worker: "mainagent", Kind: "text", Summary: s.fallbackChat(t, run.Prompt.Text, locale.FromContext(ctx))})
@@ -203,4 +212,12 @@ func (s *Server) reserveExternalChat(ctx context.Context, c *db.Conversation, me
 		return "", chatstate.ErrBusy
 	}
 	return run.ID, nil
+}
+
+func chatRunActivity(run chatstate.Run, a db.Activity) db.Activity {
+	a.RunID = run.ID
+	a.TurnID = run.TurnID
+	active := true
+	a.ActiveAttempt = &active
+	return a
 }

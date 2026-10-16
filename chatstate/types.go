@@ -121,3 +121,14 @@ type HistoryChange struct {
 	ExpectedRevision int64   `json:"expected_revision,string"`
 	Replacement      *Prompt `json:"replacement,omitempty"`
 }
+
+// LegacyTranscriptID preserves existing on-disk identities until revision publication.
+func (r SessionRef) LegacyTranscriptID() string {
+	if r.ConversationID > 0 {
+		return r.Key()
+	}
+	if r.MainSeg > 0 {
+		return fmt.Sprintf("exp%d-main-s%d", r.ExplorationID, r.MainSeg)
+	}
+	return fmt.Sprintf("exp%d-main", r.ExplorationID)
+}

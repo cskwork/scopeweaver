@@ -146,7 +146,18 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 		}
 		kind := "turn"
 		if mode == "steer" {
+			var approval bool
+			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intercept_pending WHERE status='pending' AND (conversation_id=$1 OR task_id=$2))`, nullableID(ref.ConversationID), fmt.Sprint(ref.TaskID)).Scan(&approval); e != nil {
+				return e
+			}
+			if approval {
+				return chatstate.ErrBusy
+			}
 			kind = "steer"
+			var activeSession string
+			if e = tx.QueryRowContext(ctx, `SELECT session_key FROM chat_control_runs WHERE id=$1 AND status='running'`, targetRunID).Scan(&activeSession); e != nil || activeSession != ref.Key() {
+				return chatstate.ErrConflict
+			}
 			if len(prompt.Attachments) > 0 || targetRunID == "" || !active.Valid || active.String != targetRunID {
 				return chatstate.ErrConflict
 			}
@@ -332,6 +343,9 @@ func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (out *chatstat
 		if e = tx.QueryRowContext(ctx, `SELECT history_revision,transcript_id FROM chat_control_sessions WHERE session_key=$1`, a.Session.Key()).Scan(&r.HistoryRevision, &r.TranscriptID); e != nil {
 			return e
 		}
+		if r.TranscriptID == "" {
+			r.TranscriptID = r.Session.LegacyTranscriptID()
+		}
 		payload, _ := json.Marshal(a.Prompt)
 		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status) VALUES($1,$2,$3,$4,$5,$6,$7,'running')`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload); e != nil {
 			return e
@@ -365,6 +379,11 @@ func (d *DB) FinishChatRun(ctx context.Context, runID, status string) error {
 				return nil
 			}
 			return chatstate.ErrConflict
+		}
+		for _, table := range []string{"activity", "conversation_activities"} {
+			if _, e := tx.ExecContext(ctx, `UPDATE `+table+` SET history_mutable=CASE WHEN kind='user' THEN $2::boolean ELSE $3::boolean END WHERE run_id=$1`, runID, r.StartRecordUUID != "" && status != "unknown", r.StartRecordUUID != "" && r.EndRecordUUID != "" && status == "completed"); e != nil {
+				return e
+			}
 		}
 		inputStatus := status
 		if status == "stopped" {
@@ -480,4 +499,68 @@ func (d *DB) PendingChatGates(ctx context.Context) ([]string, error) {
 		keys = append(keys, key)
 	}
 	return keys, rows.Err()
+}
+
+func (d *DB) TakeSteer(ctx context.Context, runID string) (out *chatstate.Admission, err error) {
+	r, err := d.ChatRun(ctx, runID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	err = d.chatTx(ctx, r.Session, func(tx *sql.Tx) error {
+		var active sql.NullString
+		if e := tx.QueryRowContext(ctx, `SELECT active_run_id FROM chat_control_gates WHERE gate_key=$1`, r.Session.GateKey()).Scan(&active); e != nil {
+			return e
+		}
+		if !active.Valid || active.String != runID {
+			return nil
+		}
+		a, e := scanChatAdmission(tx.QueryRowContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.target_run_id=$1 AND i.kind='steer' AND i.status='queued' ORDER BY i.ordinal,i.id LIMIT 1 FOR UPDATE OF i`, runID))
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='claimed',revision=revision+1 WHERE id=$1`, a.ID); e != nil {
+			return e
+		}
+		a.Status = "claimed"
+		a.Revision++
+		out = &a
+		return bumpChatGate(ctx, tx, r.Session.GateKey())
+	})
+	return
+}
+func (d *DB) SteerDelivered(ctx context.Context, runID, inputID string) error {
+	r, e := d.ChatRun(ctx, runID)
+	if e != nil {
+		return e
+	}
+	return d.chatTx(ctx, r.Session, func(tx *sql.Tx) error {
+		result, e := tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='delivered',revision=revision+1 WHERE id=$1 AND target_run_id=$2 AND kind='steer' AND status='claimed' AND EXISTS(SELECT 1 FROM chat_control_runs WHERE id=$2 AND status='running')`, inputID, runID)
+		if e != nil {
+			return e
+		}
+		n, e := result.RowsAffected()
+		if e != nil {
+			return e
+		}
+		if n != 1 {
+			return chatstate.ErrConflict
+		}
+		return bumpChatGate(ctx, tx, r.Session.GateKey())
+	})
+}
+func (d *DB) RecordBoundary(ctx context.Context, runID, start, end string) error {
+	r, e := d.ChatRun(ctx, runID)
+	if e != nil {
+		return e
+	}
+	return d.chatTx(ctx, r.Session, func(tx *sql.Tx) error {
+		_, e := tx.ExecContext(ctx, `UPDATE chat_control_runs SET start_record_uuid=CASE WHEN $2='' THEN start_record_uuid ELSE $2 END,end_record_uuid=CASE WHEN $3='' THEN end_record_uuid ELSE $3 END WHERE id=$1 AND status='running'`, runID, start, end)
+		return e
+	})
 }
