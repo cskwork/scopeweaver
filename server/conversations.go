@@ -7,13 +7,13 @@ import (
 	"log"
 	"math"
 	"net/http"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"github.com/Autumn-27/artex/agent"
+	"github.com/Autumn-27/artex/chatstate"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/locale"
@@ -367,19 +367,15 @@ func (s *Server) pgConversationMsgDetail(w http.ResponseWriter, r *http.Request)
 // the run/stop button in the chat UI). It cancels only THIS session's agent run;
 // the P3 trigger queue is untouched, so the agent's next queued fire still starts.
 func (s *Server) pgStopConversation(w http.ResponseWriter, r *http.Request) {
-	_, c, ok := s.convByID(w, r)
+	pg, c, ok := s.convByID(w, r)
 	if !ok {
 		return
 	}
-	busyKey := s.convBusyKey(c.ID)
-	s.chatMu.Lock()
-	cancel := s.chatCancel[busyKey]
-	s.chatMu.Unlock()
-	if cancel == nil {
-		writeJSON(w, 200, map[string]any{"status": "idle"}) // nothing running
+	if err := pg.PauseChatGate(r.Context(), chatstate.SessionRef{ConversationID: c.ID}, -1); err != nil {
+		chatControlError(w, err)
 		return
 	}
-	cancel(agent.AbortChatStoppedByUser)
+	s.cancelConversation(c.ID)
 	writeJSON(w, 200, map[string]any{"status": "stopping"})
 }
 
@@ -387,76 +383,18 @@ func (s *Server) pgStopConversation(w http.ResponseWriter, r *http.Request) {
 // background (steps stream to conversation_activities, polled by the client). One
 // in-flight turn per conversation.
 func (s *Server) pgSendConversationMessage(w http.ResponseWriter, r *http.Request) {
-	pg, c, ok := s.convByID(w, r)
+	_, c, ok := s.convByID(w, r)
 	if !ok {
 		return
 	}
 	var req struct {
 		Message     string           `json:"message"`
-		Attachments []chatAttachment `json:"attachments,omitempty"` // Uploaded files, with paths relative to the conversation working directory.
+		Attachments []chatAttachment `json:"attachments"`
 	}
-	if err := decode(r, &req); err != nil {
-		writeError(w, 400, err)
+	if !decodeConversationRequest(w, r, &req) {
 		return
 	}
-	msg := strings.TrimSpace(req.Message)
-	if msg == "" && len(req.Attachments) == 0 {
-		writeErr(w, 400, locale.Text(responseLanguage(w), "Message is required"))
-		return
-	}
-	agentMessage, ok := s.prepareChatMentionMessage(w, msg)
-	if !ok {
-		return
-	}
-	// Same resolution as the background runner: honour the agent binding / this
-	// conversation's chosen profile before falling back to the global config, so a
-	// conversation that picked a valid LLM is not rejected just because no global
-	// config is active.
-	if s.resolveChatAgent(c) == nil {
-		writeErr(w, 503, s.chatUnavailableReason(locale.FromRequest(r)))
-		return
-	}
-
-	busyKey := s.convBusyKey(c.ID)
-	s.chatMu.Lock()
-	if s.chatBusy[busyKey] {
-		s.chatMu.Unlock()
-		writeErr(w, 409, locale.Text(responseLanguage(w), "This conversation is processing the previous message; please wait"))
-		return
-	}
-	s.chatBusy[busyKey] = true
-	s.chatMu.Unlock()
-
-	// persist + float the human turn; auto-title the thread from the first message.
-	// Worker is the agent key (not "user") so the transcript stays a single lane
-	// (no worker chips) — the kind='user' already right-aligns it as a human bubble.
-	// With attachments, Detail carries {text, attachments} JSON so the transcript
-	// renders attachment cards; without, Detail is the full text (Summary is truncated,
-	// so the transcript lazy-loads Detail to show the message untruncated).
-	ua := userActivityWithAttachments(c.AgentKey, msg, req.Attachments)
-	ua.Summary = firstLine(msg, 200)
-	if ua.Detail == "" {
-		ua.Detail = msg
-	}
-	if _, err := pg.AppendConvActivity(c.ID, ua); err != nil {
-		log.Printf(locale.Text(responseLanguage(w), "[conv %d] append user msg failed: %v"), c.ID, err)
-	}
-	if isDefaultConversationTitle(c.Title) {
-		title := firstLine(msg, 40)
-		if title == "" {
-			title = locale.Text(responseLanguage(w), "Attachment message")
-		}
-		_ = pg.RenameConversation(c.ID, title)
-	}
-	_ = pg.TouchConversation(c.ID)
-
-	// Append the uploaded files' ABSOLUTE paths so the ChatAgent opens them with its
-	// Read/Bash tools. baseDir = the agent's per-session CWD (<workDir>/sessions/
-	// conv-<id>/), matching chatUpload's landing dir and agent/chat.go's sessionWorkDir
-	// — busyKey == convBusyKey(c.ID) == "conv-<id>" == that session id.
-	baseDir := filepath.Join(s.m.dir, "sessions", busyKey)
-	s.runConversationWithContext(r.Context(), c, composeAgentMessageForLanguage(agentMessage, req.Attachments, baseDir, locale.FromContext(r.Context())), busyKey, msg)
-	writeJSON(w, 202, map[string]any{"status": "accepted"})
+	s.admitCompatibilityChat(w, r, chatstate.SessionRef{ConversationID: c.ID}, req.Message, req.Attachments)
 }
 
 // runConversation runs ONE agent turn on a conversation in a background goroutine
@@ -476,6 +414,16 @@ func (s *Server) runConversationWithContext(request context.Context, c *db.Conve
 		ctx = withNativeRole(ctx, "mainagent")
 		ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: userMessage[0]})
 	}
+	if runID, err := s.reserveExternalChat(ctx, c, msg); err != nil {
+		cancel(err)
+		s.chatMu.Lock()
+		delete(s.chatBusy, busyKey)
+		delete(s.chatCancel, busyKey)
+		s.chatMu.Unlock()
+		return
+	} else {
+		ctx = context.WithValue(ctx, externalChatRunKey{}, runID)
+	}
 	go s.runConversationTurn(ctx, cancel, c, msg, busyKey)
 }
 
@@ -486,6 +434,16 @@ func (s *Server) runConversationWithContext(request context.Context, c *db.Conve
 func (s *Server) runConversationSync(c *db.Conversation, msg, busyKey string, langs ...locale.Lang) {
 	ctx, cancel := s.conversationRunContext(c.ID, busyKey)
 	ctx = locale.WithLang(ctx, locale.First(langs))
+	if runID, err := s.reserveExternalChat(ctx, c, msg); err != nil {
+		cancel(err)
+		s.chatMu.Lock()
+		delete(s.chatBusy, busyKey)
+		delete(s.chatCancel, busyKey)
+		s.chatMu.Unlock()
+		return
+	} else {
+		ctx = context.WithValue(ctx, externalChatRunKey{}, runID)
+	}
 	s.runConversationTurn(ctx, cancel, c, msg, busyKey)
 }
 
@@ -512,6 +470,15 @@ func (s *Server) runConversationTurn(ctx context.Context, cancel context.CancelC
 	// Only the first turn executes a historical retest. Follow-up conversation
 	// turns may explain the sealed result; the result tool refuses to overwrite it.
 	finishStatus, finishReason := "failed", locale.Text(locale.FromContext(ctx), "Retest could not start")
+	defer func() {
+		if id, ok := ctx.Value(externalChatRunKey{}).(string); ok {
+			status := finishStatus
+			if ctx.Err() != nil {
+				status = "stopped"
+			}
+			_ = s.m.pg.FinishChatRun(context.Background(), id, status)
+		}
+	}()
 	if c.AgentKey == db.FindingRetestAgentKey {
 		// Read without the run cancellation so an immediate stop still seals pending.
 		r, err := s.m.pg.FindingRetestForConversation(context.Background(), c.ID)

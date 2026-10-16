@@ -3,6 +3,8 @@ package db
 import (
 	"errors"
 	"github.com/Autumn-27/artex/chatstate"
+	"sync"
+	"sync/atomic"
 	"testing"
 )
 
@@ -46,5 +48,146 @@ func TestChatAdmission(t *testing.T) {
 	}
 	if state.Inputs[0].Prompt.Attachments[0].Path != "uploads/report.pdf" {
 		t.Fatal("manifest lost")
+	}
+}
+
+func controlFixture(t *testing.T) (*DB, chatstate.SessionRef) {
+	t.Helper()
+	d, e := Open(testDSN(t))
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { d.Close() })
+	c, e := d.CreateConversation("mainagent", "control lifecycle", nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { d.DeleteConversation(c.ID) })
+	return d, chatstate.SessionRef{ConversationID: c.ID}
+}
+func queueInput(t *testing.T, d *DB, ref chatstate.SessionRef, id string) chatstate.Admission {
+	t.Helper()
+	a, e := d.AdmitChatInput(t.Context(), ref, id, "queue", "", chatstate.Prompt{Text: id})
+	if e != nil {
+		t.Fatal(e)
+	}
+	return a
+}
+func TestChatQueueClaimOnce(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "one")
+	var wg sync.WaitGroup
+	var successful atomic.Int32
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+			if e != nil {
+				t.Error(e)
+			}
+			if r != nil {
+				successful.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	if successful.Load() != 1 {
+		t.Fatalf("claims %d", successful.Load())
+	}
+}
+func TestChatRestartUnknownBarrier(t *testing.T) {
+	d, ref := controlFixture(t)
+	first := queueInput(t, d, ref, "one")
+	queueInput(t, d, ref, "two")
+	if r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey()); e != nil || r == nil {
+		t.Fatal(r, e)
+	}
+	if e := d.RecoverChatRuns(t.Context()); e != nil {
+		t.Fatal(e)
+	}
+	state, e := d.ChatControlState(t.Context(), ref)
+	if e != nil || !state.Paused || state.Inputs[0].Status != "unknown" {
+		t.Fatalf("recovery %+v %v", state, e)
+	}
+	if e = d.ResumeChatGate(t.Context(), ref, state.Revision); !errors.Is(e, chatstate.ErrUnknownRun) {
+		t.Fatal(e)
+	}
+	if e = d.DiscardUnknownChatRun(t.Context(), ref, first.ID, state.Revision); e != nil {
+		t.Fatal(e)
+	}
+	state, _ = d.ChatControlState(t.Context(), ref)
+	if !state.Paused {
+		t.Fatal("discard resumed queue")
+	}
+	if e = d.ResumeChatGate(t.Context(), ref, state.Revision); e != nil {
+		t.Fatal(e)
+	}
+	r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if e != nil || r == nil || r.Prompt.Text != "two" {
+		t.Fatal(r, e)
+	}
+	if second, e := d.ClaimNextChatInput(t.Context(), ref.GateKey()); e != nil || second != nil {
+		t.Fatal(second, e)
+	}
+}
+func TestChatQueueFailurePauses(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "one")
+	queueInput(t, d, ref, "two")
+	r, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = d.FinishChatRun(t.Context(), r.ID, "failed"); e != nil {
+		t.Fatal(e)
+	}
+	state, _ := d.ChatControlState(t.Context(), ref)
+	if !state.Paused || state.Active != nil {
+		t.Fatal(state)
+	}
+	next, e := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if e != nil || next != nil {
+		t.Fatal(next, e)
+	}
+}
+func TestChatStopPausesAllSegments(t *testing.T) {
+	d, _ := controlFixture(t)
+	task, e := d.CreateTaskWithOptions("segment gate", "idle", TaskCreateOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer d.Exec(`DELETE FROM tasks WHERE id=$1`, task.ID)
+	_, e = d.Exec(`INSERT INTO main_sessions(exploration_id,seq) VALUES($1,1)`, task.ExplorationID)
+	if e != nil {
+		t.Fatal(e)
+	}
+	a := chatstate.SessionRef{TaskID: task.ID, ExplorationID: task.ExplorationID}
+	b := a
+	b.MainSeg = 1
+	queueInput(t, d, a, "one")
+	queueInput(t, d, b, "two")
+	r, e := d.ClaimNextChatInput(t.Context(), a.GateKey())
+	if e != nil || r == nil {
+		t.Fatal(r, e)
+	}
+	state, _ := d.ChatControlState(t.Context(), b)
+	if e = d.PauseChatGate(t.Context(), b, state.Revision); e != nil {
+		t.Fatal(e)
+	}
+	if e = d.FinishChatRun(t.Context(), r.ID, "stopped"); e != nil {
+		t.Fatal(e)
+	}
+	other, e := d.ClaimNextChatInput(t.Context(), b.GateKey())
+	if e != nil || other != nil {
+		t.Fatal("another segment started after stop", other, e)
+	}
+}
+
+func TestChatSendCannotImplicitlyQueue(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "queued")
+	if _, err := d.AdmitChatInput(t.Context(), ref, "send", "send", "", chatstate.Prompt{Text: "must choose queue"}); !errors.Is(err, chatstate.ErrBusy) {
+		t.Fatalf("send overtook admission: %v", err)
 	}
 }

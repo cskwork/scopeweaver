@@ -135,6 +135,15 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 		if e = tx.QueryRowContext(ctx, `SELECT paused,active_run_id FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&paused, &active); e != nil {
 			return e
 		}
+		if mode == "send" {
+			var pending bool
+			if e = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_control_inputs WHERE gate_key=$1 AND kind='turn' AND status='queued')`, ref.GateKey()).Scan(&pending); e != nil {
+				return e
+			}
+			if pending {
+				return chatstate.ErrBusy
+			}
+		}
 		kind := "turn"
 		if mode == "steer" {
 			kind = "steer"
@@ -286,4 +295,189 @@ func scanChatRun(row interface{ Scan(...any) error }) (r chatstate.Run, err erro
 }
 func chatRun(ctx context.Context, tx *sql.Tx, id string) (chatstate.Run, error) {
 	return scanChatRun(tx.QueryRowContext(ctx, `SELECT `+runCols+` FROM chat_control_runs r JOIN chat_control_sessions s ON s.session_key=r.session_key WHERE r.id=$1`, id))
+}
+
+func (d *DB) ChatGateSession(ctx context.Context, gate string) (ref chatstate.SessionRef, err error) {
+	err = d.QueryRowContext(ctx, `SELECT COALESCE(conversation_id,0),COALESCE(task_id,0),COALESCE(exploration_id,0),main_seg FROM chat_control_sessions WHERE gate_key=$1 ORDER BY session_key LIMIT 1`, gate).Scan(&ref.ConversationID, &ref.TaskID, &ref.ExplorationID, &ref.MainSeg)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = chatstate.ErrGone
+	}
+	return
+}
+func (d *DB) ChatRun(ctx context.Context, id string) (chatstate.Run, error) {
+	return scanChatRun(d.QueryRowContext(ctx, `SELECT `+runCols+` FROM chat_control_runs r JOIN chat_control_sessions s ON s.session_key=r.session_key WHERE r.id=$1`, id))
+}
+func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (out *chatstate.Run, err error) {
+	ref, err := d.ChatGateSession(ctx, gate)
+	if err != nil {
+		return nil, err
+	}
+	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
+		var paused bool
+		var active sql.NullString
+		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active); e != nil {
+			return e
+		}
+		if paused || active.Valid {
+			return nil
+		}
+		a, e := scanChatAdmission(tx.QueryRowContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status='queued' AND i.kind='turn' ORDER BY i.ordinal,i.id LIMIT 1 FOR UPDATE OF i`, gate))
+		if errors.Is(e, sql.ErrNoRows) {
+			return nil
+		}
+		if e != nil {
+			return e
+		}
+		r := chatstate.Run{ID: chatID(), InputID: a.ID, TurnID: chatID(), Session: a.Session, Prompt: a.Prompt, Status: "running"}
+		if e = tx.QueryRowContext(ctx, `SELECT history_revision,transcript_id FROM chat_control_sessions WHERE session_key=$1`, a.Session.Key()).Scan(&r.HistoryRevision, &r.TranscriptID); e != nil {
+			return e
+		}
+		payload, _ := json.Marshal(a.Prompt)
+		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status) VALUES($1,$2,$3,$4,$5,$6,$7,'running')`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload); e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='claimed',revision=revision+1 WHERE id=$1`, a.ID); e != nil {
+			return e
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_gates SET active_run_id=$2,revision=revision+1 WHERE gate_key=$1`, gate, r.ID); e != nil {
+			return e
+		}
+		out = &r
+		return nil
+	})
+	return
+}
+func (d *DB) FinishChatRun(ctx context.Context, runID, status string) error {
+	if status != "completed" && status != "failed" && status != "stopped" && status != "unknown" {
+		return fmt.Errorf("invalid run status")
+	}
+	r, e := d.ChatRun(ctx, runID)
+	if e != nil {
+		return e
+	}
+	return d.chatTx(ctx, r.Session, func(tx *sql.Tx) error {
+		var current string
+		if e := tx.QueryRowContext(ctx, `SELECT status FROM chat_control_runs WHERE id=$1 FOR UPDATE`, runID).Scan(&current); e != nil {
+			return e
+		}
+		if current != "running" {
+			if current == status {
+				return nil
+			}
+			return chatstate.ErrConflict
+		}
+		inputStatus := status
+		if status == "stopped" {
+			inputStatus = "cancelled"
+		}
+		if _, e := tx.ExecContext(ctx, `UPDATE chat_control_runs SET status=$2,completed_at=now() WHERE id=$1`, runID, status); e != nil {
+			return e
+		}
+		if _, e := tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status=$2,revision=revision+1 WHERE id=$1`, r.InputID, inputStatus); e != nil {
+			return e
+		}
+		if _, e := tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='undelivered',revision=revision+1 WHERE target_run_id=$1 AND status IN ('queued','claimed')`, runID); e != nil {
+			return e
+		}
+		_, e := tx.ExecContext(ctx, `UPDATE chat_control_gates SET active_run_id=NULL,paused=paused OR $3,revision=revision+1 WHERE gate_key=$1 AND active_run_id=$2`, r.Session.GateKey(), runID, status != "completed")
+		return e
+	})
+}
+func (d *DB) PauseChatGate(ctx context.Context, ref chatstate.SessionRef, expected int64) error {
+	return d.setChatPause(ctx, ref, expected, true)
+}
+func (d *DB) ResumeChatGate(ctx context.Context, ref chatstate.SessionRef, expected int64) error {
+	return d.setChatPause(ctx, ref, expected, false)
+}
+func (d *DB) setChatPause(ctx context.Context, ref chatstate.SessionRef, expected int64, paused bool) error {
+	return d.chatTx(ctx, ref, func(tx *sql.Tx) error {
+		if expected >= 0 {
+			if e := chatExpected(ctx, tx, ref.GateKey(), expected); e != nil {
+				return e
+			}
+		}
+		if !paused {
+			var unknown bool
+			if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM chat_control_inputs WHERE gate_key=$1 AND status='unknown')`, ref.GateKey()).Scan(&unknown); e != nil {
+				return e
+			}
+			if unknown {
+				return chatstate.ErrUnknownRun
+			}
+		}
+		_, e := tx.ExecContext(ctx, `UPDATE chat_control_gates SET paused=$2,revision=revision+1 WHERE gate_key=$1`, ref.GateKey(), paused)
+		return e
+	})
+}
+func (d *DB) CancelChatInput(ctx context.Context, ref chatstate.SessionRef, id string, expected int64) error {
+	return d.mutateChatInputStatus(ctx, ref, id, expected, "queued", "cancelled")
+}
+func (d *DB) DiscardUnknownChatRun(ctx context.Context, ref chatstate.SessionRef, id string, expected int64) error {
+	return d.mutateChatInputStatus(ctx, ref, id, expected, "unknown", "cancelled")
+}
+func (d *DB) mutateChatInputStatus(ctx context.Context, ref chatstate.SessionRef, id string, expected int64, from, to string) error {
+	return d.chatTx(ctx, ref, func(tx *sql.Tx) error {
+		a, e := chatInput(ctx, tx, ref, id)
+		if e != nil {
+			return e
+		}
+		// Input operations use their own row revision; Discard follows the gate revision
+		// in the HTTP contract because it acknowledges a gate-wide recovery barrier.
+		if from == "unknown" {
+			if e = chatExpected(ctx, tx, ref.GateKey(), expected); e != nil {
+				return e
+			}
+		} else if a.Revision != expected {
+			return chatstate.ErrConflict
+		}
+		if a.Status != from {
+			return chatstate.ErrConflict
+		}
+		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status=$2,revision=revision+1 WHERE id=$1`, id, to); e != nil {
+			return e
+		}
+		return bumpChatGate(ctx, tx, ref.GateKey())
+	})
+}
+func (d *DB) RecoverChatRuns(ctx context.Context) error {
+	rows, e := d.QueryContext(ctx, `SELECT id FROM chat_control_runs WHERE status='running'`)
+	if e != nil {
+		return e
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if e = rows.Scan(&id); e != nil {
+			rows.Close()
+			return e
+		}
+		ids = append(ids, id)
+	}
+	e = rows.Err()
+	rows.Close()
+	if e != nil {
+		return e
+	}
+	for _, id := range ids {
+		if e = d.FinishChatRun(ctx, id, "unknown"); e != nil && !errors.Is(e, chatstate.ErrGone) && !errors.Is(e, chatstate.ErrConflict) {
+			return e
+		}
+	}
+	return nil
+}
+func (d *DB) PendingChatGates(ctx context.Context) ([]string, error) {
+	rows, e := d.QueryContext(ctx, `SELECT gate_key FROM chat_control_gates WHERE NOT paused AND active_run_id IS NULL AND EXISTS(SELECT 1 FROM chat_control_inputs i WHERE i.gate_key=chat_control_gates.gate_key AND status='queued' AND kind='turn')`)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	var keys []string
+	for rows.Next() {
+		var key string
+		if e = rows.Scan(&key); e != nil {
+			return nil, e
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
 }
