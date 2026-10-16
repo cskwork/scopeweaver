@@ -89,6 +89,7 @@ The **LLM → New** form includes GLM-5.3 configuration templates for Z.ai's Gen
 separately labeled Coding Plan reference. Add your own API key; template selection does not save,
 activate, or contact a provider. Coding Plan use is restricted to officially supported tools, and
 ScopeWeaver is not listed. See [provider setup and support limits](docs/llm-providers.md).
+To reduce cloud token use, see [Controlling token use](docs/llm-providers.md#controlling-token-use).
 
 Optional **native Ollama** profiles run without an API key. Three templates cover Ollama on the same
 machine, on the host from Docker, and the opt-in `docker compose --profile local-llm` service. Selecting one reads installed models and prefills one, preferring declared tool support;
