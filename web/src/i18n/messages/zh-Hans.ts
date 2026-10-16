@@ -3103,7 +3103,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   "kimi": "月之暗面 Kimi · kimi-k3（经济型）",
   "openrouter": "OpenRouter · DeepSeek Flash（经济型）",
   "deepseekHelp": "可选的经济型默认值：推理强度 low，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。是否思考沿用 DeepSeek 默认。节省效果未经测量；结果被截断或过浅时请提高强度或上限。",
-  "claudeHelp": "可选的经济型默认值：关闭思考，强度 low，输出上限 16,384 token，上下文窗口 0（默认 200K）。为节省输出令牌而关闭思考；较难的任务请选择“自适应”（Sonnet 和 Opus 5.5 必须使用）。节省效果未经测量。",
+  "claudeHelp": "可选的经济型默认值：关闭思考，强度 low，输出上限 16,384 token，上下文窗口 0（默认 200K）。为节省输出令牌而关闭思考；较难的任务请选择“自适应”或“不发送”（Sonnet 和 Opus 5.5 需选其一）。节省效果未经测量。",
   "openaiHelp": "Responses API 的可选经济型默认值：推理强度 low，输出上限 16,384 token（以 max_output_tokens 发送），上下文窗口 0（默认 200K）。节省效果未经测量；结果过浅时请提高强度。",
   "qwenHelp": "国际兼容端点的可选经济型默认值：推理强度 low，输出上限 16,384 token（以 max_completion_tokens 发送），上下文窗口 0（默认 200K）。如所在地域端点不同请修改。节省效果未经测量。",
   "kimiHelp": "可选的经济型默认值：推理强度 low，输出上限 16,384 token（以 max_completion_tokens 发送），上下文窗口 0（默认 200K）。节省效果未经测量；结果过浅时请提高强度。",
