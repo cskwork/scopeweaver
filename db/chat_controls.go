@@ -104,13 +104,22 @@ func bumpChatGate(ctx context.Context, tx *sql.Tx, gate string) error {
 }
 
 func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
-	return d.admitChatInput(ctx, ref, clientID, mode, targetRunID, prompt, "user")
+	return d.admitChatInput(ctx, ref, clientID, mode, targetRunID, prompt, "user", false)
+}
+
+// Only the legacy task endpoint accepts blank prompts; all durable gate and
+// ownership checks still apply, and the original prompt is stored unchanged.
+func (d *DB) AdmitLegacyTaskChatInput(ctx context.Context, ref chatstate.SessionRef, clientID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
+	if ref.TaskID <= 0 || ref.ConversationID != 0 {
+		return chatstate.Admission{}, chatstate.ErrGone
+	}
+	return d.admitChatInput(ctx, ref, clientID, "send", "", prompt, "user", true)
 }
 func (d *DB) AdmitExternalChatInput(ctx context.Context, ref chatstate.SessionRef, clientID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
-	return d.admitChatInput(ctx, ref, clientID, "queue", "", prompt, "external")
+	return d.admitChatInput(ctx, ref, clientID, "queue", "", prompt, "external", false)
 }
-func (d *DB) admitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt, sourceKind string) (out chatstate.Admission, err error) {
-	if strings.TrimSpace(clientID) == "" || len(clientID) > 200 || strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
+func (d *DB) admitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt, sourceKind string, allowBlankTask bool) (out chatstate.Admission, err error) {
+	if strings.TrimSpace(clientID) == "" || len(clientID) > 200 || (!allowBlankTask && strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0) {
 		return out, locale.Errorf("client request ID and prompt are required")
 	}
 	if mode != "send" && mode != "queue" && mode != "steer" {
