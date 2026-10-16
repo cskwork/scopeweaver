@@ -58,6 +58,9 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 	} else if result != nil {
 		return s.chatHistoryResult(ctx, *result), nil
 	}
+	if err = s.ensureLegacyChatHistory(ctx, ref); err != nil {
+		return out, err
+	}
 	state, err := s.m.pg.ChatControlState(ctx, ref)
 	if err != nil {
 		return out, err
@@ -151,6 +154,10 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 			}
 		}
 	}()
+	origins, e := chatstate.ChatRecordOrigins(prefix)
+	if e != nil {
+		return out, e
+	}
 	copied := map[string]chatstate.Prompt{}
 	if target.ConversationID > 0 && target != ref {
 		included := map[string]bool{}
@@ -167,7 +174,9 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 			}
 			copied[run.ID] = prompt
 			for index, record := range prefix {
-				if record.UUID == run.StartRecordUUID && record.Message != nil {
+				// Compaction retains new copies of user records in its working set.
+				// Rebase the exact generated manifest in both originals and copies.
+				if origins[record.UUID] == run.StartRecordUUID && record.Message != nil && record.Message.Role == llm.RoleUser {
 					message := *record.Message
 					message.Content = append([]llm.ContentBlock(nil), message.Content...)
 					for blockIndex, block := range message.Content {

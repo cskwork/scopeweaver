@@ -435,3 +435,45 @@ func LoadChatTranscriptThrough(store *transcript.Store, sessionID, endUUID strin
 		}
 	}
 }
+
+// ChatRecordOrigins identifies a retained message's original birth record. In
+// particular, equal user-authored text is not evidence that it is a snapshot
+// copy. Canonical validation proves the compactor's retained suffix first.
+func ChatRecordOrigins(records []transcript.Record) (map[string]string, error) {
+	if _, err := CanonicalChatRecords(records); err != nil {
+		return nil, err
+	}
+	origins := make(map[string]string, len(records))
+	var working []string
+	for i := 0; i < len(records); i++ {
+		r := records[i]
+		if r.Message == nil {
+			continue
+		}
+		if !llm.IsBoundaryMarker(*r.Message) {
+			origins[r.UUID] = r.UUID
+			working = append(working, r.UUID)
+			continue
+		}
+		meta, _ := llm.ParseBoundaryMeta(*r.Message)
+		var host struct {
+			Count int `json:"host_working_set_count"`
+		}
+		_ = json.Unmarshal(r.Message.Content[0].Input, &host)
+		count := host.Count
+		if count == 0 {
+			count = 2 + len(meta.ActiveSkills) + len(working) - meta.MessagesSummarized
+		}
+		tail := count - 2 - len(meta.ActiveSkills)
+		next := make([]string, count-1)
+		for j := 0; j < tail; j++ {
+			origin := working[len(working)-tail+j]
+			index := count - 1 - tail + j
+			next[index] = origin
+			origins[records[i+1+index].UUID] = origin
+		}
+		working = next
+		i += count - 1
+	}
+	return origins, nil
+}

@@ -111,12 +111,24 @@ export function useChatControls(ref: ChatSessionRef | null) {
   }
   const targetFor = (id: string) => state?.inputs.find((item) => item.id === id)?.session ?? ref;
   return {
-    context:()=>http<ChatContextView>(chatControlsURL(ref!,"context")),
-    compact:async(options:ChatCompactOptions)=>{
-      if(!ref)throw new Error("Chat session unavailable");
-      const fingerprint=JSON.stringify([key,"compact",options]);const clientID=requests.get(fingerprint)??newChatID();requests.set(fingerprint,clientID);
-      try{const result=await mutate<ChatContextView>("compact","POST",{...options,client_request_id:clientID,expected_revision:state?.revision});requests.delete(fingerprint);return result}
-      catch(error){if(error instanceof HTTPError&&error.status>=400&&error.status<500)requests.delete(fingerprint);throw error}
+    context: () => http<ChatContextView>(chatControlsURL(ref!, "context")),
+    compact: async (options: ChatCompactOptions) => {
+      if (!ref) throw new Error("Chat session unavailable");
+      const fingerprint = JSON.stringify([key, "compact", options]);
+      const clientID = requests.get(fingerprint) ?? newChatID();
+      requests.set(fingerprint, clientID);
+      try {
+        const result = await mutate<ChatContextView>("compact", "POST", {
+          ...options,
+          client_request_id: clientID,
+          expected_revision: state?.revision,
+        });
+        requests.delete(fingerprint);
+        return result;
+      } catch (error) {
+        if (error instanceof HTTPError && error.status >= 400 && error.status < 500) requests.delete(fingerprint);
+        throw error;
+      }
     },
     prompt: (turnID: string) => http<ChatPrompt>(chatControlsURL(ref!, `turns/${encodeURIComponent(turnID)}/prompt`)),
     retry: (clientID: string) =>
@@ -152,6 +164,13 @@ export function useChatControls(ref: ChatSessionRef | null) {
       mutate<void>("queue/order", "POST", { expected_revision: expected, input_ids: ids }),
     pause: () => mutate<ChatControlState>("pause", "POST", { expected_revision: state?.revision }),
     resume: () => mutate<ChatControlState>("resume", "POST", { expected_revision: state?.revision }),
+    queueSteerFollowup: (id: string, expected: string) =>
+      mutate<ChatAdmission>(
+        `inputs/${encodeURIComponent(id)}/followup`,
+        "POST",
+        { expected_revision: expected },
+        targetFor(id),
+      ),
     discardUnknown: (id: string, expected: string) =>
       mutate<ChatControlState>(
         `inputs/${encodeURIComponent(id)}/discard`,

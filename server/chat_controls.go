@@ -100,6 +100,10 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if err := s.ensureLegacyChatHistory(r.Context(), ref); err != nil {
+		chatControlError(w, err)
+		return
+	}
 	rest := strings.Trim(r.PathValue("rest"), "/")
 	parts := strings.Split(rest, "/")
 	if r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "turns" && parts[2] == "prompt" {
@@ -174,6 +178,22 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			writeJSON(w, 200, map[string]bool{"ok": true})
+			return
+		}
+		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "followup" {
+			var req struct {
+				Expected int64 `json:"expected_revision,string"`
+			}
+			if !decodeConversationRequest(w, r, &req) {
+				return
+			}
+			admission, err := s.m.pg.QueueUndeliveredSteer(r.Context(), ref, id, req.Expected)
+			if err != nil {
+				chatControlError(w, err)
+				return
+			}
+			s.dispatchChatGate(ref.GateKey())
+			writeJSON(w, 200, admission)
 			return
 		}
 		if r.Method == http.MethodPost && len(parts) == 3 && parts[2] == "discard" {

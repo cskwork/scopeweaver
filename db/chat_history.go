@@ -361,6 +361,7 @@ func cloneChatPrefixTx(ctx context.Context, tx *sql.Tx, source, target chatstate
 	if err = tx.QueryRowContext(ctx, `SELECT history_revision FROM chat_control_sessions WHERE session_key=$1`, target.Key()).Scan(&history); err != nil {
 		return err
 	}
+	var displayMap []chatDisplayImport
 	for index, r := range runs {
 		prompt := r.Prompt
 		if copied, ok := revision.ImportedPrompts[r.ID]; ok {
@@ -371,33 +372,19 @@ func cloneChatPrefixTx(ctx context.Context, tx *sql.Tx, source, target chatstate
 		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_control_inputs(id,session_key,gate_key,client_id,fingerprint,kind,status,prompt,revision,ordinal,turn_id) VALUES($1,$2,$3,$4,$5,'turn','completed',$6,1,$7,$8)`, inputID, target.Key(), target.GateKey(), "imported-"+r.ID, chatFingerprint(prompt), payload, index+1, turnID); err != nil {
 			return err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,start_record_uuid,end_record_uuid,prompt,status,active,imported,source_run_id,completed_at,turn_ordinal) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,true,$11,now(),$12)`, runID, inputID, target.Key(), turnID, history, revision.TranscriptID, r.StartRecordUUID, r.EndRecordUUID, payload, r.Status, r.ID, index+1); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,start_record_uuid,end_record_uuid,prompt,status,active,imported,source_run_id,completed_at,turn_ordinal,source_kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,true,true,$11,now(),$12,$13)`, runID, inputID, target.Key(), turnID, history, revision.TranscriptID, r.StartRecordUUID, r.EndRecordUUID, payload, r.Status, r.ID, index+1, r.SourceKind); err != nil {
 			return err
 		}
-		if target.ConversationID > 0 {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO conversation_activities(conversation_id,worker,kind,tool,tool_use_id,is_error,summary,detail,turn_id,run_id,active_attempt,history_mutable,created_at) SELECT $1,worker,kind,tool,tool_use_id,is_error,summary,detail,$2,$3,true,history_mutable,created_at FROM conversation_activities WHERE conversation_id=$4 AND run_id=$5 ORDER BY id`, target.ConversationID, turnID, runID, source.ConversationID, r.ID); err != nil {
-				return err
-			}
-		} else {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO activity(exploration_id,worker,kind,tool,tool_use_id,is_error,summary,detail,metadata,main_seg,turn_id,run_id,active_attempt,history_mutable,created_at) SELECT exploration_id,worker,kind,tool,tool_use_id,is_error,summary,detail,metadata,$1,$2,$3,true,history_mutable,created_at FROM activity WHERE exploration_id=$4 AND COALESCE(main_seg,0)=$5 AND run_id=$6 ORDER BY id`, target.MainSeg, turnID, runID, source.ExplorationID, source.MainSeg, r.ID); err != nil {
-				return err
-			}
-		}
+
 		// Replace only the user attachment DTO; generated tool/artifact paths retain provenance.
 		detail := prompt.Text
 		if len(prompt.Attachments) > 0 {
 			data, _ := json.Marshal(map[string]any{"text": prompt.Text, "attachments": prompt.Attachments})
 			detail = string(data)
 		}
-		table := "activity"
-		if target.ConversationID > 0 {
-			table = "conversation_activities"
-		}
-		if _, err = tx.ExecContext(ctx, `UPDATE `+table+` SET detail=$2 WHERE run_id=$1 AND kind='user'`, runID, detail); err != nil {
-			return err
-		}
+		displayMap = append(displayMap, chatDisplayImport{Source: r.ID, Run: runID, Turn: turnID, Detail: detail})
 	}
-	return nil
+	return cloneChatDisplayPrefixTx(ctx, tx, source, target, displayMap)
 }
 func (d *DB) AbandonChatHistoryPreparation(ctx context.Context, source chatstate.SessionRef, clientID string) error {
 	return d.chatTx(ctx, source, func(tx *sql.Tx) error {

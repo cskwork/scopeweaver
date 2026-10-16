@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"log"
@@ -170,8 +169,10 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr 
 		return err
 	}
 	message = composeAgentMessageForLanguage(message, run.Prompt.Attachments, s.chatPromptDir(run.Session), locale.FromContext(ctx))
-	ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: run.Prompt.Text})
-	ctx = withNativeRole(ctx, "mainagent")
+	if run.SourceKind == "user" {
+		ctx = intercept.WithReviewContext(ctx, "", intercept.ReviewBackground{Source: intercept.BackgroundUserMessage, Text: run.Prompt.Text})
+		ctx = withNativeRole(ctx, "mainagent")
+	}
 	if run.Session.ConversationID > 0 {
 		c, err := s.m.pg.GetConversation(run.Session.ConversationID)
 		if err != nil {
@@ -179,6 +180,10 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr 
 		}
 		if c == nil {
 			return chatstate.ErrGone
+		}
+		ctx = intercept.WithConvID(ctx, c.ID)
+		if run.SourceKind == "external" {
+			return s.executeExternalConversation(ctx, c, message)
 		}
 		ca := s.resolveChatAgent(c)
 		if ca == nil {
@@ -237,23 +242,6 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr 
 	defer s.engine.EndLLMCall(t.ID)
 	_, err = ma.Chat(ctx, run.Session.TaskID, seg, s.m.Assets(), t.Store, t.Goal, message, emit, t.Notify, func() { s.reviveTask(t) }, t.NotifyGoal, t.NotifyHint)
 	return err
-}
-
-type externalChatRunKey struct{}
-
-func (s *Server) reserveExternalChat(ctx context.Context, c *db.Conversation, message string) (string, error) {
-	ref := chatstate.SessionRef{ConversationID: c.ID}
-	if _, err := s.m.pg.AdmitExternalChatInput(ctx, ref, "external-"+rand.Text(), chatstate.Prompt{Text: message}); err != nil {
-		return "", err
-	}
-	run, err := s.m.pg.ClaimNextChatInput(ctx, ref.GateKey())
-	if err != nil {
-		return "", err
-	}
-	if run == nil {
-		return "", chatstate.ErrBusy
-	}
-	return run.ID, nil
 }
 
 func chatRunActivity(run chatstate.Run, a db.Activity) db.Activity {

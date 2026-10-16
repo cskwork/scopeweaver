@@ -110,6 +110,7 @@ export function ChatQueue({ controls }: { controls: Controls }) {
       </div>
     );
   const queued = state.inputs.filter((a) => a.kind === "turn" && a.status === "queued");
+  const steering = state.inputs.filter((a) => a.kind === "steer" && (a.status === "queued" || a.status === "claimed"));
   const warnings = state.inputs.filter((a) => a.status === "unknown" || a.status === "undelivered");
   function move(index: number, delta: number) {
     const ids = queued.map((a) => a.id);
@@ -200,10 +201,32 @@ export function ChatQueue({ controls }: { controls: Controls }) {
           </li>
         ))}
       </ol>
+      {steering.map((item) => (
+        <div role="status" key={item.id} data-steer-input={item.id} className="border-t py-2">
+          <p>{t(item.status === "claimed" ? "interface.chatSteerDelivering" : "interface.chatSteerPending")}</p>
+          <p className="break-all text-muted-foreground">
+            {t("interface.chatSteerTarget")}: {item.target_run_id}
+          </p>
+          <details>
+            <summary className="cursor-pointer truncate">{item.prompt.text}</summary>
+            <p className="whitespace-pre-wrap break-words">{item.prompt.text}</p>
+          </details>
+        </div>
+      ))}
       {warnings.map((item) => (
         <div role="status" key={item.id} className="border-t py-2">
           <p>{t(item.status === "unknown" ? "interface.chatLostRun" : "interface.chatSteerUndelivered")}</p>
-          <p className="truncate">{item.prompt.text}</p>
+          <p className="whitespace-pre-wrap break-words">{item.prompt.text}</p>
+          {item.status === "undelivered" && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={pending}
+              onClick={() => void action(() => controls.queueSteerFollowup(item.id, item.revision))}
+            >
+              {t("interface.chatSteerFollowUp")}
+            </Button>
+          )}
           {item.status === "unknown" && (
             <Button
               size="sm"

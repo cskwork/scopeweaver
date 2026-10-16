@@ -107,7 +107,7 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 	return d.admitChatInput(ctx, ref, clientID, mode, targetRunID, prompt, "user")
 }
 func (d *DB) AdmitExternalChatInput(ctx context.Context, ref chatstate.SessionRef, clientID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
-	return d.admitChatInput(ctx, ref, clientID, "send", "", prompt, "external")
+	return d.admitChatInput(ctx, ref, clientID, "queue", "", prompt, "external")
 }
 func (d *DB) admitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt, sourceKind string) (out chatstate.Admission, err error) {
 	if strings.TrimSpace(clientID) == "" || len(clientID) > 200 || strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
