@@ -212,3 +212,15 @@ The v0.1.0 verification recorded **14 npm audit findings: 1 critical, 9 high and
 - Historical validation documents under `sidequestion/` describe upstream work, not new ScopeWeaver runs.
 
 Current remote checks are available in [GitHub Actions](https://github.com/cskwork/scopeweaver/actions/workflows/ci.yml).
+
+## Chat document paste — 2026-10-16
+
+Verified in an isolated worktree against a disposable PostgreSQL 17 database and a local backend, without external model calls:
+
+- Frontend Node suite: **52 passed**; production static export succeeded.
+- Clipboard browser checks: standalone and task composers, English/Korean/Simplified Chinese, 1440 px and 390 px. All 12 combinations passed.
+- Covered two rapid document pastes with one lazy conversation owner, independent accompanying text, native 3,000-character insertion and keyboard undo, exact Unicode long-text preview, restoration after later edits, upload failure/retry, completion after client-side navigation, mentions/IME, both send preferences, and zero unintended message submissions.
+- The browser check failed on the missing second chip when only the React paste wiring was temporarily disabled, then passed with the application wiring enabled.
+- Existing real-backend smoke suite, including the new clipboard checks and Ollama loopback fixtures: **E2E passed**, no uncaught page errors.
+
+Browser file cases dispatch event-supplied File objects. Native text and undo cases use the Chromium clipboard and keyboard paste.
