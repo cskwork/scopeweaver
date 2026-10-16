@@ -4,7 +4,7 @@
 
 An LLM multi-agent autonomous penetration-testing system (Go backend + Next.js frontend)
 
-English · [한국어](README.ko.md)
+English · [한국어](README.ko.md) · [日本語](README.ja.md)
 
 </div>
 
@@ -607,7 +607,8 @@ ScopeWeaver is derived from [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX
   distribution. The Go module (`github.com/Autumn-27/artex`), the build source path (`./cmd/artex`),
   the `ARTEX_*` config/env keys, and the `artex` database defaults are **kept** for compatibility.
 - **Documentation language**: English is the default; a Korean translation lives in
-  [README.ko.md](README.ko.md) and under [docs/ko](docs/ko/README.md).
+  [README.ko.md](README.ko.md) and under [docs/ko](docs/ko/README.md). A Japanese translation of
+  this README is available in [README.ja.md](README.ja.md); it does not add a Japanese UI locale.
 - **Script language**: setup/build/start/update/reset-password prompts default to English, with
   Korean selectable via `SCOPEWEAVER_LANGUAGE=ko` (`ARTEX_LANGUAGE=ko` also works). No network
   translation is used.

@@ -4,7 +4,7 @@
 
 LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 + Next.js 프런트엔드)
 
-[English](README.md) · 한국어
+[English](README.md) · 한국어 · [日本語](README.ja.md)
 
 </div>
 
@@ -598,7 +598,7 @@ ScopeWeaver는 [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)의 업스�
   모듈(`github.com/Autumn-27/artex`), 빌드 소스 경로(`./cmd/artex`), `ARTEX_*` 설정/환경 키,
   `artex` 데이터베이스 기본값은 호환을 위해 **유지**합니다.
 - **문서 언어**: 영어가 기본이며, 한국어 번역은 [README.ko.md](README.ko.md)와 [docs/ko](docs/ko/README.md) 아래에
-  있습니다.
+  있습니다. 이 README의 일본어 번역은 [README.ja.md](README.ja.md)에 있습니다. 일본어 UI를 추가하지는 않습니다.
 - **스크립트 언어**: 설치/빌드/시작/업데이트/비밀번호 재설정 안내는 기본이 영어이고,
   `SCOPEWEAVER_LANGUAGE=ko`(`ARTEX_LANGUAGE=ko`도 동작)로 한국어를 선택할 수 있습니다. 네트워크
   번역은 쓰지 않습니다.
