@@ -1,11 +1,26 @@
 name: checks
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
+    types: [opened, synchronize, reopened, edited]
 permissions:
   contents: read
 jobs:
+  branch-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Test contribution branch policy
+        run: bash e2e/branch-policy.sh
+      - name: Check pull request route
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/check-branch-policy.sh
   agent-adapter:
     runs-on: ubuntu-latest
     services:
@@ -79,6 +94,12 @@ jobs:
           ARTEX_TEST_DSN: postgres://scopeweaver_test:test_only_password@localhost:5432/scopeweaver_test_chat_browser?sslmode=disable
           SCOPEWEAVER_CHAT_E2E: "1"
         run: go test ./server -run '^TestChatControlsE2E$' -count=1 -timeout 12m -v
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: chat-browser-results
+          path: dist/chat-e2e
+          if-no-files-found: ignore
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -120,6 +141,8 @@ jobs:
         run: go test ./evidence -run '^Test(WriteBody|CommitBodyFile)' -count=1 -v
       - name: Test native Python and skill paths
         run: go test ./server -run '^Test(ExecPython|DetectPython.*|SkillRelPath|SkillFilePathsUseForwardSlashes)$' -count=1 -v
+      - name: Test native chat attachment copies
+        run: go test ./server -run '^TestCopyChatAttachments' -count=1 -v
   backend:
     runs-on: ubuntu-latest
     services:
