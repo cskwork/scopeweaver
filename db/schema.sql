@@ -1390,3 +1390,69 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- Durable chat admission. A task gate is shared by every MainAgent segment.
+CREATE TABLE IF NOT EXISTS chat_control_gates (
+ gate_key TEXT PRIMARY KEY,
+ conversation_id BIGINT UNIQUE REFERENCES conversations(id) ON DELETE CASCADE,
+ task_id BIGINT UNIQUE REFERENCES tasks(id) ON DELETE CASCADE,
+ paused BOOLEAN NOT NULL DEFAULT false,
+ active_run_id TEXT,
+ revision BIGINT NOT NULL DEFAULT 0,
+ CHECK ((conversation_id IS NOT NULL)::int + (task_id IS NOT NULL)::int = 1)
+);
+CREATE TABLE IF NOT EXISTS chat_control_sessions (
+ session_key TEXT PRIMARY KEY,
+ gate_key TEXT NOT NULL REFERENCES chat_control_gates(gate_key) ON DELETE CASCADE,
+ conversation_id BIGINT REFERENCES conversations(id) ON DELETE CASCADE,
+ task_id BIGINT REFERENCES tasks(id) ON DELETE CASCADE,
+ exploration_id BIGINT REFERENCES explorations(id) ON DELETE CASCADE,
+ main_seg INT NOT NULL DEFAULT 0,
+ history_revision BIGINT NOT NULL DEFAULT 0,
+ transcript_id TEXT NOT NULL DEFAULT '',
+ parent_session_key TEXT REFERENCES chat_control_sessions(session_key) ON DELETE SET NULL,
+ parent_turn_id TEXT,
+ preparing BOOLEAN NOT NULL DEFAULT false,
+ CHECK ((conversation_id IS NOT NULL AND task_id IS NULL AND exploration_id IS NULL AND main_seg=0) OR (conversation_id IS NULL AND task_id IS NOT NULL AND exploration_id IS NOT NULL AND main_seg>=0))
+);
+CREATE TABLE IF NOT EXISTS chat_control_inputs (
+ id TEXT PRIMARY KEY,
+ session_key TEXT NOT NULL REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ gate_key TEXT NOT NULL REFERENCES chat_control_gates(gate_key) ON DELETE CASCADE,
+ client_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL,
+ kind TEXT NOT NULL CHECK (kind IN ('turn','steer')),
+ target_run_id TEXT NOT NULL DEFAULT '',
+ status TEXT NOT NULL CHECK (status IN ('queued','claimed','delivered','completed','failed','cancelled','undelivered','unknown')),
+ prompt JSONB NOT NULL,
+ revision BIGINT NOT NULL DEFAULT 0,
+ ordinal BIGINT NOT NULL,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ UNIQUE(session_key,client_id)
+);
+CREATE INDEX IF NOT EXISTS idx_chat_input_pending ON chat_control_inputs(gate_key,ordinal) WHERE status='queued';
+CREATE TABLE IF NOT EXISTS chat_control_runs (
+ id TEXT PRIMARY KEY,
+ input_id TEXT NOT NULL UNIQUE REFERENCES chat_control_inputs(id) ON DELETE CASCADE,
+ session_key TEXT NOT NULL REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ turn_id TEXT NOT NULL,
+ supersedes_run_id TEXT REFERENCES chat_control_runs(id) ON DELETE SET NULL,
+ history_revision BIGINT NOT NULL,
+ transcript_id TEXT NOT NULL DEFAULT '',
+ start_record_uuid TEXT NOT NULL DEFAULT '',
+ end_record_uuid TEXT NOT NULL DEFAULT '',
+ prompt JSONB NOT NULL,
+ status TEXT NOT NULL CHECK (status IN ('running','completed','failed','stopped','unknown')),
+ model TEXT NOT NULL DEFAULT '',
+ usage JSONB NOT NULL DEFAULT '{}',
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ completed_at TIMESTAMPTZ
+);
+ALTER TABLE activity ADD COLUMN IF NOT EXISTS turn_id TEXT;
+ALTER TABLE activity ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE activity ADD COLUMN IF NOT EXISTS active_attempt BOOLEAN;
+ALTER TABLE activity ADD COLUMN IF NOT EXISTS history_mutable BOOLEAN;
+ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS turn_id TEXT;
+ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS run_id TEXT;
+ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS active_attempt BOOLEAN;
+ALTER TABLE conversation_activities ADD COLUMN IF NOT EXISTS history_mutable BOOLEAN;

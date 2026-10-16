@@ -85,17 +85,21 @@ type Node struct {
 
 // Activity is one worker execution step (= old task_activity).
 type Activity struct {
-	ID        int64           `json:"id"`
-	NodeID    *int64          `json:"node_id,omitempty"`
-	Worker    string          `json:"worker,omitempty"`
-	Kind      string          `json:"kind,omitempty"`
-	Tool      string          `json:"tool,omitempty"`
-	ToolUseID string          `json:"tool_use_id,omitempty"`
-	IsError   bool            `json:"is_error"`
-	Summary   string          `json:"summary,omitempty"`
-	Detail    string          `json:"-"` // full blob; lazy-loaded, omitted from list payloads
-	Metadata  json.RawMessage `json:"metadata,omitempty"`
-	CreatedAt time.Time       `json:"created_at"`
+	TurnID         string          `json:"turn_id,omitempty"`
+	RunID          string          `json:"run_id,omitempty"`
+	ActiveAttempt  *bool           `json:"active_attempt,omitempty"`
+	HistoryMutable *bool           `json:"history_mutable,omitempty"`
+	ID             int64           `json:"id"`
+	NodeID         *int64          `json:"node_id,omitempty"`
+	Worker         string          `json:"worker,omitempty"`
+	Kind           string          `json:"kind,omitempty"`
+	Tool           string          `json:"tool,omitempty"`
+	ToolUseID      string          `json:"tool_use_id,omitempty"`
+	IsError        bool            `json:"is_error"`
+	Summary        string          `json:"summary,omitempty"`
+	Detail         string          `json:"-"` // full blob; lazy-loaded, omitted from list payloads
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
 	// Token usage — set only on the terminal kind='result' record; nil elsewhere.
 	InputTokens      *int  `json:"input_tokens,omitempty"`
 	OutputTokens     *int  `json:"output_tokens,omitempty"`
