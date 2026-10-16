@@ -1,6 +1,6 @@
 # Chat Controls and Context Design
 
-Status: Draft for user review
+Status: Approved for implementation planning on 2026-10-16
 
 ## Purpose and agreed scope
 
