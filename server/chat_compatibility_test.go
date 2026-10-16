@@ -451,13 +451,21 @@ func TestChatCompatibilityBlankTaskHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	original, err := s.m.pg.ChatRun(t.Context(), state.LatestRunID)
+	if err != nil || original.Status != "completed" || original.Prompt.Text != "" || !original.Active {
+		t.Fatalf("original blank task run: %+v %v", original, err)
+	}
 	if _, err = s.changeChatHistory(t.Context(), ref, chatstate.HistoryChange{ClientID: "retry-blank", Kind: "retry", ExpectedRevision: state.Revision}); err != nil {
 		t.Fatal("valid persisted blank task prompt cannot be retried", err)
 	}
 	waitRetestIdle(t, s)
 	runs, err := s.m.pg.ChatHistoryRuns(t.Context(), ref)
-	if err != nil || len(runs) != 2 || runs[1].Status != "completed" || runs[1].Prompt.Text != "" {
+	if err != nil || len(runs) != 1 || runs[0].ID == original.ID || runs[0].SupersedesRunID != original.ID || runs[0].TurnID != original.TurnID || runs[0].Status != "completed" || runs[0].Prompt.Text != "" {
 		t.Fatalf("blank retry changed prompt or did not execute: %+v %v", runs, err)
+	}
+	preserved, err := s.m.pg.ChatRun(t.Context(), original.ID)
+	if err != nil || preserved.Active || preserved.Status != "completed" || preserved.Prompt.Text != original.Prompt.Text || preserved.StartRecordUUID != original.StartRecordUUID || preserved.EndRecordUUID != original.EndRecordUUID {
+		t.Fatalf("retry did not preserve the superseded blank attempt: %+v %v", preserved, err)
 	}
 	state, err = s.m.pg.ChatControlState(t.Context(), ref)
 	if err != nil {
