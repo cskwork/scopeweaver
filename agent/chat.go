@@ -174,15 +174,21 @@ func (c *ChatAgent) Chat(ctx context.Context, agentKey, sessionID, message strin
 	}
 	// Experimental noa compaction stores persistent archives under <workDir>/noa/<SessionID>.
 	secureWebSearch(&opts, ws.PolicyResolver, ws.DeepSeekMeter)
+	if err := bindChatRunOptions(ctx, &opts); err != nil {
+		return "", err
+	}
 	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: c.nativeOllamaFn != nil && c.nativeOllamaFn(), ContextWindow: c.window})
-	enableNoa(&opts, c.noaEnabledFn, c.workDir, "chat-"+sessionID, noaWarn("chat-"+sessionID))
+	noaSessionState := enableNoa(&opts, c.noaEnabledFn, c.workDir, chatNoaSession(ctx, "chat-"+sessionID), noaWarn("chat-"+sessionID))
+	ctx = attachChatContext(ctx, &opts, def, noaSessionState)
 	ctx = attachSideCapture(ctx, &opts)
 	s := agentcore.NewSession(opts)
 	defer s.Close()
 	// reload prior conversation so the agent has context across turns (each Chat is
 	// a fresh session). First turn: no file yet → Resume loads nothing and proceeds.
 	if c.tx != nil {
-		_ = s.Resume(sessionID)
+		if err := s.Resume(opts.SessionID); err != nil {
+			return "", err
+		}
 	}
 	// re-unlock skill-gated MCPs from prior Skill() calls in the reloaded history so
 	// revealed tools stay callable across the fresh session.
