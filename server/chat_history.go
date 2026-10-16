@@ -108,7 +108,7 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 		if err = s.validateChatPrompt(ref, *change.Replacement); err != nil {
 			return out, err
 		}
-	} else if err = s.validateChatPrompt(ref, selected.Prompt); err != nil {
+	} else if err = s.validateChatPrompt(ref, selected.Prompt, true); err != nil {
 		return out, err
 	}
 	active, err := s.m.pg.ActiveChatTranscript(ctx, ref)

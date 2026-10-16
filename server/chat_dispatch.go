@@ -71,29 +71,36 @@ func chatBusyKey(ref chatstate.SessionRef) string {
 
 // Claim and cancellation registration finish before the accepting HTTP request
 // returns. No DB transaction is held while tools or inference execute.
-func (s *Server) dispatchChatGate(gate string)             { s.dispatchChatInput(gate, "") }
-func (s *Server) dispatchChatHistoryInput(gate, id string) { s.dispatchChatInput(gate, id) }
-func (s *Server) dispatchChatInput(gate, selected string) {
-	if s.m.pg == nil || s.ctx.Err() != nil {
-		return
+func (s *Server) dispatchChatGate(gate string) { s.dispatchChatHistoryInput(gate, "") }
+func (s *Server) dispatchChatHistoryInput(gate, id string) {
+	if err := s.dispatchChatInput(gate, id); err != nil {
+		log.Printf("[chat %s] dispatch: %v", gate, err)
+	}
+}
+func (s *Server) dispatchChatInput(gate, selected string) error {
+	if s.m.pg == nil {
+		return chatstate.ErrGone
+	}
+	if err := s.ctx.Err(); err != nil {
+		return err
 	}
 	s.chatMu.Lock()
 	ref, err := s.m.pg.ChatGateSession(s.ctx, gate)
 	if err != nil {
 		s.chatMu.Unlock()
-		return
+		return err
 	}
 	key := chatBusyKey(ref)
 	if s.chatBusy[key] {
 		s.chatMu.Unlock()
-		return
+		return nil
 	}
 	taskID := ""
 	if ref.TaskID > 0 {
 		taskID = strconv.FormatInt(ref.TaskID, 10)
 		if !s.engine.beginTaskOperation(taskID) {
 			s.chatMu.Unlock()
-			return
+			return chatstate.ErrGone
 		}
 	}
 	var run *chatstate.Run
@@ -107,7 +114,7 @@ func (s *Server) dispatchChatInput(gate, selected string) {
 			s.engine.decInflight(taskID)
 		}
 		s.chatMu.Unlock()
-		return
+		return err
 	}
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	s.chatBusy[key] = true
@@ -150,6 +157,7 @@ func (s *Server) dispatchChatInput(gate, selected string) {
 			log.Printf("[chat %s] run: %v", run.ID, err)
 		}
 	}()
+	return nil
 }
 func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr error) {
 	ctx = locale.WithLang(ctx, locale.Lang(run.Language))
@@ -163,7 +171,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := s.validateChatPrompt(run.Session, run.Prompt); err != nil {
+	if err := s.validateChatPrompt(run.Session, run.Prompt, true); err != nil {
 		return err
 	}
 	if run.HistoryRevision > 0 {

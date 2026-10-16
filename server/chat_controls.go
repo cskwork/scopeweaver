@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -59,8 +60,9 @@ func (s *Server) chatPromptDir(ref chatstate.SessionRef) string {
 	}
 	return filepath.Join(s.m.dir, "tasks", strconv.FormatInt(ref.TaskID, 10))
 }
-func (s *Server) validateChatPrompt(ref chatstate.SessionRef, prompt chatstate.Prompt) error {
-	if strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
+func (s *Server) validateChatPrompt(ref chatstate.SessionRef, prompt chatstate.Prompt, allowBlankTask ...bool) error {
+	legacyTask := len(allowBlankTask) > 0 && allowBlankTask[0] && ref.TaskID > 0 && ref.ConversationID == 0
+	if !legacyTask && strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
 		return fmt.Errorf("message is required")
 	}
 	base := s.chatPromptDir(ref)
@@ -270,12 +272,12 @@ func (s *Server) admitChatHTTP(w http.ResponseWriter, r *http.Request, ref chats
 	writeJSON(w, 202, a)
 }
 
-func (s *Server) admitChatPrompt(w http.ResponseWriter, r *http.Request, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt) (chatstate.Admission, bool) {
+func (s *Server) admitChatPrompt(w http.ResponseWriter, r *http.Request, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt, legacyTask ...bool) (chatstate.Admission, bool) {
 	if ref.TaskID > 0 && s.engine.IsDeleting(strconv.FormatInt(ref.TaskID, 10)) {
 		chatControlError(w, chatstate.ErrGone)
 		return chatstate.Admission{}, false
 	}
-	if err := s.validateChatPrompt(ref, prompt); err != nil {
+	if err := s.validateChatPrompt(ref, prompt, legacyTask...); err != nil {
 		chatControlError(w, err)
 		return chatstate.Admission{}, false
 	}
@@ -294,7 +296,13 @@ func (s *Server) admitChatPrompt(w http.ResponseWriter, r *http.Request, ref cha
 			return chatstate.Admission{}, false
 		}
 	}
-	a, err := s.m.pg.AdmitChatInput(r.Context(), ref, clientID, mode, targetRunID, prompt)
+	var a chatstate.Admission
+	var err error
+	if len(legacyTask) > 0 && legacyTask[0] && ref.TaskID > 0 && ref.ConversationID == 0 {
+		a, err = s.m.pg.AdmitLegacyTaskChatInput(r.Context(), ref, clientID, prompt)
+	} else {
+		a, err = s.m.pg.AdmitChatInput(r.Context(), ref, clientID, mode, targetRunID, prompt)
+	}
 	if err != nil {
 		chatControlError(w, err)
 		return chatstate.Admission{}, false
@@ -310,11 +318,16 @@ func (s *Server) admitCompatibilityChat(w http.ResponseWriter, r *http.Request, 
 		task := s.m.ResolveTask(strconv.FormatInt(ref.TaskID, 10))
 		rule = !s.taskRuntimeAvailable(task, "mainagent")
 	}
-	a, ok := s.admitChatPrompt(w, r, ref, rand.Text(), "send", "", chatstate.Prompt{Text: message, Attachments: attachments})
+	a, ok := s.admitChatPrompt(w, r, ref, rand.Text(), "send", "", chatstate.Prompt{Text: message, Attachments: attachments}, ref.TaskID > 0)
 	if !ok {
 		return
 	}
-	s.dispatchChatGate(ref.GateKey())
+	if err := s.dispatchChatInput(ref.GateKey(), ""); err != nil {
+		err = s.cancelCompatibilityInput(a, err)
+		log.Printf("[chat %s] compatibility dispatch: %v", a.ID, err)
+		compatibilityChatError(w, err)
+		return
+	}
 	if ref.ConversationID > 0 {
 		writeJSON(w, 202, map[string]string{"status": "accepted"})
 		return
@@ -325,13 +338,8 @@ func (s *Server) admitCompatibilityChat(w http.ResponseWriter, r *http.Request, 
 	}
 	reply, err := s.waitCompatibilityReply(r.Context(), a)
 	if err != nil {
-		if errors.Is(err, chatstate.ErrBusy) || errors.Is(err, chatstate.ErrGone) || errors.Is(err, chatstate.ErrUnknownRun) {
-			chatControlError(w, err)
-		} else if errors.Is(err, agent.ErrChatPersistence) {
-			writeError(w, 500, chatstate.ErrGone)
-		} else {
-			writeError(w, 500, err)
-		}
+		log.Printf("[chat %s] compatibility completion: %v", a.ID, err)
+		compatibilityChatError(w, err)
 		return
 	}
 	writeJSON(w, 200, map[string]string{"reply": reply, "mode": "rule"})
@@ -339,23 +347,27 @@ func (s *Server) admitCompatibilityChat(w http.ResponseWriter, r *http.Request, 
 
 // Read the one durable run's reply; fallbackChat writes hints/intents and must
 // never be called again just to construct the legacy synchronous response.
-func (s *Server) waitCompatibilityReply(request context.Context, admission chatstate.Admission) (string, error) {
-	ctx, cancel := context.WithCancel(request)
+func (s *Server) waitCompatibilityReply(request context.Context, admission chatstate.Admission) (reply string, waitErr error) {
+	ctx, cancel := context.WithTimeout(request, 5*time.Second)
 	stop := context.AfterFunc(s.ctx, cancel)
 	defer stop()
 	defer cancel()
+	defer func() {
+		if errors.Is(waitErr, context.DeadlineExceeded) {
+			waitErr = s.cancelCompatibilityInput(admission, waitErr)
+		}
+	}()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
 		var status, reply string
-		var revision int64
 		var paused bool
-		err := s.m.pg.QueryRowContext(ctx, `SELECT i.status,i.revision,g.paused,COALESCE(a.summary,'')
+		err := s.m.pg.QueryRowContext(ctx, `SELECT i.status,g.paused,COALESCE(a.summary,'')
 FROM chat_control_inputs i
 JOIN chat_control_gates g ON g.gate_key=i.gate_key
 LEFT JOIN chat_control_runs r ON r.input_id=i.id
 LEFT JOIN activity a ON a.run_id=r.id AND a.worker='mainagent' AND a.kind='text'
-WHERE i.id=$1 ORDER BY a.id DESC NULLS LAST LIMIT 1`, admission.ID).Scan(&status, &revision, &paused, &reply)
+WHERE i.id=$1 ORDER BY a.id DESC NULLS LAST LIMIT 1`, admission.ID).Scan(&status, &paused, &reply)
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", chatstate.ErrGone
 		}
@@ -376,16 +388,7 @@ WHERE i.id=$1 ORDER BY a.id DESC NULLS LAST LIMIT 1`, admission.ID).Scan(&status
 			return "", agent.ErrChatPersistence
 		case "queued":
 			if paused {
-				err = s.m.pg.CancelChatInput(ctx, admission.Session, admission.ID, revision)
-				if err == nil {
-					return "", chatstate.ErrBusy
-				}
-				if !errors.Is(err, chatstate.ErrConflict) {
-					if errors.Is(err, sql.ErrNoRows) {
-						return "", chatstate.ErrGone
-					}
-					return "", err
-				}
+				return "", s.cancelCompatibilityInput(admission, chatstate.ErrBusy)
 			}
 		case "claimed":
 		default:
@@ -397,4 +400,24 @@ WHERE i.id=$1 ORDER BY a.id DESC NULLS LAST LIMIT 1`, admission.ID).Scan(&status
 		case <-ticker.C:
 		}
 	}
+}
+
+func compatibilityChatError(w http.ResponseWriter, err error) {
+	if errors.Is(err, chatstate.ErrBusy) || errors.Is(err, chatstate.ErrGone) || errors.Is(err, chatstate.ErrUnknownRun) {
+		chatControlError(w, err)
+		return
+	}
+	writeError(w, 500, chatstate.ErrGone)
+}
+
+// Cancel only our unchanged, unclaimed input. A claim/revision conflict retains
+// the durable work because execution may already have produced side effects.
+func (s *Server) cancelCompatibilityInput(admission chatstate.Admission, cause error) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(s.ctx), time.Second)
+	defer cancel()
+	err := s.m.pg.CancelChatInput(ctx, admission.Session, admission.ID, admission.Revision)
+	if err != nil && !errors.Is(err, chatstate.ErrConflict) && !errors.Is(err, chatstate.ErrGone) && !errors.Is(err, sql.ErrNoRows) {
+		return errors.Join(cause, err)
+	}
+	return cause
 }

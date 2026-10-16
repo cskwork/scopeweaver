@@ -214,8 +214,6 @@ func TestChatCompatibilityQueuedAndDeletingTask(t *testing.T) {
 }
 
 func TestChatCompatibilityCompletionFailures(t *testing.T) {
-	s, task, _ := compatibilityTask(t)
-	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
 	for _, tc := range []struct {
 		status string
 		want   error
@@ -226,9 +224,8 @@ func TestChatCompatibilityCompletionFailures(t *testing.T) {
 		{"completed", agent.ErrChatPersistence}, // No persisted reply must not become a successful empty response.
 	} {
 		t.Run(tc.status, func(t *testing.T) {
-			if err := s.m.pg.ResumeChatGate(t.Context(), ref, -1); err != nil {
-				t.Fatal(err)
-			}
+			s, task, _ := compatibilityTask(t)
+			ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
 			a, err := s.m.pg.AdmitChatInput(t.Context(), ref, "terminal-"+tc.status, "send", "", chatstate.Prompt{Text: "terminal status fixture"})
 			if err != nil {
 				t.Fatal(err)
@@ -432,5 +429,68 @@ func TestChatCompatibilityFinishFailureHasFiniteWait(t *testing.T) {
 	nodes, err := task.Store.ListByKind(db.KindHint, 10)
 	if err != nil || len(nodes) != 1 {
 		t.Fatalf("ambiguous execution was replayed: %+v %v", nodes, err)
+	}
+}
+
+func TestChatCompatibilityBlankTaskHistory(t *testing.T) {
+	s, task, h := compatibilityTask(t)
+	p := retestProvider{complete: func(context.Context, llm.CompletionRequest) (llm.Message, string, llm.Usage, error) {
+		return llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{llm.TextBlock("done")}}, "end_turn", llm.Usage{}, nil
+	}}
+	main := agent.NewMainAgent(p, "compatibility", s.m.dir, transcript.NewStore(filepath.Join(s.m.dir, "transcripts")), 10000, 1)
+	main.SetNonStreaming(func() bool { return true })
+	s.llmOn, s.llmProv = true, p
+	s.taskAgents = map[string]*taskAgentBundle{task.ID: {main: main}}
+	w := compatibilityRequest(h, "/api/chat?task="+task.ID, `{}`)
+	if w.Code != 202 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	waitRetestIdle(t, s)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	state, err := s.m.pg.ChatControlState(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.changeChatHistory(t.Context(), ref, chatstate.HistoryChange{ClientID: "retry-blank", Kind: "retry", ExpectedRevision: state.Revision}); err != nil {
+		t.Fatal("valid persisted blank task prompt cannot be retried", err)
+	}
+	waitRetestIdle(t, s)
+	runs, err := s.m.pg.ChatHistoryRuns(t.Context(), ref)
+	if err != nil || len(runs) != 2 || runs[1].Status != "completed" || runs[1].Prompt.Text != "" {
+		t.Fatalf("blank retry changed prompt or did not execute: %+v %v", runs, err)
+	}
+	state, err = s.m.pg.ChatControlState(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.changeChatHistory(t.Context(), ref, chatstate.HistoryChange{ClientID: "blank-edit", Kind: "edit", TurnID: state.LatestTurnID, ExpectedRevision: state.Revision, Replacement: &chatstate.Prompt{}}); err == nil {
+		t.Fatal("new edit control admitted a blank replacement")
+	}
+	if _, err = s.changeChatHistory(t.Context(), ref, chatstate.HistoryChange{ClientID: "branch-blank", Kind: "branch", TurnID: state.LatestTurnID, ExpectedRevision: state.Revision}); err != nil {
+		t.Fatal("valid persisted blank task prompt cannot be branched", err)
+	}
+}
+
+func TestChatCompatibilityPausePreservesRevisedInput(t *testing.T) {
+	s, task, _ := compatibilityTask(t)
+	ref := chatstate.SessionRef{TaskID: mustTaskID(t, task.ID), ExplorationID: task.ExpID}
+	a, err := s.m.pg.AdmitChatInput(t.Context(), ref, "revised-before-pause", "send", "", chatstate.Prompt{Text: "hint original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = s.m.pg.UpdateChatInput(t.Context(), ref, a.ID, a.Revision, chatstate.Prompt{Text: "hint revised"}); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.m.pg.PauseChatGate(t.Context(), ref, -1); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if _, err = s.waitCompatibilityReply(ctx, a); !errors.Is(err, chatstate.ErrBusy) {
+		t.Fatal(err)
+	}
+	var status, prompt string
+	if err = s.m.pg.QueryRow(`SELECT status,prompt->>'text' FROM chat_control_inputs WHERE id=$1`, a.ID).Scan(&status, &prompt); err != nil || status != "queued" || prompt != "hint revised" {
+		t.Fatalf("legacy rejection cancelled another client's revision: %s %q %v", status, prompt, err)
 	}
 }

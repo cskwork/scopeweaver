@@ -98,7 +98,7 @@ export async function runChatDraftRetentionChecks({ base, token, fixture, step, 
             let enter;
             const entered = new Promise(resolve => { enter = resolve; });
             let posted;
-            await page.route(`**${path}/inputs`, async route => {
+            await page.route(url => url.pathname === `${path}/inputs`, async route => {
               posted = route.request().postDataJSON();
               enter();
               routeTask = (async () => {

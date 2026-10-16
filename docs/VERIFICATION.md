@@ -238,12 +238,12 @@ Current remote checks are available in [GitHub Actions](https://github.com/cskwo
 
 ## Chat document paste (2026-10-16)
 
-I checked paste handling against a disposable PostgreSQL 17 database and a local backend:
+PR #29 records the following paste checks against a disposable PostgreSQL 17 database and a local backend. These are contributor-reported results from 2026-10-16; current integration evidence is recorded separately:
 
 - The frontend suite passed 52 tests; the production static export passed.
 - Clipboard browser checks passed 12 combinations: standalone/task chat, EN/KO/zh-Hans and 1440/390 px.
 - Cases covered rapid document pastes with one draft owner, accompanying text, native 3,000-character insertion and undo, Unicode preview, draft restoration, upload retry, navigation, mentions, IME and both send preferences. Pasting submitted no messages.
-- I disabled the React paste handler to confirm the browser check failed on the missing second attachment chip, then restored it and reran the check.
+- The contributor disabled the React paste handler to confirm the browser check failed on the missing second attachment chip, then restored it and reran the check.
 - The backend smoke suite passed the clipboard checks and Ollama loopback fixtures with no uncaught page errors.
 
 The file cases supply browser File objects through paste events. The text and undo cases use the Chromium clipboard and keyboard paste.
