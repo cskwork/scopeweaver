@@ -85,7 +85,7 @@ GLM-5.3 always thinks, so these runs do not measure the effect of turning thinki
 
 Live bridge checks (Claude via `claude -p`, OpenAI via `codex exec`) test model behavior through a local bridge. They do not test the API wire format or billing.
 
-{{LIVE:bridge-results}}
+A `codex exec` bridge ran the OpenAI template (gpt-6-luna, Responses) through one full task: the tool loop completed, the planted issue was found and written up by the report writer, and a follow-up side question was answered (not reported as interrupted). The run's `llm_usage` rows carried reasoning tokens and cache-read tokens, including a `btw` side-question row. Two more runs did not finish inside the harness time limit because the bridge is slow; that is a bridge speed limit, not a code result. The `claude -p` bridge was dropped: it would not drive the tool protocol. Claude and OpenAI request and usage handling are proven by fixtures.
 
 ### Recommended settings
 

@@ -85,7 +85,7 @@ GLM-5.3은 항상 추론하므로 이 측정으로는 추론을 끈 효과를 �
 
 로컬 브리지 확인(Claude는 `claude -p`, OpenAI는 `codex exec`)은 로컬 브리지를 거친 모델 동작을 확인합니다. API 전송 형식이나 과금은 확인하지 않습니다.
 
-{{LIVE:bridge-results}}
+{KO}
 
 ### 권장 설정
 
