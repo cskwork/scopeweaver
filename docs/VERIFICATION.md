@@ -2,26 +2,28 @@
 
 [한국어](ko/VERIFICATION.md)
 
-## Chat controls and context — 2026-10-16
+## Chat controls and context (2026-10-16)
 
-Native implementation in an isolated worktree based on main `51e6e39`. The behavior follows the [approved design](superpowers/specs/2026-10-16-chat-controls-design.md), with Hermes references pinned to `4e59ac2b883b4133ea8a2d299abac45189781c09`.
+I implemented the [approved design](superpowers/specs/2026-10-16-chat-controls-design.md) in an isolated worktree based on `51e6e39`. I used Hermes commit `4e59ac2b883b4133ea8a2d299abac45189781c09` as the behavior reference.
 
-| Check actually run | Result |
+| Check | Result |
 | --- | --- |
-| Disposable PostgreSQL 17 race suites (`db`, `server`, `agent`) | 635 top-level tests passed, no race reports; optional browser, adapter and live-provider checks are separate |
-| Remaining Go packages and static analysis | `go test ./... -count=1` and `go vet ./...` passed |
-| Frontend tests, translations, dependency audit and production static export | 62 tests passed; 3,249 EN/KO/zh-Hans keys preserve parity; 0 audit findings; TypeScript and all 31 pages passed |
-| Backend catalog | 1,978 production keys passed three-language raw completeness/parity and printf checks |
-| Real Handler and Chromium chat gate | All 60 scenarios passed: queue/restart, history, context, tool steering/shared task gate and document paste; EN/KO/zh-Hans × 1440/390 px × standalone/task; no uncaught page errors |
-| Existing embedded-browser smoke and dashboard | Smoke E2E passed; all 12 dashboard scenarios passed, with no uncaught browser errors |
-| Agent adapter | 7 unit tests, syntax checks and 3 real MCP/Pi scenarios passed |
-| Installer, Compose and notices | 8 installer fixtures, 11 Compose credential cases, 5 packaging archives per language (EN/KO), and 6 release-notice tests passed |
+| Disposable PostgreSQL 17 race suites (`db`, `server`, `agent`) | 635 top-level tests passed; no race reports |
+| Go packages and static analysis | `go test ./... -count=1` and `go vet ./...` passed |
+| Frontend tests, translations, audit and static export | 62 tests passed; 3,249 EN/KO/zh-Hans keys passed parity checks; 0 audit findings; TypeScript and 31 pages passed |
+| Backend translations | 1,978 production keys passed completeness, parity and printf checks in three languages |
+| Chat browser gate | 60 scenarios passed across EN/KO/zh-Hans, 1440/390 px and standalone/task chat; no uncaught page errors |
+| Embedded-app smoke and dashboard | Smoke E2E and 12 dashboard scenarios passed; no uncaught browser errors |
+| Agent adapter | 7 unit tests, syntax checks and 3 MCP/Pi scenarios passed |
+| Installer and packaging | 8 installer fixtures, 11 Compose cases, 5 packaging archives per language (EN/KO), and 6 release-notice tests passed |
 
-The integration regressions reproduce lost-response identity reuse, queue claim/restart barriers, acknowledged steering before the next tool, accepted-language persistence, visible preflight failures, retry after an interrupted tool, abandoned branch preparation recovery, atomic generated-source identity, document-read attribution and comparable compaction estimates. The inspector distinguishes request occupancy and local category estimates from cumulative billed usage. Manual compaction retains recent complete exchanges and publishes a durable history revision; source/audit attempts and their billing remain available.
+The chat browser cases cover queue edits and ordering, restart acknowledgement, retry/edit/branch, context inspection and compaction, tool steering, and document paste. Backend regressions cover accepted-language persistence, preflight errors, interrupted tool exchanges, abandoned branch preparations and document-read attribution.
 
-The fresh whole-branch review reproduced six significant integration gaps. Regression fixes route generated input through the common source-aware dispatcher, retain retest bookkeeping on Resume and the unknown-run barrier on shutdown, preserve unclaimed durable retests during Manager startup, rebase compaction copies using their original record identity, map only unambiguous legacy history while preserving read-only display rows, and show pending steering with an idempotent **Queue as follow-up** action. The attachment regression deletes the parent before sending another child prompt; a separate regression preserves literal user-authored manifest text. These findings were repaired with failing-then-passing regressions and the complete local gate rerun; there was no second reviewer pass.
+You can inspect the model's current context apart from billed conversation usage. Compression keeps the recent completed exchanges you select; you retain the full display history and usage from previous attempts.
 
-All inference checks use loopback fixtures and disposable databases. Windows runtime, paid providers, external targets, remote CI, release publication and merge are outside these local receipts. The unchanged notice fixture ran with Python 3 ahead of this host's Python 2 `python` executable, matching CI's interpreter requirement.
+The reviewer found six integration defects. I fixed generated-input admission and retest recovery, attachment paths in branches after compaction, legacy display history, and steering delivery controls. The attachment test deletes the parent before the child's next prompt. Another test checks that rebasing preserves literal manifest text you wrote. For each finding, I ran a failing regression, fixed the code and reran the full local gate. I used one reviewer pass.
+
+I used loopback models and disposable databases for inference tests. These results cover local Linux checks; Windows runtime, paid providers and remote CI require separate verification. I ran the notice fixture with Python 3 ahead of the host's Python 2 `python` executable, matching CI's interpreter requirement.
 
 ## Native hardening candidate — 2026-10-15
 
@@ -234,14 +236,14 @@ The v0.1.0 verification recorded **14 npm audit findings: 1 critical, 9 high and
 
 Current remote checks are available in [GitHub Actions](https://github.com/cskwork/scopeweaver/actions/workflows/ci.yml).
 
-## Chat document paste — 2026-10-16
+## Chat document paste (2026-10-16)
 
-Verified in an isolated worktree against a disposable PostgreSQL 17 database and a local backend, without external model calls:
+I checked paste handling against a disposable PostgreSQL 17 database and a local backend:
 
-- Frontend Node suite: **52 passed**; production static export succeeded.
-- Clipboard browser checks: standalone and task composers, English/Korean/Simplified Chinese, 1440 px and 390 px. All 12 combinations passed.
-- Covered two rapid document pastes with one lazy conversation owner, independent accompanying text, native 3,000-character insertion and keyboard undo, exact Unicode long-text preview, restoration after later edits, upload failure/retry, completion after client-side navigation, mentions/IME, both send preferences, and zero unintended message submissions.
-- The browser check failed on the missing second chip when only the React paste wiring was temporarily disabled, then passed with the application wiring enabled.
-- Existing real-backend smoke suite, including the new clipboard checks and Ollama loopback fixtures: **E2E passed**, no uncaught page errors.
+- The frontend suite passed 52 tests; the production static export passed.
+- Clipboard browser checks passed 12 combinations: standalone/task chat, EN/KO/zh-Hans and 1440/390 px.
+- Cases covered rapid document pastes with one draft owner, accompanying text, native 3,000-character insertion and undo, Unicode preview, draft restoration, upload retry, navigation, mentions, IME and both send preferences. Pasting submitted no messages.
+- I disabled the React paste handler to confirm the browser check failed on the missing second attachment chip, then restored it and reran the check.
+- The backend smoke suite passed the clipboard checks and Ollama loopback fixtures with no uncaught page errors.
 
-Browser file cases dispatch event-supplied File objects. Native text and undo cases use the Chromium clipboard and keyboard paste.
+The file cases supply browser File objects through paste events. The text and undo cases use the Chromium clipboard and keyboard paste.

@@ -6,11 +6,11 @@ Status: Approved for implementation planning on 2026-10-16
 
 Give Scopeweaver chat visible controls for queued follow-ups, steering a running agent, retrying and editing prompts, branching conversations, inspecting and compressing context, and pasting documents directly into the composer. Use Hermes Agent and Hermes Desktop as the behavioral and implementation references, while retaining Scopeweaver's Go, Norma, PostgreSQL, and Next.js architecture and current visual style.
 
-The user requested planning only, selected these features, and explicitly required a graphical interface comparable to Hermes Desktop. Every supported operation has a visible UI control; slash commands provide optional shortcuts. The design covers the standalone chat page and task MainAgent sessions. Existing Worker steering remains integrated with its current task lifecycle.
+Users can access each operation through a visible control, with slash commands as shortcuts. The design covers standalone chat and task MainAgent sessions. Keep Worker steering in its existing task lifecycle.
 
-The proposed paste default follows the inspected Hermes Desktop policy: copied files become attachments, ordinary text stays inline, and plain text longer than 3,000 JavaScript string code units becomes a text attachment. Browser clipboard support determines whether an original copied file is available.
+Use the inspected Hermes Desktop paste policy: attach copied files, keep text inline up to 3,000 JavaScript string code units, and attach longer text as a text file. A browser must expose the copied file through its clipboard API to attach the original bytes.
 
-Success means users can keep composing while work runs, distinguish queued input from delivered steering, safely revisit prompts, understand which context reaches the model, and paste material without opening a file picker. Accepted queued inputs, uploaded attachments, and published conversation history survive process restart. Unsent drafts and pending uploads stay associated with their original session when the user switches chats.
+Users can compose during a run, check whether the agent received a correction, revisit prompts and inspect model context. They can paste documents without opening the file picker. The server retains accepted queue entries, uploaded attachments and published history across restart. Switching chats preserves unsent drafts and pending uploads in their source session.
 
 Memory, conversation-wide search, new messaging gateways, autonomous skill maintenance, and additional subagent systems are outside this scope.
 
@@ -40,7 +40,7 @@ Hermes source references below are pinned to commit `4e59ac2b883b4133ea8a2d299ab
 
 ## User interface
 
-The existing conversation rail, transcript, model picker, and `/btw` remain the foundation. Add focused controls in the following places.
+Extend the conversation rail, transcript, model picker and `/btw` with these controls.
 
 | Location | Controls and feedback |
 | --- | --- |
