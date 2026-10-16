@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/compaction"
 	"github.com/Autumn-27/norma/llm"
 	"github.com/Autumn-27/norma/transcript"
@@ -17,17 +17,17 @@ import (
 func PrepareChatCompaction(ctx context.Context, records []transcript.Record, req llm.CompletionRequest, opts chatstate.CompactOptions, summarize compaction.Summarizer, inputBudget int) ([]transcript.Record, chatstate.ContextView, error) {
 	var empty chatstate.ContextView
 	if opts.KeepRecent < 1 {
-		return nil, empty, fmt.Errorf("keep_recent must be at least 1")
+		return nil, empty, locale.Errorf("keep_recent must be at least 1")
 	}
 	if summarize == nil {
-		return nil, empty, fmt.Errorf("summary provider unavailable")
+		return nil, empty, locale.Errorf("summary provider unavailable")
 	}
 	births, err := chatstate.CanonicalChatRecords(records)
 	if err != nil {
 		return nil, empty, err
 	}
 	if len(opts.TurnStarts) <= opts.KeepRecent {
-		return nil, empty, fmt.Errorf("not enough completed exchanges to compact")
+		return nil, empty, locale.Errorf("not enough completed exchanges to compact")
 	}
 	cutoff := opts.TurnStarts[len(opts.TurnStarts)-opts.KeepRecent]
 	var msgs []llm.Message
@@ -46,7 +46,7 @@ func PrepareChatCompaction(ctx context.Context, records []transcript.Record, req
 	protected := req
 	protected.Messages = msgs[tail:]
 	if inputBudget <= 0 || EstimatedChatRequestTokens(protected) > inputBudget {
-		return nil, empty, fmt.Errorf("protected recent exchanges exceed the model input budget")
+		return nil, empty, locale.Errorf("protected recent exchanges exceed the model input budget")
 	}
 	sdk := compaction.New(compaction.Config{KeepRecent: len(msgs) - tail}, func(ctx context.Context, head []llm.Message) (string, error) {
 		if opts.Focus != "" {
@@ -56,7 +56,7 @@ func PrepareChatCompaction(ctx context.Context, records []transcript.Record, req
 	})
 	out, ok := sdk.Reactive(ctx, msgs)
 	if !ok {
-		return nil, empty, fmt.Errorf("context summary failed or did not reduce context")
+		return nil, empty, locale.Errorf("context summary failed or did not reduce context")
 	}
 	i := llm.LastBoundaryIndex(out)
 	if i < 0 || i+1 >= len(out) {
@@ -73,7 +73,7 @@ func PrepareChatCompaction(ctx context.Context, records []transcript.Record, req
 	nextReq := req
 	nextReq.Messages = llm.MessagesForAPI(out)
 	if EstimatedChatRequestTokens(nextReq) > inputBudget {
-		return nil, empty, fmt.Errorf("summary and protected exchanges exceed the model input budget")
+		return nil, empty, locale.Errorf("summary and protected exchanges exceed the model input budget")
 	}
 	prepared := append([]transcript.Record{}, records...)
 	for _, m := range out[i:] {

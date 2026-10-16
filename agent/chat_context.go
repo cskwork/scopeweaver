@@ -68,6 +68,7 @@ func contextReserve(window, reserve int) (int, bool) {
 func MeasureChatContext(req llm.CompletionRequest, profileID int64, model string, window, reserve int, p ContextProvenance) chatstate.ContextView {
 	effectiveReserve, estimatedReserve := contextReserve(window, reserve)
 	v := chatstate.ContextView{ProfileID: profileID, Model: model, Window: window, OutputReserve: effectiveReserve, ReserveEstimated: estimatedReserve, Estimated: true, UpdatedAt: time.Now().UTC(), Source: "request", Request: req}
+	v.Attribution, _ = json.Marshal(p)
 	counts := requestContributions(req, p)
 	names := make([]string, 0, len(counts))
 	for k := range counts {
@@ -156,7 +157,11 @@ func chatContextProvenance(ctx context.Context, req llm.CompletionRequest, opts 
 						FilePath string `json:"file_path"`
 					}
 					if json.Unmarshal(b.Input, &in) == nil {
-						if rel, err := filepath.Rel(filepath.Join(opts.WorkingDir, "uploads"), in.FilePath); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
+						documentPath := in.FilePath
+						if !filepath.IsAbs(documentPath) {
+							documentPath = filepath.Join(opts.WorkingDir, documentPath)
+						}
+						if rel, err := filepath.Rel(filepath.Join(opts.WorkingDir, "uploads"), documentPath); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel) {
 							category = "documents"
 							calls[b.ID] = category
 						}
@@ -326,4 +331,37 @@ func (c *observedChatCompactor) View(ctx context.Context, m []llm.Message) []llm
 		return v.View(ctx, m)
 	}
 	return llm.MessagesForAPI(m)
+}
+
+// Rebase only attribution metadata. Unchanged retained blocks retain their sole
+// category; newly synthesized prose is conversation, never raw prompt text.
+func RemapChatContextProvenance(previous chatstate.ContextView, req llm.CompletionRequest) ContextProvenance {
+	var old ContextProvenance
+	_ = json.Unmarshal(previous.Attribution, &old)
+	next := ContextProvenance{SystemSegments: old.SystemSegments, ToolCategories: old.ToolCategories, MessageBlocks: map[string]string{}}
+	known := map[string]string{}
+	for i, m := range previous.Request.Messages {
+		for j, b := range m.Content {
+			raw, _ := json.Marshal([]any{m.Role, b})
+			known[string(raw)] = old.MessageBlocks[fmt.Sprintf("%d:%d", i, j)]
+		}
+	}
+	for i, m := range req.Messages {
+		for j, b := range m.Content {
+			raw, _ := json.Marshal([]any{m.Role, b})
+			category := known[string(raw)]
+			if category == "" {
+				switch b.Type {
+				case llm.BlockText, llm.BlockThinking:
+					category = "conversation"
+				case llm.BlockToolUse:
+					category = old.ToolCategories[b.Name]
+				default:
+					category = "other"
+				}
+			}
+			next.MessageBlocks[fmt.Sprintf("%d:%d", i, j)] = category
+		}
+	}
+	return next
 }

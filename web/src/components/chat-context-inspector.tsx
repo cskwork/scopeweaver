@@ -35,6 +35,10 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
     const working = useRef(false);
     const epoch = useRef(0);
     const alive = useRef(true);
+    const panel = useRef<HTMLDivElement>(null);
+    useEffect(() => {
+      if (open && panel.current) panel.current.scrollTop = 0;
+    }, [open]);
     const identity = controls?.state?.session ? JSON.stringify(controls.state.session) : "draft";
     useEffect(() => {
       alive.current = true;
@@ -68,8 +72,15 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
     useEffect(() => {
       void load();
     }, [controls?.state, locale]);
+    function openFromComposer() {
+      // Let the composer's pointer event finish before the popover installs
+      // outside-click handling (including a previous closing layer).
+      requestAnimationFrame(() => {
+        if (alive.current) setOpen(true);
+      });
+    }
     async function compact(options: ChatCompactOptions) {
-      setOpen(true);
+      openFromComposer();
       setFocus(options.focus);
       setKeep(String(options.keep_recent));
       if (!controls || working.current || !canCompactChatContext(controls.state, view)) {
@@ -98,7 +109,7 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
     }
     useImperativeHandle(ref, () => ({
       open: () => {
-        setOpen(true);
+        openFromComposer();
         void load();
       },
       compact,
@@ -123,19 +134,21 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
         </span>
       </Button>
     );
+    const header = (
+      <div className="flex shrink-0 items-center justify-between gap-3 px-4 pt-3 pb-2">
+        <h2 className="font-medium">{t("interface.chatContext")}</h2>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label={t("interface.chatContextClose")}
+          onClick={() => setOpen(false)}
+        >
+          <X className="size-4" />
+        </Button>
+      </div>
+    );
     const body = (
-      <div className="space-y-4 overflow-y-auto p-4" data-chat-context-panel>
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="font-medium">{t("interface.chatContext")}</h2>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            aria-label={t("interface.chatContextClose")}
-            onClick={() => setOpen(false)}
-          >
-            <X className="size-4" />
-          </Button>
-        </div>
+      <div className="min-h-0 space-y-4 overflow-y-auto px-4 pb-4" ref={panel} data-chat-context-panel>
         <p className="text-lg tabular-nums" data-chat-context-usage>
           {formatted.usage}
         </p>
@@ -253,6 +266,7 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
                 <DrawerTitle>{t("interface.chatContext")}</DrawerTitle>
                 <DrawerDescription>{t("interface.chatContextUsageHelp")}</DrawerDescription>
               </DrawerHeader>
+              {header}
               {body}
             </DrawerContent>
           </Drawer>
@@ -262,9 +276,11 @@ export const ChatContextInspector = forwardRef<ChatContextHandle, { controls: Co
             <PopoverContent
               align="end"
               side="top"
-              className="max-h-[80vh] w-[min(28rem,calc(100vw-1rem))] overflow-hidden p-0"
+              className="max-h-[min(80vh,var(--radix-popover-content-available-height,80vh))] w-[min(28rem,calc(100vw-1rem))] gap-0 overflow-hidden p-0"
+              onCloseAutoFocus={(event) => event.preventDefault()}
               aria-label={t("interface.chatContext")}
             >
+              {header}
               {body}
             </PopoverContent>
           </Popover>

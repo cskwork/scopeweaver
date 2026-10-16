@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"strconv"
 	"time"
@@ -21,6 +22,18 @@ import (
 func (s *Server) initChatControls() {
 	if s.m.pg == nil {
 		return
+	}
+	abandoned, err := s.m.pg.RecoverChatPreparations(s.ctx)
+	if err != nil {
+		log.Printf("[chat] preparation recovery failed: %v", err)
+		return
+	}
+	for _, ref := range abandoned {
+		if ref.ConversationID > 0 {
+			if exists, e := s.m.pg.ChatConversationExists(s.ctx, ref.ConversationID); e == nil && !exists {
+				_ = os.RemoveAll(s.chatPromptDir(ref))
+			}
+		}
 	}
 	if err := s.m.pg.RecoverChatRuns(s.ctx); err != nil {
 		log.Printf("[chat] recovery failed: %v", err)
@@ -124,7 +137,15 @@ func (s *Server) dispatchChatInput(gate, selected string) {
 		}
 	}()
 }
-func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
+func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) (runErr error) {
+	ctx = locale.WithLang(ctx, locale.Lang(run.Language))
+	defer func() {
+		if runErr != nil && !errors.Is(runErr, chatstate.ErrGone) && !errors.Is(runErr, agent.ErrChatPersistence) {
+			if e := s.displayChatPreflightFailure(ctx, run, runErr); e != nil && !errors.Is(e, chatstate.ErrGone) {
+				runErr = fmt.Errorf("%w: %v", agent.ErrChatPersistence, e)
+			}
+		}
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -161,7 +182,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 		}
 		ca := s.resolveChatAgent(c)
 		if ca == nil {
-			return fmt.Errorf("chat model unavailable")
+			return locale.Errorf("chat model unavailable")
 		}
 		ctx = intercept.WithConvID(ctx, c.ID)
 		ua := chatRunActivity(run, userActivityWithAttachments(c.AgentKey, run.Prompt.Text, run.Prompt.Attachments))
@@ -210,7 +231,7 @@ func (s *Server) executeChatRun(ctx context.Context, run chatstate.Run) error {
 	}
 	ma := s.agentsForTask(t).main
 	if ma == nil {
-		return fmt.Errorf("main agent unavailable")
+		return locale.Errorf("main agent unavailable")
 	}
 	s.engine.BeginLLMCall(t.ID)
 	defer s.engine.EndLLMCall(t.ID)
@@ -222,7 +243,7 @@ type externalChatRunKey struct{}
 
 func (s *Server) reserveExternalChat(ctx context.Context, c *db.Conversation, message string) (string, error) {
 	ref := chatstate.SessionRef{ConversationID: c.ID}
-	if _, err := s.m.pg.AdmitChatInput(ctx, ref, "external-"+rand.Text(), "send", "", chatstate.Prompt{Text: message}); err != nil {
+	if _, err := s.m.pg.AdmitExternalChatInput(ctx, ref, "external-"+rand.Text(), chatstate.Prompt{Text: message}); err != nil {
 		return "", err
 	}
 	run, err := s.m.pg.ClaimNextChatInput(ctx, ref.GateKey())
@@ -231,9 +252,6 @@ func (s *Server) reserveExternalChat(ctx context.Context, c *db.Conversation, me
 	}
 	if run == nil {
 		return "", chatstate.ErrBusy
-	}
-	if _, err = s.m.pg.ExecContext(ctx, `UPDATE chat_control_runs SET source_kind='external' WHERE id=$1`, run.ID); err != nil {
-		return "", err
 	}
 	return run.ID, nil
 }

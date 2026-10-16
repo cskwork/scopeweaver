@@ -138,3 +138,31 @@ func TestChatBranchSegmentAllocationSharesLegacyLock(t *testing.T) {
 		t.Fatalf("allocated %d segments", len(seen))
 	}
 }
+
+func TestChatBranchPreparationRecovery(t *testing.T) {
+	d, ref := controlFixture(t)
+	state, err := d.ChatControlState(t.Context(), ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	target, err := d.PrepareChatHistoryTarget(t.Context(), ref, chatstate.HistoryChange{ClientID: "crashed-branch", Kind: "branch", ExpectedRevision: state.Revision}, true, "turn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	abandoned, err := d.RecoverChatPreparations(t.Context())
+	found := false
+	for _, candidate := range abandoned {
+		if candidate == target {
+			found = true
+		}
+	}
+	if err != nil || !found {
+		t.Fatal(abandoned, err)
+	}
+	if exists, err := d.ChatConversationExists(t.Context(), target.ConversationID); err != nil || exists {
+		t.Fatal("crashed preparing child survived recovery", exists, err)
+	}
+	if exists, err := d.ChatConversationExists(t.Context(), ref.ConversationID); err != nil || !exists {
+		t.Fatal("published source removed", exists, err)
+	}
+}

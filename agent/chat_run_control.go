@@ -123,8 +123,10 @@ func (b *chatRunBinding) beforeRequest(ctx context.Context) error {
 		return b.fault
 	}
 	if b.start == "" {
+		// Prompt records its user message before compaction or background reminders.
+		// Identify it by this run's persisted baseline, never by user text prefixes.
 		for _, r := range records[b.before:] {
-			if r.Message != nil && r.Message.Role == llm.RoleUser && !chatHasToolResult(*r.Message) && !strings.HasPrefix(r.Message.Text(), "[Background task") {
+			if r.Message != nil && r.Message.Role == llm.RoleUser && !chatHasToolResult(*r.Message) {
 				b.start = r.UUID
 				break
 			}

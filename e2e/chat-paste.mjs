@@ -25,6 +25,8 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
   const createdTask = await api.post("/api/tasks", { data: { description: "Clipboard document fixture", goal: "Keep fixture idle", seed_first_intent: false } });
   check(createdTask.ok(), `task fixture ${createdTask.status()}`);
   const task = await createdTask.json();
+  check((await api.post(`/api/tasks/${task.id}/control`, { data: { action: "pause" } })).ok(), "clipboard fixture must stay paused");
+  try {
   for (const locale of ["en", "ko", "zh-Hans"]) {
     for (const width of [1440, 390]) {
       for (const surface of ["standalone", "task"]) {
@@ -106,7 +108,11 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
           let began;
           const started = new Promise((resolve) => { began = resolve; });
           await p.route("**/api/chat/upload?**", async (route) => { began(); await barrier; await route.continue(); });
+          // Mention selection commits its caret on the next animation frame.
+          // Finish that interaction before starting the separate navigation case.
+          await input.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
           await input.fill("origin draft");
+          check(await input.inputValue() === "origin draft", "navigation fixture did not replace the previous mention draft");
           const key = await input.getAttribute("data-chat-draft");
           await p.keyboard.press("Escape");
           await pasteFiles(input, ["delayed.pdf"]);
@@ -129,7 +135,11 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
       }
     }
   }
-  await api.dispose();
+  } finally {
+    const deleted=await api.delete(`/api/tasks/${task.id}`,{data:{delete_files:true}});
+    check(deleted.ok(),`clipboard fixture cleanup ${deleted.status()}`);
+    await api.dispose();
+  }
 }
 
 if (process.argv[1]?.endsWith("chat-paste.mjs")) {

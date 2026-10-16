@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 )
 
 func chatID() string {
@@ -102,12 +103,18 @@ func bumpChatGate(ctx context.Context, tx *sql.Tx, gate string) error {
 	return err
 }
 
-func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt) (out chatstate.Admission, err error) {
+func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
+	return d.admitChatInput(ctx, ref, clientID, mode, targetRunID, prompt, "user")
+}
+func (d *DB) AdmitExternalChatInput(ctx context.Context, ref chatstate.SessionRef, clientID string, prompt chatstate.Prompt) (chatstate.Admission, error) {
+	return d.admitChatInput(ctx, ref, clientID, "send", "", prompt, "external")
+}
+func (d *DB) admitChatInput(ctx context.Context, ref chatstate.SessionRef, clientID, mode, targetRunID string, prompt chatstate.Prompt, sourceKind string) (out chatstate.Admission, err error) {
 	if strings.TrimSpace(clientID) == "" || len(clientID) > 200 || strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
-		return out, fmt.Errorf("client request ID and prompt are required")
+		return out, locale.Errorf("client request ID and prompt are required")
 	}
 	if mode != "send" && mode != "queue" && mode != "steer" {
-		return out, fmt.Errorf("invalid input mode")
+		return out, locale.Errorf("invalid input mode")
 	}
 	// Canonicalize absent manifests for stable idempotency across JSON clients.
 	if prompt.Attachments == nil {
@@ -118,10 +125,10 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 		Prompt       chatstate.Prompt
 	}{mode, targetRunID, prompt})
 	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
-		var stored string
-		e := tx.QueryRowContext(ctx, `SELECT id,fingerprint FROM chat_control_inputs WHERE session_key=$1 AND client_id=$2`, ref.Key(), clientID).Scan(&out.ID, &stored)
+		var stored, storedSource string
+		e := tx.QueryRowContext(ctx, `SELECT id,fingerprint,source_kind FROM chat_control_inputs WHERE session_key=$1 AND client_id=$2`, ref.Key(), clientID).Scan(&out.ID, &stored, &storedSource)
 		if e == nil {
-			if stored != fingerprint {
+			if stored != fingerprint || storedSource != sourceKind {
 				return chatstate.ErrConflict
 			}
 			out, e = chatInput(ctx, tx, ref, out.ID)
@@ -178,7 +185,7 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 		}
 		payload, _ := json.Marshal(prompt)
 		out = chatstate.Admission{ID: chatID(), ClientID: clientID, Kind: kind, TargetRunID: targetRunID, Status: "queued", Session: ref, Prompt: prompt, Ordinal: ordinal, Revision: 1}
-		_, e = tx.ExecContext(ctx, `INSERT INTO chat_control_inputs(id,session_key,gate_key,client_id,fingerprint,kind,target_run_id,status,prompt,revision,ordinal) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,1,$9)`, out.ID, ref.Key(), ref.GateKey(), clientID, fingerprint, kind, targetRunID, payload, ordinal)
+		_, e = tx.ExecContext(ctx, `INSERT INTO chat_control_inputs(id,session_key,gate_key,client_id,fingerprint,kind,target_run_id,status,prompt,revision,ordinal,language,source_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'queued',$8,1,$9,$10,$11)`, out.ID, ref.Key(), ref.GateKey(), clientID, fingerprint, kind, targetRunID, payload, ordinal, string(locale.FromContext(ctx)), sourceKind)
 		if e != nil {
 			return e
 		}
@@ -268,7 +275,7 @@ func (d *DB) UpdateChatInput(ctx context.Context, ref chatstate.SessionRef, id s
 			return chatstate.ErrConflict
 		}
 		if strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
-			return fmt.Errorf("prompt is required")
+			return locale.Errorf("prompt is required")
 		}
 		payload, _ := json.Marshal(prompt)
 		_, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET prompt=$2,revision=revision+1 WHERE id=$1`, id, payload)
@@ -349,11 +356,11 @@ func (d *DB) ReorderChatInputs(ctx context.Context, ref chatstate.SessionRef, ex
 	})
 }
 
-const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,r.turn_ordinal,r.active,r.imported,COALESCE(r.source_run_id,''),r.baseline_recorded,r.before_record_uuid,r.source_kind,COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
+const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,r.turn_ordinal,r.active,r.imported,COALESCE(r.source_run_id,''),r.baseline_recorded,r.before_record_uuid,r.source_kind,r.language,COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
 
 func scanChatRun(row interface{ Scan(...any) error }) (r chatstate.Run, err error) {
 	var prompt []byte
-	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.TurnOrdinal, &r.Active, &r.Imported, &r.SourceRunID, &r.BaselineRecorded, &r.BeforeRecordUUID, &r.SourceKind, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
+	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.TurnOrdinal, &r.Active, &r.Imported, &r.SourceRunID, &r.BaselineRecorded, &r.BeforeRecordUUID, &r.SourceKind, &r.Language, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
 	if err == nil {
 		err = json.Unmarshal(prompt, &r.Prompt)
 	}
@@ -405,7 +412,10 @@ func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *ch
 		if e != nil {
 			return e
 		}
-		r := chatstate.Run{ID: chatID(), InputID: a.ID, TurnID: chatID(), Session: a.Session, Prompt: a.Prompt, Status: "running"}
+		r := chatstate.Run{ID: chatID(), InputID: a.ID, TurnID: chatID(), Session: a.Session, Prompt: a.Prompt, Status: "running", Active: true}
+		if e = tx.QueryRowContext(ctx, `SELECT language,source_kind FROM chat_control_inputs WHERE id=$1`, a.ID).Scan(&r.Language, &r.SourceKind); e != nil {
+			return e
+		}
 		if e = tx.QueryRowContext(ctx, `SELECT history_revision,transcript_id FROM chat_control_sessions WHERE session_key=$1`, a.Session.Key()).Scan(&r.HistoryRevision, &r.TranscriptID); e != nil {
 			return e
 		}
@@ -425,7 +435,7 @@ func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *ch
 			r.TranscriptID = r.Session.LegacyTranscriptID()
 		}
 		payload, _ := json.Marshal(a.Prompt)
-		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status,supersedes_run_id,turn_ordinal) VALUES($1,$2,$3,$4,$5,$6,$7,'running',NULLIF($8,''),$9)`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload, r.SupersedesRunID, r.TurnOrdinal); e != nil {
+		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status,supersedes_run_id,turn_ordinal,language,source_kind) VALUES($1,$2,$3,$4,$5,$6,$7,'running',NULLIF($8,''),$9,$10,$11)`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload, r.SupersedesRunID, r.TurnOrdinal, r.Language, r.SourceKind); e != nil {
 			return e
 		}
 		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='claimed',revision=revision+1 WHERE id=$1`, a.ID); e != nil {
@@ -441,7 +451,7 @@ func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *ch
 }
 func (d *DB) FinishChatRun(ctx context.Context, runID, status string) error {
 	if status != "completed" && status != "failed" && status != "stopped" && status != "unknown" {
-		return fmt.Errorf("invalid run status")
+		return locale.Errorf("invalid run status")
 	}
 	r, e := d.ChatRun(ctx, runID)
 	if e != nil {
@@ -459,7 +469,7 @@ func (d *DB) FinishChatRun(ctx context.Context, runID, status string) error {
 			return chatstate.ErrConflict
 		}
 		for _, table := range []string{"activity", "conversation_activities"} {
-			if _, e := tx.ExecContext(ctx, `UPDATE `+table+` SET history_mutable=CASE WHEN kind='user' THEN $2::boolean ELSE $3::boolean END WHERE run_id=$1`, runID, r.StartRecordUUID != "" && status != "unknown", r.StartRecordUUID != "" && r.EndRecordUUID != "" && status == "completed"); e != nil {
+			if _, e := tx.ExecContext(ctx, `UPDATE `+table+` SET history_mutable=CASE WHEN kind='user' THEN $2::boolean ELSE $3::boolean END WHERE run_id=$1`, runID, r.SourceKind == "user" && r.StartRecordUUID != "" && status != "unknown", r.SourceKind == "user" && r.StartRecordUUID != "" && r.EndRecordUUID != "" && status == "completed"); e != nil {
 				return e
 			}
 		}

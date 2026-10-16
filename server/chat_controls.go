@@ -66,12 +66,12 @@ func (s *Server) validateChatPrompt(ref chatstate.SessionRef, prompt chatstate.P
 	for _, a := range prompt.Attachments {
 		cleaned := filepath.ToSlash(filepath.Clean(a.Path))
 		if cleaned != a.Path || !strings.HasPrefix(cleaned, "uploads/") || strings.Contains(cleaned, "../") || filepath.IsAbs(a.Path) {
-			return fmt.Errorf("invalid attachment path")
+			return locale.Errorf("invalid attachment path")
 		}
 		path := filepath.Join(base, filepath.FromSlash(cleaned))
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
-			return fmt.Errorf("attachment unavailable: %s", a.Name)
+			return locale.Errorf("attachment unavailable: %s", a.Name)
 		}
 		root, err := filepath.EvalSymlinks(filepath.Join(base, "uploads"))
 		if err != nil {
@@ -79,14 +79,14 @@ func (s *Server) validateChatPrompt(ref chatstate.SessionRef, prompt chatstate.P
 		}
 		rel, err := filepath.Rel(root, resolved)
 		if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("attachment outside chat")
+			return locale.Errorf("attachment outside chat")
 		}
 		info, err := os.Stat(resolved)
 		if err != nil || !info.Mode().IsRegular() || info.Size() != a.Size {
-			return fmt.Errorf("attachment unavailable: %s", a.Name)
+			return locale.Errorf("attachment unavailable: %s", a.Name)
 		}
 		if a.Abs != "" && filepath.Clean(a.Abs) != filepath.Clean(path) {
-			return fmt.Errorf("attachment owner mismatch")
+			return locale.Errorf("attachment owner mismatch")
 		}
 	}
 	_, err := composeChatMentionMessage(s.m.pg, prompt.Text)

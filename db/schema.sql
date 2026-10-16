@@ -1521,3 +1521,6 @@ ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS baseline_recorded BOOLEAN
 ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS before_record_uuid TEXT NOT NULL DEFAULT '';
 ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT 'user';
 ALTER TABLE chat_control_gates ADD COLUMN IF NOT EXISTS closed BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE chat_control_inputs ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS language TEXT NOT NULL DEFAULT 'en';
+ALTER TABLE chat_control_inputs ADD COLUMN IF NOT EXISTS source_kind TEXT NOT NULL DEFAULT 'user';

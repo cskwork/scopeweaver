@@ -5,14 +5,14 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 )
 
 // Reserve a short durable operation token; no transaction spans summarization.
 func (d *DB) BeginChatContextChange(ctx context.Context, ref chatstate.SessionRef, client string, expected int64, kind string, payload any) (token string, result *chatstate.ControlState, reserved int64, err error) {
 	if client == "" || len(client) > 200 {
-		return "", nil, 0, fmt.Errorf("client request ID is required")
+		return "", nil, 0, locale.Errorf("client request ID is required")
 	}
 	fingerprint := chatFingerprint(struct {
 		Kind    string
@@ -138,7 +138,7 @@ func (d *DB) CommitChatContextChange(ctx context.Context, ref chatstate.SessionR
 			if e != nil {
 				return e
 			}
-			request, e := json.Marshal(view.Request)
+			request, e := chatContextRequestJSON(*view)
 			if e != nil {
 				return e
 			}

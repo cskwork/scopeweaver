@@ -5,17 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/transcript"
 )
 
 func validatePreparedChatRevision(ref chatstate.SessionRef, revision chatstate.TranscriptRevision) error {
 	if revision.SessionKey != ref.Key() || revision.Directory == "" {
-		return fmt.Errorf("invalid prepared transcript owner")
+		return locale.Errorf("invalid prepared transcript owner")
 	}
 	return chatstate.ValidateTranscriptRevision(transcript.NewStore(revision.Directory), revision)
 }
@@ -120,7 +120,7 @@ func ensureChatSessionTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionR
 }
 func (d *DB) PrepareChatHistoryTarget(ctx context.Context, source chatstate.SessionRef, change chatstate.HistoryChange, branch bool, parentTurn string) (target chatstate.SessionRef, err error) {
 	if change.ClientID == "" || len(change.ClientID) > 200 {
-		return target, fmt.Errorf("client request ID is required")
+		return target, locale.Errorf("client request ID is required")
 	}
 	err = d.chatTx(ctx, source, func(tx *sql.Tx) error {
 		var fingerprint string
@@ -187,7 +187,7 @@ func (d *DB) PrepareChatHistoryTarget(ctx context.Context, source chatstate.Sess
 }
 func (d *DB) NewMainSessionBranch(ctx context.Context, ref chatstate.SessionRef, parentTurnID, clientID string) (chatstate.SessionRef, error) {
 	if ref.TaskID == 0 {
-		return chatstate.SessionRef{}, fmt.Errorf("task session required")
+		return chatstate.SessionRef{}, locale.Errorf("task session required")
 	}
 	state, err := d.ChatControlState(ctx, ref)
 	if err != nil {
@@ -284,7 +284,7 @@ func (d *DB) CommitChatHistoryChange(ctx context.Context, source, target chatsta
 			prompt := selected.Prompt
 			if change.Kind == "edit" {
 				if change.Replacement == nil {
-					return fmt.Errorf("replacement is required")
+					return locale.Errorf("replacement is required")
 				}
 				prompt = *change.Replacement
 			}
@@ -313,7 +313,7 @@ func (d *DB) CommitChatHistoryChange(ctx context.Context, source, target chatsta
 			}
 			inputID = chatID()
 			payload, _ := json.Marshal(prompt)
-			if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_inputs(id,session_key,gate_key,client_id,fingerprint,kind,status,prompt,revision,ordinal,turn_id,supersedes_run_id) VALUES($1,$2,$3,$4,$5,'turn','queued',$6,1,$7,$8,NULLIF($9,''))`, inputID, target.Key(), target.GateKey(), "history-"+change.ClientID, historyChangeFingerprint(change), payload, ordinal, turnID, supersedes); e != nil {
+			if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_inputs(id,session_key,gate_key,client_id,fingerprint,kind,status,prompt,revision,ordinal,turn_id,supersedes_run_id,language) VALUES($1,$2,$3,$4,$5,'turn','queued',$6,1,$7,$8,NULLIF($9,''),$10)`, inputID, target.Key(), target.GateKey(), "history-"+change.ClientID, historyChangeFingerprint(change), payload, ordinal, turnID, supersedes, string(locale.FromContext(ctx))); e != nil {
 				return e
 			}
 		}

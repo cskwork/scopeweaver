@@ -255,3 +255,23 @@ func TestChatSteerUndeliveredAfterFinish(t *testing.T) {
 	}
 	t.Fatal("steer not visibly undelivered")
 }
+
+func TestChatAdmissionExternalSourceIsAtomic(t *testing.T) {
+	d, ref := controlFixture(t)
+	prompt := chatstate.Prompt{Text: "generated trigger"}
+	input, err := d.AdmitExternalChatInput(t.Context(), ref, "external-fixture", prompt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.AdmitChatInput(t.Context(), ref, input.ClientID, "send", "", prompt); !errors.Is(err, chatstate.ErrConflict) {
+		t.Fatal("human request reused an external admission", err)
+	}
+	run, err := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if err != nil || run == nil || run.SourceKind != "external" {
+		t.Fatal("source identity was not claimed atomically", run, err)
+	}
+	saved, err := d.ChatRun(t.Context(), run.ID)
+	if err != nil || saved.SourceKind != "external" {
+		t.Fatal(saved, err)
+	}
+}

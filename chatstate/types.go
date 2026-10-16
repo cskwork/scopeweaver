@@ -2,18 +2,19 @@
 package chatstate
 
 import (
-	"errors"
+	"encoding/json"
 	"fmt"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/llm"
 	"time"
 )
 
 var (
-	ErrConflict         = errors.New("chat state changed; reload and try again")
-	ErrBusy             = errors.New("chat is busy")
-	ErrGone             = errors.New("chat is unavailable")
-	ErrUnknownRun       = errors.New("a lost run requires acknowledgement")
-	ErrAmbiguousHistory = errors.New("historical turn boundary is unavailable")
+	ErrConflict         = locale.NewError("chat state changed; reload and try again")
+	ErrBusy             = locale.NewError("chat is busy")
+	ErrGone             = locale.NewError("chat is unavailable")
+	ErrUnknownRun       = locale.NewError("a lost run requires acknowledgement")
+	ErrAmbiguousHistory = locale.NewError("historical turn boundary is unavailable")
 )
 
 type SessionRef struct {
@@ -67,6 +68,7 @@ type Admission struct {
 	Ordinal     int64      `json:"ordinal,string"`
 }
 type Run struct {
+	Language         string     `json:"-"`
 	BaselineRecorded bool       `json:"-"`
 	BeforeRecordUUID string     `json:"-"`
 	SourceKind       string     `json:"source_kind"`
@@ -117,6 +119,7 @@ type ContextCategory struct {
 	Estimated bool   `json:"estimated"`
 }
 type ContextView struct {
+	Attribution      json.RawMessage       `json:"-"`
 	MeasuredInput    int                   `json:"measured_input"`
 	ReserveEstimated bool                  `json:"reserve_estimated"`
 	RunID            string                `json:"run_id,omitempty"`

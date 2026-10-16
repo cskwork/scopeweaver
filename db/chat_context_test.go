@@ -73,3 +73,32 @@ func TestChatContextBillingRetainsSupersededAttempts(t *testing.T) {
 		t.Fatal("live usage double-counted", state.BilledUsage, err)
 	}
 }
+
+func TestChatContextGeneratedRunCannotOfferUserHistoryActions(t *testing.T) {
+	d, ref := controlFixture(t)
+	queueInput(t, d, ref, "generated trigger")
+	run, err := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.Exec(`UPDATE chat_control_runs SET source_kind='external' WHERE id=$1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.RecordBoundary(t.Context(), run.ID, "start", "end"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = d.AppendConvActivity(ref.ConversationID, Activity{Kind: "result", RunID: run.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if err = d.FinishChatRun(t.Context(), run.ID, "completed"); err != nil {
+		t.Fatal(err)
+	}
+	var mutable bool
+	if err = d.QueryRow(`SELECT history_mutable FROM conversation_activities WHERE run_id=$1`, run.ID).Scan(&mutable); err != nil || mutable {
+		t.Fatal("generated result advertises a genuine user history action", mutable, err)
+	}
+	state, err := d.ChatControlState(t.Context(), ref)
+	if err != nil || state.LatestTurnID != "" {
+		t.Fatal("generated trigger became latest user turn", state, err)
+	}
+}

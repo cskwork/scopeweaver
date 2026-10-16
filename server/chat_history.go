@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
-	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -52,7 +51,7 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 	}()
 
 	if change.Kind != "retry" && change.Kind != "edit" && change.Kind != "branch" {
-		return out, fmt.Errorf("invalid history operation")
+		return out, locale.Errorf("invalid history operation")
 	}
 	if result, e := s.m.pg.ChatHistoryChangeResult(ctx, ref, change); e != nil {
 		return out, e
@@ -101,7 +100,7 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 	}
 	if change.Kind == "edit" {
 		if change.Replacement == nil {
-			return out, fmt.Errorf("replacement is required")
+			return out, locale.Errorf("replacement is required")
 		}
 		if err = s.validateChatPrompt(ref, *change.Replacement); err != nil {
 			return out, err
@@ -115,13 +114,9 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 	}
 	store := transcript.NewStore(filepath.Join(s.m.dir, "transcripts"))
 	if active.ID != "" {
-		if err = chatstate.ValidateTranscriptRevision(store, *active); err != nil {
+		if err = chatstate.ValidateTranscriptPrefix(store, *active); err != nil {
 			return out, err
 		}
-	}
-	records, err := store.Load(store.MainPath(active.TranscriptID))
-	if err != nil {
-		return out, err
 	}
 	boundary := selected.StartRecordUUID
 	include := false
@@ -129,18 +124,13 @@ func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef
 		boundary = selected.EndRecordUUID
 		include = true
 	}
-	end := -1
-	for index, record := range records {
-		if record.UUID == boundary {
-			end = index
-			if include {
-				end++
-			}
-			break
-		}
+	records, err := chatstate.LoadChatTranscriptThrough(store, active.TranscriptID, boundary)
+	if err != nil {
+		return out, err
 	}
-	if end < 0 {
-		return out, chatstate.ErrAmbiguousHistory
+	end := len(records)
+	if !include {
+		end--
 	}
 	prefix := append([]transcript.Record(nil), records[:end]...)
 	branch := change.Kind == "branch" || change.Kind == "edit" && selected.ID != runs[len(runs)-1].ID
@@ -236,7 +226,7 @@ func CopyChatAttachments(ctx context.Context, sourceDir, targetDir string, promp
 		}
 		clean := filepath.ToSlash(filepath.Clean(a.Path))
 		if a.Size < 0 || clean != a.Path || !strings.HasPrefix(clean, "uploads/") || filepath.IsAbs(a.Path) || strings.Contains(clean, "../") {
-			return out, fmt.Errorf("invalid attachment manifest")
+			return out, locale.Errorf("invalid attachment manifest")
 		}
 		source := filepath.Join(sourceDir, filepath.FromSlash(a.Path))
 		resolved, err := filepath.EvalSymlinks(source)
@@ -249,21 +239,21 @@ func CopyChatAttachments(ctx context.Context, sourceDir, targetDir string, promp
 		}
 		relative, err := filepath.Rel(root, resolved)
 		if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
-			return out, fmt.Errorf("attachment outside source")
+			return out, locale.Errorf("attachment outside source")
 		}
 		if a.Abs != "" && filepath.Clean(a.Abs) != filepath.Clean(source) {
-			return out, fmt.Errorf("attachment owner mismatch")
+			return out, locale.Errorf("attachment owner mismatch")
 		}
 		info, err := os.Stat(resolved)
 		if err != nil || !info.Mode().IsRegular() || info.Size() != a.Size {
-			return out, fmt.Errorf("attachment unavailable")
+			return out, locale.Errorf("attachment unavailable")
 		}
 		target := filepath.Join(targetDir, filepath.FromSlash(a.Path))
 		if err = prepareChildUploadDirectory(targetDir, a.Path); err != nil {
 			return out, err
 		}
 		if info, e := os.Lstat(target); e == nil && (!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0) {
-			return out, fmt.Errorf("invalid child upload")
+			return out, locale.Errorf("invalid child upload")
 		} else if e != nil && !errors.Is(e, os.ErrNotExist) {
 			return out, e
 		}
@@ -273,7 +263,7 @@ func CopyChatAttachments(ctx context.Context, sourceDir, targetDir string, promp
 			return out, err
 		}
 		if int64(len(bytes)) != a.Size {
-			return out, fmt.Errorf("attachment changed while copying")
+			return out, locale.Errorf("attachment changed while copying")
 		}
 		if existing, e := os.ReadFile(target); e == nil {
 			if sha256.Sum256(existing) != sha256.Sum256(bytes) {
@@ -390,7 +380,7 @@ func prepareChildUploadDirectory(root, relative string) error {
 			return err
 		}
 		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("invalid child upload directory")
+			return locale.Errorf("invalid child upload directory")
 		}
 	}
 	return nil

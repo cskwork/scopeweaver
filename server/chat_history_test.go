@@ -385,3 +385,25 @@ func TestChatActionsLatestIdentity(t *testing.T) {
 		t.Fatal(state, err)
 	}
 }
+
+func TestChatRetryStoppedIncompleteTail(t *testing.T) {
+	f := newHistoryFixture(t)
+	f.turn(t, "safe original")
+	f.change(t, "retry", "first-retry", "", nil)
+	waitRetestIdle(t, f.s)
+	runs, err := f.s.m.pg.ChatHistoryRuns(t.Context(), f.ref)
+	if err != nil || len(runs) != 1 {
+		t.Fatal(runs, err)
+	}
+	run := runs[0]
+	writer := f.store.ResumeWriter(run.TranscriptID, run.EndRecordUUID)
+	writer.RecordMessage(llm.Message{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "unfinished", Name: "Read", Input: []byte(`{}`)}}}, llm.Usage{})
+	if _, err = f.s.m.pg.Exec(`UPDATE chat_control_runs SET status='stopped' WHERE id=$1`, run.ID); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := f.s.m.pg.ChatControlState(t.Context(), f.ref)
+	if _, err = f.s.changeChatHistory(t.Context(), f.ref, chatstate.HistoryChange{ClientID: "retry-stopped", Kind: "retry", ExpectedRevision: state.Revision}); err != nil {
+		t.Fatal("stopped attempt's discarded suffix blocked Retry", err)
+	}
+	waitRetestIdle(t, f.s)
+}

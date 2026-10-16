@@ -191,3 +191,49 @@ func TestChatContextSteerAcknowledgedBeforeNextCallWithPublisher(t *testing.T) {
 		t.Fatal(calls)
 	}
 }
+
+func TestChatContextExternalBackgroundPromptHasBoundary(t *testing.T) {
+	for _, kind := range []string{"user", "external"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			store := transcript.NewStore(dir)
+			control := &fakeChatControl{}
+			p := captureUsageProvider{stream: func(_ context.Context, y func(llm.StreamEvent, error) bool) {
+				y(llm.StreamEvent{Type: llm.SETextDelta, Text: "generated response"}, nil)
+				y(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "end_turn"}, nil)
+				y(llm.StreamEvent{Type: llm.SEMessageStop}, nil)
+			}}
+			ca := NewChatAgent(p, "fixture", dir, store, 32000)
+			ctx := WithChatRun(t.Context(), chatstate.Run{ID: "generated", SourceKind: kind, Session: chatstate.SessionRef{ConversationID: 1}}, control)
+			if _, err := ca.Chat(ctx, "auto", "conv-1", "[Background task fixture] generated trigger", 2, 0, false, nil); err != nil {
+				t.Fatal("external trigger cannot establish its own raw boundary", err)
+			}
+			if control.start == "" {
+				t.Fatal("missing external boundary")
+			}
+		})
+	}
+}
+
+func TestChatContextRelativeDocumentReadProvenance(t *testing.T) {
+	req := llm.CompletionRequest{Messages: []llm.Message{{Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "read", Name: "Read", Input: []byte(`{"file_path":"uploads/spec.pdf"}`)}}}, {Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText("read", "document contents", false)}}}}
+	provenance := chatContextProvenance(t.Context(), req, &agentcore.Options{WorkingDir: "/owned/chat"}, DeferredInfo{})
+	if provenance.MessageBlocks["1:0"] != "documents" {
+		t.Fatal("relative uploaded document result lost its provenance", provenance)
+	}
+}
+
+func TestChatContextCompactionAttribution(t *testing.T) {
+	old := llm.CompletionRequest{System: []string{"system"}, Tools: []llm.ToolSchema{{Name: "Read", Description: "read file"}}, Messages: []llm.Message{llm.UserText("old prompt"), {Role: llm.RoleAssistant, Content: []llm.ContentBlock{{Type: llm.BlockToolUse, ID: "read", Name: "Read", Input: []byte(`{"file_path":"uploads/spec.pdf"}`)}}}, {Role: llm.RoleUser, Content: []llm.ContentBlock{llm.ToolResultText("read", "document text", false)}}}}
+	previous := MeasureChatContext(old, 1, "fixture", 32000, 100, ContextProvenance{SystemSegments: map[int]string{0: "system"}, ToolCategories: map[string]string{"Read": "tools"}, MessageBlocks: map[string]string{"0:0": "conversation", "1:0": "documents", "2:0": "documents"}})
+	next := old
+	next.Messages = append([]llm.Message{llm.UserText("compressed summary")}, old.Messages[1:]...)
+	v := MeasureChatContext(next, 1, "fixture", 32000, 100, RemapChatContextProvenance(previous, next))
+	found := map[string]int{}
+	for _, c := range v.Categories {
+		found[c.Name] = c.Tokens
+	}
+	if found["system"] == 0 || found["tools"] == 0 || found["conversation"] == 0 || found["documents"] == 0 {
+		t.Fatal("compaction collapsed proven categories into other", v)
+	}
+}

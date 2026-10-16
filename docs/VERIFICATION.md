@@ -2,6 +2,25 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Chat controls and context — 2026-10-16
+
+Native implementation in an isolated worktree based on main `51e6e39`. The behavior follows the [approved design](superpowers/specs/2026-10-16-chat-controls-design.md), with Hermes references pinned to `4e59ac2b883b4133ea8a2d299abac45189781c09`.
+
+| Check actually run | Result |
+| --- | --- |
+| Disposable PostgreSQL 17 race suites (`db`, `server`, `agent`) | 624 top-level tests passed, no race reports; optional browser, adapter and live-provider checks are separate |
+| Remaining Go packages and static analysis | `go test ./... -count=1` and `go vet ./...` passed |
+| Frontend tests, translations, dependency audit and production static export | 62 tests passed; 3,245 EN/KO/zh-Hans keys preserve parity; 0 audit findings; TypeScript and all 31 pages passed |
+| Backend catalog | 1,978 production keys passed three-language raw completeness/parity and printf checks |
+| Real Handler and Chromium chat gate | All 60 scenarios passed: queue/restart, history, context, tool steering/shared task gate and document paste; EN/KO/zh-Hans × 1440/390 px × standalone/task; no uncaught page errors |
+| Existing embedded-browser smoke and dashboard | Smoke E2E passed; all 12 dashboard scenarios passed, with no uncaught browser errors |
+| Agent adapter | 7 unit tests, syntax checks and 3 real MCP/Pi scenarios passed |
+| Installer, Compose and notices | 8 installer fixtures, 11 Compose credential cases, 5 packaging archives per language (EN/KO), and 6 release-notice tests passed |
+
+The integration regressions reproduce lost-response identity reuse, queue claim/restart barriers, acknowledged steering before the next tool, accepted-language persistence, visible preflight failures, retry after an interrupted tool, abandoned branch preparation recovery, atomic generated-source identity, document-read attribution and comparable compaction estimates. The inspector distinguishes request occupancy and local category estimates from cumulative billed usage. Manual compaction retains recent complete exchanges and publishes a durable history revision; source/audit attempts and their billing remain available.
+
+All inference checks use loopback fixtures and disposable databases. Windows runtime, paid providers, external targets, remote CI, release publication and merge are outside these local receipts. The unchanged notice fixture ran with Python 3 ahead of this host's Python 2 `python` executable, matching CI's interpreter requirement.
+
 ## Native hardening candidate — 2026-10-15
 
 Local and independent checks on `feat/ollama-zero-egress-hardening`, based on main `33b131e`. These are candidate results; exact-head remote CI and PR delivery remain pending. Historical sections below retain their original results.

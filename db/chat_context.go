@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/norma/llm"
 )
 
 func (d *DB) SaveChatContext(ctx context.Context, ref chatstate.SessionRef, runID string, view chatstate.ContextView) error {
@@ -45,7 +46,7 @@ func (d *DB) SaveChatContext(ctx context.Context, ref chatstate.SessionRef, runI
 		if err != nil {
 			return err
 		}
-		request, err := json.Marshal(view.Request)
+		request, err := chatContextRequestJSON(view)
 		if err != nil {
 			return err
 		}
@@ -70,7 +71,25 @@ func (d *DB) ChatContext(ctx context.Context, ref chatstate.SessionRef) (view ch
 			return err
 		}
 		view.ProfileIdentity = identity
-		return json.Unmarshal(request, &view.Request)
+		return decodeChatContextRequestJSON(request, &view)
 	})
 	return
+}
+
+type persistedChatRequest struct {
+	llm.CompletionRequest
+	Attribution json.RawMessage `json:"_scopeweaver_context_attribution,omitempty"`
+}
+
+func chatContextRequestJSON(view chatstate.ContextView) ([]byte, error) {
+	return json.Marshal(persistedChatRequest{CompletionRequest: view.Request, Attribution: view.Attribution})
+}
+func decodeChatContextRequestJSON(raw []byte, view *chatstate.ContextView) error {
+	var request persistedChatRequest
+	if err := json.Unmarshal(raw, &request); err != nil {
+		return err
+	}
+	view.Request = request.CompletionRequest
+	view.Attribution = request.Attribution
+	return nil
 }
