@@ -312,8 +312,9 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	}
 	// Pass thinking.type and effort independently; empty omits each field.
 	// Either, both, or neither may be sent; official Claude 5.5 defaults to adaptive.
+	rejectDisabled := strings.HasPrefix(c.Model, "claude-sonnet-") || strings.HasPrefix(c.Model, "claude-opus-") || (strings.HasPrefix(c.Model, "claude-haiku-") && (c.ReasoningEffort == "xhigh" || c.ReasoningEffort == "max"))
 	lc.ThinkingType = c.ThinkingType
-	if c.officialClaude55() && lc.ThinkingType == "" {
+	if c.officialClaude55() && (lc.ThinkingType == "" || (lc.ThinkingType == "disabled" && rejectDisabled)) {
 		lc.ThinkingType = "adaptive"
 	}
 	lc.ReasoningEffort = c.ReasoningEffort
@@ -332,7 +333,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	if err != nil {
 		return nil, err
 	}
-	provider = cloudProviderAdapter{Provider: provider, format: c.Format, claude: c.officialClaude55(), rejectDisabled: strings.HasPrefix(c.Model, "claude-sonnet-") || strings.HasPrefix(c.Model, "claude-opus-") || (strings.HasPrefix(c.Model, "claude-haiku-") && (c.ReasoningEffort == "xhigh" || c.ReasoningEffort == "max"))}
+	provider = cloudProviderAdapter{Provider: provider, format: c.Format, claude: c.officialClaude55(), rejectDisabled: rejectDisabled}
 	if c.Model == "glm-5.3" {
 		return glm53Provider{Provider: provider}, nil
 	}

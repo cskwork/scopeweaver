@@ -32,6 +32,7 @@ type deepSeekSearch struct {
 	actool.CoreTool // Preserve Norma's schema, metadata and permission decision.
 	cfg             actool.WebSearchConfig
 	client          *http.Client
+	clientErr       error
 	meter           DeepSeekSearchMeter
 	drainTimeout    time.Duration
 }
@@ -42,35 +43,57 @@ func NewDeepSeekWebSearch(cfg actool.WebSearchConfig, meter DeepSeekSearchMeter)
 	if err != nil {
 		return nil, err
 	}
-	return &deepSeekSearch{CoreTool: original, cfg: cfg, client: deepSeekSearchClient(cfg), meter: meter, drainTimeout: 10 * time.Second}, nil
+	client, clientErr := deepSeekSearchClient(cfg)
+	return &deepSeekSearch{CoreTool: original, cfg: cfg, client: client, clientErr: clientErr, meter: meter, drainTimeout: 10 * time.Second}, nil
 }
 
-func deepSeekSearchClient(cfg actool.WebSearchConfig) *http.Client {
-	// Match Norma's direct/proxy/TLS behavior, including system roots plus a CA.
+// deepSeekSearchClientErr reports a fail-closed configuration error without
+// building the client (used by tests to lock in proxy/CA/InsecureTLS precedence).
+func deepSeekSearchClientErr(cfg actool.WebSearchConfig) error {
+	_, err := deepSeekSearchClient(cfg)
+	return err
+}
+
+func deepSeekSearchClient(cfg actool.WebSearchConfig) (*http.Client, error) {
+	// Preserve direct/proxy/TLS behavior, but fail closed on invalid configuration.
 	if cfg.Proxy == "" && !cfg.InsecureTLS && cfg.CACert == "" {
-		return &http.Client{}
+		return &http.Client{}, nil
 	}
 	tr := &http.Transport{}
 	if cfg.Proxy != "" {
-		if u, err := url.Parse(cfg.Proxy); err == nil {
-			tr.Proxy = http.ProxyURL(u)
+		u, err := url.Parse(cfg.Proxy)
+		if err != nil {
+			return nil, fmt.Errorf("invalid search proxy URL")
 		}
+		if u.Hostname() == "" {
+			return nil, fmt.Errorf("search proxy requires a host")
+		}
+		switch u.Scheme {
+		case "http", "https", "socks5", "socks5h":
+		default:
+			return nil, fmt.Errorf("unsupported search proxy scheme %q", u.Scheme)
+		}
+		tr.Proxy = http.ProxyURL(u)
 	}
 	switch {
 	case cfg.InsecureTLS:
+		// InsecureTLS wins and ignores CACert, matching Norma's documented precedence.
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	case cfg.CACert != "":
-		if pem, err := os.ReadFile(cfg.CACert); err == nil {
-			pool, _ := x509.SystemCertPool()
-			if pool == nil {
-				pool = x509.NewCertPool()
-			}
-			if pool.AppendCertsFromPEM(pem) {
-				tr.TLSClientConfig = &tls.Config{RootCAs: pool}
-			}
+		pem, err := os.ReadFile(cfg.CACert)
+		if err != nil {
+			return nil, fmt.Errorf("could not load search CA: %w", err)
 		}
+		pool, _ := x509.SystemCertPool()
+		if pool == nil {
+			pool = x509.NewCertPool()
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("could not parse search CA certificates")
+		}
+		tr.TLSClientConfig = &tls.Config{RootCAs: pool}
 	}
-	return &http.Client{Transport: tr}
+	return &http.Client{Transport: tr}, nil
 }
 
 func (s *deepSeekSearch) Call(ctx context.Context, input json.RawMessage, _ *actool.ToolContext) (actool.Result, error) {
@@ -149,6 +172,9 @@ func (s *deepSeekSearch) search(ctx context.Context, query string, limit int) (r
 			log.Printf("[llmusage] insert: %v", e)
 		}
 	}()
+	if s.clientErr != nil {
+		return nil, s.clientErr
+	}
 	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 	maxUses := min(max((limit+9)/10, 1), 3)
