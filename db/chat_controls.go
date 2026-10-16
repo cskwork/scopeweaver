@@ -49,7 +49,7 @@ func (d *DB) chatTx(ctx context.Context, ref chatstate.SessionRef, fn func(*sql.
 	if ref.ConversationID > 0 {
 		err = tx.QueryRowContext(ctx, `SELECT id FROM conversations WHERE id=$1 FOR UPDATE`, ref.ConversationID).Scan(&id)
 	} else {
-		err = tx.QueryRowContext(ctx, `SELECT id FROM tasks WHERE id=$1 AND exploration_id=$2 FOR UPDATE`, ref.TaskID, ref.ExplorationID).Scan(&id)
+		err = tx.QueryRowContext(ctx, `SELECT id FROM tasks WHERE id=$1 AND exploration_id=$2 AND deleted_at IS NULL AND archived_at IS NULL FOR UPDATE`, ref.TaskID, ref.ExplorationID).Scan(&id)
 		if err == nil && ref.MainSeg > 0 {
 			var exists bool
 			err = tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM main_sessions WHERE exploration_id=$1 AND seq=$2)`, ref.ExplorationID, ref.MainSeg).Scan(&exists)
@@ -131,10 +131,14 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 			return e
 		}
 		var paused bool
+		var closed bool
 		var operation string
 		var active sql.NullString
-		if e = tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&paused, &active, &operation); e != nil {
+		if e = tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id,closed FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&paused, &active, &operation, &closed); e != nil {
 			return e
+		}
+		if closed {
+			return chatstate.ErrGone
 		}
 		if mode == "send" && operation != "" {
 			return chatstate.ErrBusy
@@ -189,8 +193,16 @@ func (d *DB) ChatControlState(ctx context.Context, ref chatstate.SessionRef) (ou
 func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRef) (out chatstate.ControlState, err error) {
 	out = chatstate.ControlState{Session: ref, Inputs: []chatstate.Admission{}, Capabilities: map[string]bool{"queue": true, "steer": true}}
 	err = func() error {
+		if ref.ConversationID > 0 {
+			var e error
+			out.BilledUsage, e = chatConversationUsageTx(ctx, tx, ref.ConversationID)
+			if e != nil {
+				return e
+			}
+		}
 		var active sql.NullString
-		if e := tx.QueryRowContext(ctx, `SELECT g.revision,g.paused,g.active_run_id,s.history_revision FROM chat_control_gates g JOIN chat_control_sessions s ON s.gate_key=g.gate_key WHERE s.session_key=$1`, ref.Key()).Scan(&out.Revision, &out.Paused, &active, &out.HistoryRevision); e != nil {
+		var closed bool
+		if e := tx.QueryRowContext(ctx, `SELECT g.revision,g.paused,g.active_run_id,s.history_revision,(g.operation_id<>''),g.closed FROM chat_control_gates g JOIN chat_control_sessions s ON s.gate_key=g.gate_key WHERE s.session_key=$1`, ref.Key()).Scan(&out.Revision, &out.Paused, &active, &out.HistoryRevision, &out.ContextChanging, &closed); e != nil {
 			return e
 		}
 		if active.Valid {
@@ -205,7 +217,7 @@ func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRe
 			return e
 		}
 		for _, capability := range []string{"retry", "edit", "branch"} {
-			out.Capabilities[capability] = out.Active == nil
+			out.Capabilities[capability] = out.Active == nil && !out.ContextChanging && !closed
 		}
 		var parentJSON []byte
 		var parentKey sql.NullString
@@ -224,7 +236,8 @@ func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRe
 		if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intercept_pending WHERE status='pending' AND (conversation_id=$1 OR task_id=$2))`, nullableID(ref.ConversationID), fmt.Sprint(ref.TaskID)).Scan(&approval); e != nil {
 			return e
 		}
-		out.Capabilities["steer"] = out.Active != nil && out.Active.Session.Key() == ref.Key() && !approval
+		out.Capabilities["compact"] = out.Active == nil && !out.ContextChanging && !closed && out.LatestTurnID != ""
+		out.Capabilities["steer"] = !closed && out.Active != nil && out.Active.Session.Key() == ref.Key() && !approval
 		rows, e := tx.QueryContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status IN ('queued','claimed','unknown','undelivered') ORDER BY i.ordinal,i.id`, ref.GateKey())
 		if e != nil {
 			return e
@@ -273,8 +286,12 @@ func (d *DB) UpdateChatInput(ctx context.Context, ref chatstate.SessionRef, id s
 func chatExpected(ctx context.Context, tx *sql.Tx, gate string, expected int64) error {
 	var revision int64
 	var operation string
-	if err := tx.QueryRowContext(ctx, `SELECT revision,operation_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&revision, &operation); err != nil {
+	var closed bool
+	if err := tx.QueryRowContext(ctx, `SELECT revision,operation_id,closed FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&revision, &operation, &closed); err != nil {
 		return err
+	}
+	if closed {
+		return chatstate.ErrGone
 	}
 	if operation != "" {
 		return chatstate.ErrBusy
@@ -369,10 +386,14 @@ func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *ch
 	}
 	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
 		var paused bool
+		var closed bool
 		var operation string
 		var active sql.NullString
-		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active, &operation); e != nil {
+		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id,operation_id,closed FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active, &operation, &closed); e != nil {
 			return e
+		}
+		if closed {
+			return chatstate.ErrGone
 		}
 		if (paused && selected == "") || active.Valid || operation != "" {
 			return nil

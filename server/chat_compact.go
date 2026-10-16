@@ -21,6 +21,12 @@ type chatCompactRuntime struct {
 }
 
 func (s *Server) compactChatContext(ctx context.Context, ref chatstate.SessionRef, client string, expected int64, options chatstate.CompactOptions, runtime chatCompactRuntime) (out ChatHistoryResult, err error) {
+	operationCtx, release, beginErr := s.beginChatMutation(ctx, ref)
+	if beginErr != nil {
+		return out, beginErr
+	}
+	defer release()
+	ctx = operationCtx
 	if options.KeepRecent < 1 {
 		return out, fmt.Errorf("keep_recent must be at least 1")
 	}
@@ -140,10 +146,15 @@ func (s *Server) chatCompactHTTP(w http.ResponseWriter, r *http.Request, ref cha
 		chatControlError(w, fmt.Errorf("model unavailable"))
 		return
 	}
-	result, err := s.compactChatContext(r.Context(), ref, in.Client, in.Expected, chatstate.CompactOptions{KeepRecent: keep, Focus: in.Focus}, chatCompactRuntime{Model: sideModel(cfg, id, ""), MaxTokens: cfg.MaxTokens, Provider: provider})
+	_, err := s.compactChatContext(r.Context(), ref, in.Client, in.Expected, chatstate.CompactOptions{KeepRecent: keep, Focus: in.Focus}, chatCompactRuntime{Model: sideModel(cfg, id, ""), MaxTokens: cfg.MaxTokens, Provider: provider})
 	if err != nil {
 		chatControlError(w, err)
 		return
 	}
-	writeJSON(w, 200, result)
+	view, err := s.m.pg.ChatContext(r.Context(), ref)
+	if err != nil {
+		chatControlError(w, err)
+		return
+	}
+	writeJSON(w, 200, view)
 }

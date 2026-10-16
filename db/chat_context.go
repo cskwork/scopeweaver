@@ -10,6 +10,13 @@ import (
 
 func (d *DB) SaveChatContext(ctx context.Context, ref chatstate.SessionRef, runID string, view chatstate.ContextView) error {
 	return d.chatTx(ctx, ref, func(tx *sql.Tx) error {
+		var closed bool
+		if err := tx.QueryRowContext(ctx, `SELECT closed FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&closed); err != nil {
+			return err
+		}
+		if closed {
+			return chatstate.ErrGone
+		}
 		var history int64
 		var latest string
 		if err := tx.QueryRowContext(ctx, `SELECT history_revision FROM chat_control_sessions WHERE session_key=$1`, ref.Key()).Scan(&history); err != nil {

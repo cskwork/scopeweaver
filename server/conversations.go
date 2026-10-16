@@ -17,7 +17,6 @@ import (
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/intercept"
 	"github.com/Autumn-27/artex/locale"
-	"github.com/Autumn-27/artex/sidequestion"
 )
 
 const (
@@ -216,8 +215,12 @@ func (s *Server) pgDeleteConversation(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	s.cancelConversation(c.ID)
-	s.cancelSideWhere(func(p sidequestion.Parent) bool { return p.ConversationID == c.ID })
+	drainCtx, stop := context.WithTimeout(r.Context(), taskDeleteDrainTimeout)
+	defer stop()
+	if err := s.drainConversationChat(drainCtx, c.ID); err != nil {
+		chatControlError(w, err)
+		return
+	}
 	if err := pg.DeleteConversation(c.ID); err != nil {
 		writeError(w, 500, err)
 		return
@@ -275,8 +278,13 @@ func (s *Server) pgDeleteConversationsBatch(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	for _, id := range ids {
-		s.cancelConversation(id)
-		s.cancelSideWhere(func(p sidequestion.Parent) bool { return p.ConversationID == id })
+		drainCtx, stop := context.WithTimeout(r.Context(), taskDeleteDrainTimeout)
+		err := s.drainConversationChat(drainCtx, id)
+		stop()
+		if err != nil && !errors.Is(err, chatstate.ErrGone) {
+			chatControlError(w, err)
+			return
+		}
 	}
 	deleted, err := pg.DeleteConversations(ids)
 	if err != nil {

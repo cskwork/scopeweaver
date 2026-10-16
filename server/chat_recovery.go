@@ -8,6 +8,12 @@ import (
 )
 
 func (s *Server) discardUnknownChatRun(ctx context.Context, ref chatstate.SessionRef, inputID string, expected int64) (err error) {
+	operationCtx, release, beginErr := s.beginChatMutation(ctx, ref)
+	if beginErr != nil {
+		return beginErr
+	}
+	defer release()
+	ctx = operationCtx
 	run, err := s.m.pg.ChatRunForInput(ctx, inputID)
 	if err != nil {
 		return err

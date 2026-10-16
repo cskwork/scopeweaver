@@ -86,7 +86,16 @@ type Run struct {
 	HistoryRevision  int64      `json:"history_revision,string"`
 	Prompt           Prompt     `json:"prompt"`
 }
+type BilledUsage struct {
+	InputTokens      int `json:"input_tokens"`
+	OutputTokens     int `json:"output_tokens"`
+	CacheReadTokens  int `json:"cache_read_tokens"`
+	CacheWriteTokens int `json:"cache_write_tokens"`
+	Turns            int `json:"turns"`
+}
 type ControlState struct {
+	BilledUsage     *BilledUsage    `json:"billed_usage,omitempty"`
+	ContextChanging bool            `json:"context_changing"`
 	LatestTurnID    string          `json:"latest_turn_id,omitempty"`
 	LatestRunID     string          `json:"latest_run_id,omitempty"`
 	LatestRunStatus string          `json:"latest_run_status,omitempty"`

@@ -5,6 +5,8 @@ import { chatControlsBase, chatControlsURL } from "@/lib/chat-commands";
 import { newChatID } from "@/lib/chat-attachment-state";
 import { http, HTTPError } from "@/lib/api";
 import type {
+  ChatContextView,
+  ChatCompactOptions,
   ChatAdmission,
   ChatControlState,
   ChatPrompt,
@@ -109,6 +111,13 @@ export function useChatControls(ref: ChatSessionRef | null) {
   }
   const targetFor = (id: string) => state?.inputs.find((item) => item.id === id)?.session ?? ref;
   return {
+    context:()=>http<ChatContextView>(chatControlsURL(ref!,"context")),
+    compact:async(options:ChatCompactOptions)=>{
+      if(!ref)throw new Error("Chat session unavailable");
+      const fingerprint=JSON.stringify([key,"compact",options]);const clientID=requests.get(fingerprint)??newChatID();requests.set(fingerprint,clientID);
+      try{const result=await mutate<ChatContextView>("compact","POST",{...options,client_request_id:clientID,expected_revision:state?.revision});requests.delete(fingerprint);return result}
+      catch(error){if(error instanceof HTTPError&&error.status>=400&&error.status<500)requests.delete(fingerprint);throw error}
+    },
     prompt: (turnID: string) => http<ChatPrompt>(chatControlsURL(ref!, `turns/${encodeURIComponent(turnID)}/prompt`)),
     retry: (clientID: string) =>
       mutate<ChatHistoryResult>("retry", "POST", { client_request_id: clientID, expected_revision: state?.revision }),

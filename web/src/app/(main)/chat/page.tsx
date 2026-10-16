@@ -1,4 +1,5 @@
 "use client";
+import {ChatContextInspector,type ChatContextHandle} from "@/components/chat-context-inspector";
 import { getIntlLocale } from "@/i18n/runtime";
 
 import { translate as swt } from "@/i18n/runtime";
@@ -365,6 +366,7 @@ function DraftChat({
   const llmProfileId = profileDraft ? Number(profileDraft) : null;
   const setLlmProfileId = (id: number | null) => setProfileDraft(id == null ? "" : String(id));
   const draftKey = "chat:draft";
+ const contextInspector=React.useRef<ChatContextHandle>(null);
   const [input, setInput] = useChatDraft(draftKey);
   const [sending, setSending] = React.useState(false);
   const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => {
@@ -383,6 +385,8 @@ function DraftChat({
   async function send() {
     let msg = input.trim();
     const command=parseChatCommand(msg);
+ if(command?.kind==="context"||command?.kind==="usage"){contextInspector.current?.open();setInput("");return}
+ if(command?.kind==="compact"){if(await contextInspector.current?.compact(command.options))setInput("");return}
     if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
     if(command&&command.kind!=="queue"){toast.error(swt("interface.chatControlUnavailable"));return}
     if(command?.kind==="queue")msg=command.text;
@@ -437,6 +441,7 @@ function DraftChat({
         {agent?.description && <p className="text-muted-foreground max-w-md text-xs">{agent.description}</p>}
       </div>
 
+      <ChatContextInspector ref={contextInspector} controls={null}/>
       <Composer
         value={input}
         onChange={setInput}
@@ -494,7 +499,8 @@ function ChatView({
   const [sending, setSending] = React.useState(false);
   const [stopping, setStopping] = React.useState(false);
   // Uploaded attachments live in sessions/conv-<id>/uploads/ and accompany the next message.
-  const controls=useChatControls({conversation_id:String(conv.id),task_id:"0",exploration_id:"0",main_seg:0});
+  const contextInspector=React.useRef<ChatContextHandle>(null);
+ const controls=useChatControls({conversation_id:String(conv.id),task_id:"0",exploration_id:"0",main_seg:0});
   const attachmentState = useChatAttachments({ draftKey, ensureOwner: async () => ({ scope: "session", id: `conv-${conv.id}` }) });
   React.useEffect(() => { if (initial?.attachments?.length && !attachmentState.items.length) attachmentState.loadUploaded(initial.attachments); }, [initial?.attachments]);
   const cursorRef = React.useRef(0); // newest loaded id — incremental-tail anchor
@@ -682,41 +688,18 @@ function ChatView({
     if (vp) vp.scrollTop = vp.scrollHeight;
   }, [messages, running, viewport, approvalFocus.state]);
 
-  // Per-conversation token total, live — same accounting as the main-agent
-  // console: completed runs' `result` sum + the in-progress run's latest `usage`.
-  const tokenTotal = React.useMemo(() => {
-    let i = 0,
-      o = 0,
-      cr = 0;
-    let li = 0,
-      lo = 0,
-      lcr = 0;
-    let turns = 0; // Agent loop count equals model calls, each represented by one kind='usage' entry.
-    for (const a of messages) {
-      if (a.kind === "result") {
-        i += a.input_tokens ?? 0;
-        o += a.output_tokens ?? 0;
-        cr += a.cache_read_tokens ?? 0;
-        li = lo = lcr = 0;
-      } else if (a.kind === "usage") {
-        turns += 1;
-        li = a.input_tokens ?? 0;
-        lo = a.output_tokens ?? 0;
-        lcr = a.cache_read_tokens ?? 0;
-      }
-    }
-    const I = i + li,
-      O = o + lo,
-      CR = cr + lcr;
-    return { i: I, o: O, cr: CR, turns, any: I + O + CR > 0 };
-  }, [swLocale, messages]);
+  // Authoritative billing includes previous attempts, independently of occupancy.
+  const billed=controls.state?.billed_usage;
+  const tokenTotal={i:billed?.input_tokens??0,o:billed?.output_tokens??0,cr:billed?.cache_read_tokens??0,turns:billed?.turns??0,any:!!billed&&(billed.input_tokens+billed.output_tokens+billed.cache_read_tokens)>0};
 
   async function send(explicit?: "send"|"queue"|"steer") {
     const original=input;let msg=input.trim();const atts=attachmentState.uploaded;
     if (side.handleCommand(msg, () => setInput(""))) return;
     const command=parseChatCommand(msg);
+ if(command?.kind==="context"||command?.kind==="usage"){contextInspector.current?.open();setInput("");return}
+ if(command?.kind==="compact"){if(await contextInspector.current?.compact(command.options))setInput("");return}
     if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
-    let mode=explicit??(running||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued")?"queue":"send");
+    let mode=explicit??(running||controls.state?.active||controls.state?.context_changing||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued")?"queue":"send");
     if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;msg=command.text}else if(command.kind==="retry"){if(!controls.state?.capabilities.retry){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.retry(newChatID());await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else if(command.kind==="branch"){if(!controls.state?.capabilities.branch){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.branch({kind:"branch",client_request_id:newChatID(),turn_id:controls.state.latest_turn_id,title:command.title,expected_revision:controls.state.revision});await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else{toast.error(swt("interface.chatControlUnavailable"));return}}
     if ((!msg && !atts.length) || sending || !attachmentState.canSubmit) return;
     if(mode==="steer"&&(!controls.state?.active||attachmentState.items.length)){toast.error(swt("interface.chatControlUnavailable"));return}
@@ -792,13 +775,14 @@ function ChatView({
         </div>
       </ScrollArea>
 
+      <ChatContextInspector ref={contextInspector} controls={controls}/>
       <ChatQueue controls={controls}/>
       <Composer
         value={input}
         onChange={setInput}
         onSend={()=>void send()}
         disabled={sending}
-        queueMode={!!(running||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"))}
+        queueMode={!!(running||controls.state?.active||controls.state?.context_changing||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"))}
         onSteer={controls.state?.capabilities.steer?()=>void send("steer"):undefined}
         allowBtw
         placeholder={running ? swt("interface.m0090") : swt("interface.m0084")}

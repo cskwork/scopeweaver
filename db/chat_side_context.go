@@ -25,6 +25,19 @@ func sideControlKey(key string) string {
 	return key
 }
 func validateSideSnapshotTx(ctx context.Context, tx *sql.Tx, s sidequestion.Snapshot) error {
+	var closed bool
+	err := tx.QueryRowContext(ctx, `SELECT closed FROM chat_control_gates WHERE gate_key=$1`, func() string {
+		if s.Parent.ConversationID > 0 {
+			return s.Parent.Key()
+		}
+		return fmt.Sprintf("task-%d-main", s.Parent.TaskID)
+	}()).Scan(&closed)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	if closed {
+		return ErrSideParentGone
+	}
 	if s.Parent.IntentID > 0 {
 		return nil
 	}
@@ -38,7 +51,7 @@ func validateSideSnapshotTx(ctx context.Context, tx *sql.Tx, s sidequestion.Snap
 		}
 	}
 	var revision int64
-	err := tx.QueryRowContext(ctx, `SELECT history_revision FROM chat_control_sessions WHERE session_key=$1`, sideControlKey(s.Parent.Key())).Scan(&revision)
+	err = tx.QueryRowContext(ctx, `SELECT history_revision FROM chat_control_sessions WHERE session_key=$1`, sideControlKey(s.Parent.Key())).Scan(&revision)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
 	}

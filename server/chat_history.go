@@ -35,6 +35,12 @@ func (s *Server) chatHistoryResult(ctx context.Context, state chatstate.ControlS
 	return result
 }
 func (s *Server) changeChatHistory(ctx context.Context, ref chatstate.SessionRef, change chatstate.HistoryChange) (out ChatHistoryResult, err error) {
+	operationCtx, release, beginErr := s.beginChatMutation(ctx, ref)
+	if beginErr != nil {
+		return out, beginErr
+	}
+	defer release()
+	ctx = operationCtx
 	request := change
 	defer func() {
 		if err != nil {

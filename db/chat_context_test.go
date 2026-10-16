@@ -46,3 +46,30 @@ func TestChatContextStaleHistoryRunAndSequence(t *testing.T) {
 		t.Fatal(saved, err)
 	}
 }
+
+func TestChatContextBillingRetainsSupersededAttempts(t *testing.T) {
+	d, ref := controlFixture(t)
+	inactive := false
+	ptr := func(n int) *int { return &n }
+	for _, a := range []Activity{
+		{Kind: "usage", RunID: "old", InputTokens: ptr(10)},
+		{Kind: "result", RunID: "old", ActiveAttempt: &inactive, InputTokens: ptr(10), OutputTokens: ptr(2)},
+		{Kind: "usage", RunID: "new", InputTokens: ptr(20)},
+		{Kind: "usage", RunID: "new", InputTokens: ptr(30)},
+	} {
+		if _, err := d.AppendConvActivity(ref.ConversationID, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	state, err := d.ChatControlState(t.Context(), ref)
+	if err != nil || state.BilledUsage == nil || state.BilledUsage.InputTokens != 40 || state.BilledUsage.OutputTokens != 2 {
+		t.Fatal(state.BilledUsage, err)
+	}
+	if _, err = d.AppendConvActivity(ref.ConversationID, Activity{Kind: "result", RunID: "new", InputTokens: ptr(30), OutputTokens: ptr(4)}); err != nil {
+		t.Fatal(err)
+	}
+	state, err = d.ChatControlState(t.Context(), ref)
+	if err != nil || state.BilledUsage.InputTokens != 40 || state.BilledUsage.OutputTokens != 6 {
+		t.Fatal("live usage double-counted", state.BilledUsage, err)
+	}
+}

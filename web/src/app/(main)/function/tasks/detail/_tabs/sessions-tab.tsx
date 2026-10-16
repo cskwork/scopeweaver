@@ -33,6 +33,7 @@ import { toast } from "sonner";
 import { ApprovalExecutionFocus, useApprovalFocus, useApprovalHistory } from "@/components/approval-execution-focus";
 import { ChatAttachmentChips } from "@/components/chat-attachment-chips";
 import { useChatControls } from "@/hooks/use-chat-controls";
+import {ChatContextInspector,type ChatContextHandle} from "@/components/chat-context-inspector";
 import { parseChatCommand } from "@/lib/chat-commands";
 import {ChatMessageActions,ChatParentLink} from "@/components/chat-message-actions";
 import type {ChatHistoryResult,ChatSessionRef} from "@/lib/types";
@@ -1282,7 +1283,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
 
   const active = sessions.find((s) => s.id === activeId) ?? MAIN_SESSION;
   const controls=useChatControls(active.role==="mainagent"&&!active.inherited?{conversation_id:"0",task_id:taskId,exploration_id:"0",main_seg:active.seg??0}:null);
-  const queueMode=!!(mainChatRunning||controls.state?.active||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"));
+  const contextInspector=React.useRef<ChatContextHandle>(null);
+ const queueMode=!!(mainChatRunning||controls.state?.active||controls.state?.context_changing||controls.state?.paused||controls.state?.inputs.some(a=>a.status==="queued"));
   const knownHistory=React.useRef<Record<string,string>>({});
   const knownTerminal=React.useRef<Record<string,string>>({});
   React.useEffect(()=>{
@@ -1530,6 +1532,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
     const original=input;let text=input.trim();const atts=attachments;
     if(side.handleCommand(text,()=>setInput("")))return;
     const command=parseChatCommand(text);
+ if(command?.kind==="context"||command?.kind==="usage"){contextInspector.current?.open();setInput("");return}
+ if(command?.kind==="compact"){if(await contextInspector.current?.compact(command.options))setInput("");return}
     if(command?.kind==="invalid"){toast.error(swt("interface.chatCommandInvalid"));return}
     let mode=explicit??(queueMode?"queue":"send");
     if(command){if(command.kind==="queue"||command.kind==="steer"){mode=command.kind;text=command.text}else if(command.kind==="retry"){if(!controls.state?.capabilities.retry){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.retry(newChatID());await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else if(command.kind==="branch"){if(!controls.state?.capabilities.branch){toast.error(swt("interface.chatControlUnavailable"));return}try{const result=await controls.branch({kind:"branch",client_request_id:newChatID(),turn_id:controls.state.latest_turn_id,title:command.title,expected_revision:controls.state.revision});await historyChanged(result);setInput("")}catch(error){toast.error((error as Error).message)}return}else{toast.error(swt("interface.chatControlUnavailable"));return}}
@@ -1921,7 +1925,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
             </ScrollArea>
             {isMain ? (
               <div className="border-t p-3">
-                <ChatQueue controls={controls}/>
+                <ChatContextInspector key={active.id} ref={contextInspector} controls={controls}/>
+ <ChatQueue controls={controls}/>
                 <ChatAttachmentChips attachments={attachmentState} />
                 <input
                   ref={fileInputRef}

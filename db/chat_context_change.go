@@ -86,8 +86,12 @@ func (d *DB) CommitChatContextChange(ctx context.Context, ref chatstate.SessionR
 		var current int64
 		var operation string
 		var active sql.NullString
-		if e := tx.QueryRowContext(ctx, `SELECT revision,operation_id,active_run_id FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&current, &operation, &active); e != nil {
+		var closed bool
+		if e := tx.QueryRowContext(ctx, `SELECT revision,operation_id,active_run_id,closed FROM chat_control_gates WHERE gate_key=$1`, ref.GateKey()).Scan(&current, &operation, &active, &closed); e != nil {
 			return e
+		}
+		if closed {
+			return chatstate.ErrGone
 		}
 		if current != expected || operation != token {
 			return chatstate.ErrConflict
@@ -158,6 +162,13 @@ func (d *DB) RecordChatTranscriptBaseline(ctx context.Context, runID, before str
 		return err
 	}
 	return d.chatTx(ctx, run.Session, func(tx *sql.Tx) error {
+		var closed bool
+		if err := tx.QueryRowContext(ctx, `SELECT closed FROM chat_control_gates WHERE gate_key=$1`, run.Session.GateKey()).Scan(&closed); err != nil {
+			return err
+		}
+		if closed {
+			return chatstate.ErrGone
+		}
 		current, err := chatRun(ctx, tx, runID)
 		if err != nil {
 			return err
