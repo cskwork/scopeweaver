@@ -179,8 +179,12 @@ func (d *DB) AdmitChatInput(ctx context.Context, ref chatstate.SessionRef, clien
 	return
 }
 func (d *DB) ChatControlState(ctx context.Context, ref chatstate.SessionRef) (out chatstate.ControlState, err error) {
+	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error { out, err = chatControlStateTx(ctx, tx, ref); return err })
+	return
+}
+func chatControlStateTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRef) (out chatstate.ControlState, err error) {
 	out = chatstate.ControlState{Session: ref, Inputs: []chatstate.Admission{}, Capabilities: map[string]bool{"queue": true, "steer": true}}
-	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
+	err = func() error {
 		var active sql.NullString
 		if e := tx.QueryRowContext(ctx, `SELECT g.revision,g.paused,g.active_run_id,s.history_revision FROM chat_control_gates g JOIN chat_control_sessions s ON s.gate_key=g.gate_key WHERE s.session_key=$1`, ref.Key()).Scan(&out.Revision, &out.Paused, &active, &out.HistoryRevision); e != nil {
 			return e
@@ -191,6 +195,22 @@ func (d *DB) ChatControlState(ctx context.Context, ref chatstate.SessionRef) (ou
 				return e
 			}
 			out.Active = &run
+		}
+		for _, capability := range []string{"retry", "edit", "branch"} {
+			out.Capabilities[capability] = out.Active == nil
+		}
+		var parentJSON []byte
+		var parentKey sql.NullString
+		if e := tx.QueryRowContext(ctx, `SELECT parent_ref,parent_session_key,COALESCE(parent_turn_id,'') FROM chat_control_sessions WHERE session_key=$1`, ref.Key()).Scan(&parentJSON, &parentKey, &out.ParentTurnID); e != nil {
+			return e
+		}
+		if len(parentJSON) > 0 {
+			var parent chatstate.SessionRef
+			if e := json.Unmarshal(parentJSON, &parent); e != nil {
+				return e
+			}
+			out.Parent = &parent
+			out.ParentAvailable = parentKey.Valid
 		}
 		var approval bool
 		if e := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM intercept_pending WHERE status='pending' AND (conversation_id=$1 OR task_id=$2))`, nullableID(ref.ConversationID), fmt.Sprint(ref.TaskID)).Scan(&approval); e != nil {
@@ -210,9 +230,10 @@ func (d *DB) ChatControlState(ctx context.Context, ref chatstate.SessionRef) (ou
 			out.Inputs = append(out.Inputs, a)
 		}
 		return rows.Err()
-	})
+	}()
 	return
 }
+
 func (d *DB) UpdateChatInput(ctx context.Context, ref chatstate.SessionRef, id string, expected int64, prompt chatstate.Prompt) (out chatstate.Admission, err error) {
 	err = d.chatTx(ctx, ref, func(tx *sql.Tx) error {
 		a, e := chatInput(ctx, tx, ref, id)
@@ -299,11 +320,11 @@ func (d *DB) ReorderChatInputs(ctx context.Context, ref chatstate.SessionRef, ex
 	})
 }
 
-const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
+const runCols = `r.id,r.input_id,r.turn_id,COALESCE(r.supersedes_run_id,''),r.transcript_id,r.start_record_uuid,r.end_record_uuid,r.status,r.history_revision,r.prompt,r.turn_ordinal,r.active,r.imported,COALESCE(r.source_run_id,''),COALESCE(s.conversation_id,0),COALESCE(s.task_id,0),COALESCE(s.exploration_id,0),s.main_seg`
 
 func scanChatRun(row interface{ Scan(...any) error }) (r chatstate.Run, err error) {
 	var prompt []byte
-	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
+	err = row.Scan(&r.ID, &r.InputID, &r.TurnID, &r.SupersedesRunID, &r.TranscriptID, &r.StartRecordUUID, &r.EndRecordUUID, &r.Status, &r.HistoryRevision, &prompt, &r.TurnOrdinal, &r.Active, &r.Imported, &r.SourceRunID, &r.Session.ConversationID, &r.Session.TaskID, &r.Session.ExplorationID, &r.Session.MainSeg)
 	if err == nil {
 		err = json.Unmarshal(prompt, &r.Prompt)
 	}
@@ -323,7 +344,13 @@ func (d *DB) ChatGateSession(ctx context.Context, gate string) (ref chatstate.Se
 func (d *DB) ChatRun(ctx context.Context, id string) (chatstate.Run, error) {
 	return scanChatRun(d.QueryRowContext(ctx, `SELECT `+runCols+` FROM chat_control_runs r JOIN chat_control_sessions s ON s.session_key=r.session_key WHERE r.id=$1`, id))
 }
-func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (out *chatstate.Run, err error) {
+func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (*chatstate.Run, error) {
+	return d.claimChatInput(ctx, gate, "")
+}
+func (d *DB) ClaimChatHistoryInput(ctx context.Context, gate, id string) (*chatstate.Run, error) {
+	return d.claimChatInput(ctx, gate, id)
+}
+func (d *DB) claimChatInput(ctx context.Context, gate, selected string) (out *chatstate.Run, err error) {
 	ref, err := d.ChatGateSession(ctx, gate)
 	if err != nil {
 		return nil, err
@@ -334,10 +361,10 @@ func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (out *chatstat
 		if e := tx.QueryRowContext(ctx, `SELECT paused,active_run_id FROM chat_control_gates WHERE gate_key=$1`, gate).Scan(&paused, &active); e != nil {
 			return e
 		}
-		if paused || active.Valid {
+		if (paused && selected == "") || active.Valid {
 			return nil
 		}
-		a, e := scanChatAdmission(tx.QueryRowContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status='queued' AND i.kind='turn' ORDER BY i.ordinal,i.id LIMIT 1 FOR UPDATE OF i`, gate))
+		a, e := scanChatAdmission(tx.QueryRowContext(ctx, `SELECT `+admissionCols+` FROM chat_control_inputs i JOIN chat_control_sessions s ON s.session_key=i.session_key WHERE i.gate_key=$1 AND i.status='queued' AND i.kind='turn' AND ($2='' OR i.id=$2) ORDER BY i.ordinal,i.id LIMIT 1 FOR UPDATE OF i`, gate, selected))
 		if errors.Is(e, sql.ErrNoRows) {
 			return nil
 		}
@@ -348,11 +375,23 @@ func (d *DB) ClaimNextChatInput(ctx context.Context, gate string) (out *chatstat
 		if e = tx.QueryRowContext(ctx, `SELECT history_revision,transcript_id FROM chat_control_sessions WHERE session_key=$1`, a.Session.Key()).Scan(&r.HistoryRevision, &r.TranscriptID); e != nil {
 			return e
 		}
+		if e = tx.QueryRowContext(ctx, `SELECT COALESCE(turn_id,$2),COALESCE(supersedes_run_id,'') FROM chat_control_inputs WHERE id=$1`, a.ID, r.TurnID).Scan(&r.TurnID, &r.SupersedesRunID); e != nil {
+			return e
+		}
+		if r.SupersedesRunID != "" {
+			if e = tx.QueryRowContext(ctx, `SELECT turn_ordinal FROM chat_control_runs WHERE id=$1`, r.SupersedesRunID).Scan(&r.TurnOrdinal); e != nil {
+				return e
+			}
+		} else {
+			if e = tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(turn_ordinal),0)+1 FROM chat_control_runs WHERE session_key=$1`, r.Session.Key()).Scan(&r.TurnOrdinal); e != nil {
+				return e
+			}
+		}
 		if r.TranscriptID == "" {
 			r.TranscriptID = r.Session.LegacyTranscriptID()
 		}
 		payload, _ := json.Marshal(a.Prompt)
-		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status) VALUES($1,$2,$3,$4,$5,$6,$7,'running')`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload); e != nil {
+		if _, e = tx.ExecContext(ctx, `INSERT INTO chat_control_runs(id,input_id,session_key,turn_id,history_revision,transcript_id,prompt,status,supersedes_run_id,turn_ordinal) VALUES($1,$2,$3,$4,$5,$6,$7,'running',NULLIF($8,''),$9)`, r.ID, a.ID, a.Session.Key(), r.TurnID, r.HistoryRevision, r.TranscriptID, payload, r.SupersedesRunID, r.TurnOrdinal); e != nil {
 			return e
 		}
 		if _, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET status='claimed',revision=revision+1 WHERE id=$1`, a.ID); e != nil {

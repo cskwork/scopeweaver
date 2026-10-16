@@ -35,6 +35,10 @@ func (s *Server) chatControlRef(w http.ResponseWriter, r *http.Request) (chatsta
 		writeErr(w, 400, "seg is required")
 		return chatstate.SessionRef{}, false
 	}
+	if visible, err := s.m.pg.MainChatSegmentAvailable(r.Context(), t.ExpID, seg); err != nil || !visible {
+		chatControlError(w, chatstate.ErrGone)
+		return chatstate.SessionRef{}, false
+	}
 	id, _ := strconv.ParseInt(t.ID, 10, 64)
 	return chatstate.SessionRef{TaskID: id, ExplorationID: t.ExpID, MainSeg: seg}, true
 }
@@ -98,6 +102,10 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 	}
 	rest := strings.Trim(r.PathValue("rest"), "/")
 	parts := strings.Split(rest, "/")
+	if r.Method == http.MethodGet && parts[0] == "attempts" {
+		s.chatAttemptsHTTP(w, r, ref, parts)
+		return
+	}
 	if r.Method == http.MethodGet && rest == "" {
 		state, err := s.m.pg.ChatControlState(r.Context(), ref)
 		if err != nil {
@@ -105,6 +113,10 @@ func (s *Server) chatControls(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, 200, state)
+		return
+	}
+	if r.Method == http.MethodPost && (rest == "retry" || rest == "edit" || rest == "branch") {
+		s.chatHistoryHTTP(w, r, ref, rest)
 		return
 	}
 	if r.Method == http.MethodPost && rest == "inputs" {

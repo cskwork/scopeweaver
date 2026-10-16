@@ -140,7 +140,7 @@ func (d *DB) UpdateConversationProfile(id int64, llmProfileID *int64) error {
 
 // ListConversations returns all threads, most-recently-updated first.
 func (d *DB) ListConversations() ([]*Conversation, error) {
-	rows, err := d.Query(`SELECT ` + convCols + ` FROM conversations
+	rows, err := d.Query(`SELECT ` + convCols + ` FROM conversations WHERE NOT preparing
 ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC NULLS LAST, updated_at DESC, id DESC`)
 	if err != nil {
 		return nil, err
@@ -159,7 +159,7 @@ ORDER BY (pinned_at IS NOT NULL) DESC, pinned_at DESC NULLS LAST, updated_at DES
 
 // GetConversation returns one thread (nil, nil if absent).
 func (d *DB) GetConversation(id int64) (*Conversation, error) {
-	c, err := scanConv(d.QueryRow(`SELECT `+convCols+` FROM conversations WHERE id=$1`, id))
+	c, err := scanConv(d.QueryRow(`SELECT `+convCols+` FROM conversations WHERE id=$1 AND NOT preparing`, id))
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -205,7 +205,7 @@ func (d *DB) TouchConversation(id int64) error {
 
 // DeleteConversation removes a thread; its activities cascade via FK.
 func (d *DB) DeleteConversation(id int64) error {
-	_, err := d.Exec(`DELETE FROM conversations WHERE id=$1`, id)
+	_, err := d.Exec(`DELETE FROM conversations WHERE id=$1 AND NOT preparing`, id)
 	return err
 }
 
@@ -252,7 +252,7 @@ func (d *DB) ConvActivityList(convID, sinceID int64, limit int) ([]Activity, int
 	}
 	const cols = `id, COALESCE(worker,''), COALESCE(kind,''), COALESCE(tool,''), COALESCE(tool_use_id,''), is_error, COALESCE(summary,''), created_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,COALESCE(turn_id,''),COALESCE(run_id,''),active_attempt,history_mutable`
 	rows, err := d.Query(`SELECT `+cols+`
-FROM conversation_activities WHERE conversation_id=$1 AND id>$2 ORDER BY id LIMIT $3`, convID, sinceID, limit)
+FROM conversation_activities WHERE conversation_id=$1 AND active_attempt IS DISTINCT FROM false AND id>$2 ORDER BY id LIMIT $3`, convID, sinceID, limit)
 	if err != nil {
 		return nil, sinceID, err
 	}
@@ -286,7 +286,7 @@ func (d *DB) ConvActivityPage(convID, before int64, limit int) ([]Activity, bool
 	// fetch one extra row to detect whether older history remains before this window.
 	rows, err := d.Query(`SELECT `+cols+`
 FROM conversation_activities
-WHERE conversation_id=$1 AND ($2 <= 0 OR id < $2)
+WHERE conversation_id=$1 AND active_attempt IS DISTINCT FROM false AND ($2 <= 0 OR id < $2)
 ORDER BY id DESC LIMIT $3`, convID, before, limit+1)
 	if err != nil {
 		return nil, false, err

@@ -7,11 +7,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Autumn-27/norma/llm"
@@ -19,12 +22,14 @@ import (
 )
 
 type TranscriptRevision struct {
-	ID              string `json:"id"`
-	SessionKey      string `json:"session_key"`
-	TranscriptID    string `json:"transcript_id"`
-	EndRecordUUID   string `json:"end_record_uuid"`
-	SHA256          string `json:"sha256"`
-	HistoryRevision int64  `json:"history_revision,string"`
+	SourceRunID     string            `json:"-"`
+	ImportedPrompts map[string]Prompt `json:"-"`
+	ID              string            `json:"id"`
+	SessionKey      string            `json:"session_key"`
+	TranscriptID    string            `json:"transcript_id"`
+	EndRecordUUID   string            `json:"end_record_uuid"`
+	SHA256          string            `json:"sha256"`
+	HistoryRevision int64             `json:"history_revision,string"`
 	// The checksum protects the prepared prefix. Normal turns append after it.
 	ByteLength int64  `json:"byte_length"`
 	Directory  string `json:"-"` // preparation-only authority; never accepted from HTTP
@@ -140,12 +145,19 @@ func writeChatManifest(path string, data []byte) error {
 	return f.Sync()
 }
 func syncChatDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	return dir.Sync()
+	err = dir.Sync()
+	if errors.Is(err, syscall.EINVAL) || errors.Is(err, syscall.ENOTSUP) {
+		return nil
+	}
+	return err
 }
 func ValidateTranscriptRevision(store *transcript.Store, revision TranscriptRevision) error {
 	if store == nil || revision.ID == "" || revision.TranscriptID != "chat-rev-"+revision.ID || strings.ContainsAny(revision.ID, "/\\.") || revision.ByteLength < 0 {

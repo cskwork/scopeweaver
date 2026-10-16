@@ -1469,3 +1469,27 @@ CREATE TABLE IF NOT EXISTS chat_transcript_revisions (
  UNIQUE(session_key,history_revision)
 );
 ALTER TABLE chat_control_sessions ADD COLUMN IF NOT EXISTS active_revision_id TEXT REFERENCES chat_transcript_revisions(id) ON DELETE SET NULL;
+
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS preparing BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE main_sessions ADD COLUMN IF NOT EXISTS preparing BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE chat_control_sessions ADD COLUMN IF NOT EXISTS parent_ref JSONB;
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS imported BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS source_run_id TEXT;
+ALTER TABLE chat_control_inputs ADD COLUMN IF NOT EXISTS turn_id TEXT;
+ALTER TABLE chat_control_inputs ADD COLUMN IF NOT EXISTS supersedes_run_id TEXT REFERENCES chat_control_runs(id) ON DELETE SET NULL;
+CREATE TABLE IF NOT EXISTS chat_history_changes (
+ session_key TEXT NOT NULL REFERENCES chat_control_sessions(session_key) ON DELETE CASCADE,
+ client_id TEXT NOT NULL,
+ fingerprint TEXT NOT NULL,
+ kind TEXT NOT NULL,
+ status TEXT NOT NULL CHECK(status IN ('preparing','published','failed')),
+ target_session_key TEXT REFERENCES chat_control_sessions(session_key) ON DELETE SET NULL,
+ result JSONB,
+ created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+ PRIMARY KEY(session_key,client_id)
+);
+ALTER TABLE chat_history_changes ADD COLUMN IF NOT EXISTS input_id TEXT REFERENCES chat_control_inputs(id) ON DELETE SET NULL;
+
+ALTER TABLE chat_control_runs ADD COLUMN IF NOT EXISTS turn_ordinal BIGINT NOT NULL DEFAULT 0;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_current_attempt ON chat_control_runs(session_key,turn_id) WHERE active;

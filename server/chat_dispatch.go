@@ -44,7 +44,9 @@ func chatBusyKey(ref chatstate.SessionRef) string {
 
 // Claim and cancellation registration finish before the accepting HTTP request
 // returns. No DB transaction is held while tools or inference execute.
-func (s *Server) dispatchChatGate(gate string) {
+func (s *Server) dispatchChatGate(gate string)             { s.dispatchChatInput(gate, "") }
+func (s *Server) dispatchChatHistoryInput(gate, id string) { s.dispatchChatInput(gate, id) }
+func (s *Server) dispatchChatInput(gate, selected string) {
 	if s.m.pg == nil || s.ctx.Err() != nil {
 		return
 	}
@@ -67,7 +69,12 @@ func (s *Server) dispatchChatGate(gate string) {
 			return
 		}
 	}
-	run, err := s.m.pg.ClaimNextChatInput(s.ctx, gate)
+	var run *chatstate.Run
+	if selected != "" {
+		run, err = s.m.pg.ClaimChatHistoryInput(s.ctx, gate, selected)
+	} else {
+		run, err = s.m.pg.ClaimNextChatInput(s.ctx, gate)
+	}
 	if err != nil || run == nil {
 		if taskID != "" {
 			s.engine.decInflight(taskID)

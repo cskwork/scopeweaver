@@ -66,6 +66,10 @@ type Admission struct {
 	Ordinal     int64      `json:"ordinal,string"`
 }
 type Run struct {
+	TurnOrdinal     int64      `json:"turn_ordinal,string"`
+	Active          bool       `json:"active"`
+	Imported        bool       `json:"imported"`
+	SourceRunID     string     `json:"source_run_id,omitempty"`
 	ID              string     `json:"id"`
 	InputID         string     `json:"input_id"`
 	TurnID          string     `json:"turn_id"`
@@ -79,6 +83,10 @@ type Run struct {
 	Prompt          Prompt     `json:"prompt"`
 }
 type ControlState struct {
+	StartInputID    string          `json:"-"`
+	Parent          *SessionRef     `json:"parent,omitempty"`
+	ParentTurnID    string          `json:"parent_turn_id,omitempty"`
+	ParentAvailable bool            `json:"parent_available"`
 	Session         SessionRef      `json:"session"`
 	Revision        int64           `json:"revision,string"`
 	HistoryRevision int64           `json:"history_revision,string"`

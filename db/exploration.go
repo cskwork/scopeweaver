@@ -2,9 +2,11 @@ package db
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/Autumn-27/artex/chatstate"
 	"github.com/Autumn-27/artex/locale"
 	"sort"
 	"strconv"
@@ -1489,10 +1491,10 @@ func (s *ExplorationStore) ActivityList(nodeID *int64, sinceID int64, limit int)
 	const cols = `id, node_id, COALESCE(worker,''), COALESCE(kind,''), COALESCE(tool,''), COALESCE(tool_use_id,''), is_error, COALESCE(summary,''), metadata, created_at, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, main_seg,COALESCE(turn_id,''),COALESCE(run_id,''),active_attempt,history_mutable`
 	if nodeID != nil {
 		rows, err = s.db.Query(`SELECT `+cols+`
-FROM activity WHERE exploration_id=$1 AND node_id=$2 AND id>$3 ORDER BY id LIMIT $4`, s.expID, *nodeID, sinceID, limit)
+FROM activity WHERE exploration_id=$1 AND active_attempt IS DISTINCT FROM false AND node_id=$2 AND id>$3 ORDER BY id LIMIT $4`, s.expID, *nodeID, sinceID, limit)
 	} else {
 		rows, err = s.db.Query(`SELECT `+cols+`
-FROM activity WHERE exploration_id=$1 AND id>$2 ORDER BY id LIMIT $3`, s.expID, sinceID, limit)
+FROM activity WHERE exploration_id=$1 AND active_attempt IS DISTINCT FROM false AND id>$2 ORDER BY id LIMIT $3`, s.expID, sinceID, limit)
 	}
 	if err != nil {
 		return nil, sinceID, err
@@ -1605,7 +1607,7 @@ func (s *ExplorationStore) ActivityPage(f ActivitySessionFilter, before int64, l
 	limitArg := len(args) + 1
 	args = append(args, limit+1) // one extra row to detect older history
 	q := fmt.Sprintf(`SELECT `+cols+`
-FROM activity WHERE exploration_id=$1%s AND ($%d <= 0 OR id < $%d)
+FROM activity WHERE exploration_id=$1 AND active_attempt IS DISTINCT FROM false%s AND ($%d <= 0 OR id < $%d)
 ORDER BY id DESC LIMIT $%d`, cond, beforeArg, beforeArg, limitArg)
 	rows, err := s.db.Query(q, args...)
 	if err != nil {
@@ -1705,14 +1707,14 @@ type MainSession struct {
 // CurrentMainSeg returns the highest main-session segment (0 when none created yet).
 func (s *ExplorationStore) CurrentMainSeg() (int, error) {
 	var seg int
-	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM main_sessions WHERE exploration_id=$1`, s.expID).Scan(&seg)
+	err := s.db.QueryRow(`SELECT COALESCE(MAX(seq),0) FROM main_sessions WHERE exploration_id=$1 AND NOT preparing`, s.expID).Scan(&seg)
 	return seg, err
 }
 
 // ListMainSessions returns every main-session segment newest-first, always including
 // the implicit original segment 0. Segment 0 carries no stored timestamp.
 func (s *ExplorationStore) ListMainSessions() ([]MainSession, error) {
-	rows, err := s.db.Query(`SELECT seq, created_at FROM main_sessions WHERE exploration_id=$1 ORDER BY seq DESC`, s.expID)
+	rows, err := s.db.Query(`SELECT seq, created_at FROM main_sessions WHERE exploration_id=$1 AND NOT preparing ORDER BY seq DESC`, s.expID)
 	if err != nil {
 		return nil, err
 	}
@@ -1735,13 +1737,34 @@ func (s *ExplorationStore) ListMainSessions() ([]MainSession, error) {
 // NewMainSession creates the next main-session segment (seq = current+1) and returns
 // it. It touches only main_sessions — the task's exploration graph/assets/goal are
 // untouched, so the new session starts with a clean transcript over the same task.
-func (s *ExplorationStore) NewMainSession() (MainSession, error) {
-	var m MainSession
-	err := s.db.QueryRow(`
-INSERT INTO main_sessions(exploration_id, seq)
-VALUES ($1, COALESCE((SELECT MAX(seq) FROM main_sessions WHERE exploration_id=$1),0)+1)
-RETURNING seq, created_at`, s.expID).Scan(&m.Seq, &m.CreatedAt)
-	return m, err
+func (s *ExplorationStore) NewMainSession() (out MainSession, err error) {
+	ctx := context.Background()
+	var taskID int64
+	err = s.db.QueryRowContext(ctx, `SELECT id FROM tasks WHERE exploration_id=$1`, s.expID).Scan(&taskID)
+	allocate := func(tx *sql.Tx) error {
+		return tx.QueryRowContext(ctx, `INSERT INTO main_sessions(exploration_id,seq) VALUES($1,(SELECT COALESCE(MAX(seq),0)+1 FROM main_sessions WHERE exploration_id=$1)) RETURNING seq,created_at`, s.expID).Scan(&out.Seq, &out.CreatedAt)
+	}
+	if err == nil {
+		err = s.db.chatTx(ctx, chatstate.SessionRef{TaskID: taskID, ExplorationID: s.expID}, allocate)
+		return
+	}
+	if err != sql.ErrNoRows {
+		return
+	}
+	tx, e := s.db.BeginTx(ctx, nil)
+	if e != nil {
+		return out, e
+	}
+	defer tx.Rollback()
+	var id int64
+	if err = tx.QueryRowContext(ctx, `SELECT id FROM explorations WHERE id=$1 FOR UPDATE`, s.expID).Scan(&id); err != nil {
+		return
+	}
+	if err = allocate(tx); err != nil {
+		return
+	}
+	err = tx.Commit()
+	return
 }
 
 // ActivityDetail lazily returns the full detail blob for one step.
