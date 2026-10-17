@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/transcript"
 )
 
@@ -31,10 +32,17 @@ func (s *Server) removeUnpublishedChatTranscript(ctx context.Context, revision c
 // recovery deletes hidden owners and before any admission or dispatch can prepare files.
 func (s *Server) recoverChatTranscripts(ctx context.Context) error {
 	root := filepath.Join(s.m.dir, "transcripts")
-	entries, err := os.ReadDir(root)
+	info, err := os.Stat(root)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return errors.New(locale.Text(locale.ServerDefault(), "transcript path is not a directory: %s", root))
+	}
+	entries, err := os.ReadDir(root)
 	if err != nil {
 		return err
 	}

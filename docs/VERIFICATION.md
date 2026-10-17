@@ -2,6 +2,19 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Shared runtime fixes from standalone CLI verification (2026-10-17)
+
+Candidate branch `fix/cli-discovered-runtime-bugs`, based on `dev` commit `3f0ef25`. These are local results; the PR's exact-head hosted checks are separate. This change does not add the standalone CLI or subscription providers to the original application.
+
+- HTTP custom tools now use the complete recording-proxy URL returned by `Manager.ProxyAddr`. Before: `"http://" + addr` turned the controlled fixture's `http://127.0.0.1:<port>` into `http://http://127.0.0.1:<port>`, so the request failed before reaching the proxy. After: `proxyStr = addr` preserves the URL. Real direct, explicitly configured and automatic proxy routes pass; the automatic route failed before the fix.
+- Startup now checks that an existing transcript path is a directory before reading it. The Windows regular-file regression failed before the fix; it now rejects the path while preserving the file. Missing directories remain valid. The new diagnostic is available in English, Korean and Simplified Chinese.
+- Shutdown cancels work, drains HTTP, then waits for admitted chats, side answers and checkpoint publication before closing stores. Previously HTTP drain alone could leave background finalizers writing after database close. Final snapshot/context write errors now propagate, retain pending entries and make process shutdown fail explicitly; deleted/conflicting records remain benign. This bounded drain does not claim to cover every scheduler or engine producer.
+- The cancellation-usage test fixture now creates the existing optional usage table, matching production initialization. Its missing-table failure reproduced before the fixture fix; the corrected fresh-database test preserves the exact usage assertion.
+
+Real PostgreSQL shutdown checks passed 11 tests/subtests, including close/reopen persistence and injected final-write failures. Main-process checks passed 4 tests, covering normal exit 0, restart 75, bounded failures and cleanup on a real occupied-port serve failure. Focused proxy/startup/locale regressions passed. The full Windows backend run had 1,975 passes, 2 failures and 15 skips: one failure was an unchanged symlink-creation privilege limitation; the other exposed the catalog's expected count, updated from 1,980 to 1,982 for the two added diagnostics without removing completeness checks. The corrected catalog is verified separately. Linux/hosted checks must establish the remaining platform results.
+
+Frontend: 65 tests passed and the static export passed using Git Bash for the existing POSIX-style npm script. Agent adapter: 7 tests and syntax checks passed. Focused backend static analysis passed. No user database, real online target or notification delivery was used; each database-writing run created and dropped a separate `scopeweaver_test_*` database. No merge or release is claimed.
+
 ## Chat controls and context (2026-10-16)
 
 The author of [PR #29](https://github.com/cskwork/scopeweaver/pull/29) reported the checks below against upstream `6366429`. These are the contributor's historical Linux results, before the combined PR #29/#30 review; they do not establish the later candidate's status or Windows attachment-copy behavior.
