@@ -34,6 +34,7 @@ type sideRun struct {
 type sideQuestionState struct {
 	mu             sync.Mutex
 	commands       sync.Mutex // short admission / clear operations only, never inference
+	closing        bool       // protected by commands
 	contextPending map[string]pendingChatContext
 	pending        map[string]sidequestion.Snapshot
 	latest         map[string]sidequestion.Snapshot
@@ -96,9 +97,9 @@ func (s *Server) initSideQuestions() {
 	}()
 }
 
-func (s *Server) flushSideSnapshots() {
+func (s *Server) flushSideSnapshots() error {
 	if s.side == nil || s.m.pg == nil {
-		return
+		return nil
 	}
 	s.side.commands.Lock()
 	defer s.side.commands.Unlock()
@@ -106,12 +107,13 @@ func (s *Server) flushSideSnapshots() {
 	pending := s.side.pending
 	s.side.pending = map[string]sidequestion.Snapshot{}
 	s.side.mu.Unlock()
+	var flushErr error
 	for key, snap := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		err := s.m.pg.SaveSideSnapshot(ctx, snap)
 		cancel()
 		s.side.mu.Lock()
-		if err == nil || errors.Is(err, chatstate.ErrConflict) || errors.Is(err, db.ErrSideParentGone) {
+		if err == nil || errors.Is(err, chatstate.ErrConflict) || errors.Is(err, chatstate.ErrGone) || errors.Is(err, db.ErrSideParentGone) {
 			if cur, ok := s.side.latest[key]; ok && cur.RunID == snap.RunID && cur.Version == snap.Version {
 				delete(s.side.latest, key)
 			}
@@ -119,10 +121,12 @@ func (s *Server) flushSideSnapshots() {
 			s.side.pending[key] = snap
 		}
 		s.side.mu.Unlock()
-		if err != nil && !errors.Is(err, db.ErrSideParentGone) {
+		if err != nil && !errors.Is(err, db.ErrSideParentGone) && !errors.Is(err, chatstate.ErrGone) && !errors.Is(err, chatstate.ErrConflict) {
+			flushErr = errors.Join(flushErr, fmt.Errorf("side snapshot %s: %w", key, err))
 			log.Printf(locale.Text(locale.ServerDefault(), "[btw] checkpoint persistence: %v"), err)
 		}
 	}
+	return flushErr
 }
 
 func (s *Server) sideSnapshot(ctx context.Context, p sidequestion.Parent) (*sidequestion.Snapshot, error) {
@@ -312,6 +316,10 @@ func (s *Server) registerSideRoutes(mux *http.ServeMux) {
 }
 
 func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p sidequestion.Parent) {
+	if r.Method == http.MethodPost && s.ctx.Err() != nil {
+		writeErr(w, http.StatusServiceUnavailable, "server is shutting down")
+		return
+	}
 	key := p.Key()
 	if r.Method == "DELETE" {
 		s.side.commands.Lock()
@@ -380,6 +388,10 @@ func (s *Server) handleSideQuestions(w http.ResponseWriter, r *http.Request, p s
 	}
 	s.side.commands.Lock()
 	defer s.side.commands.Unlock()
+	if s.side.closing || s.ctx.Err() != nil {
+		writeErr(w, http.StatusServiceUnavailable, "server is shutting down")
+		return
+	}
 	if p.TaskID > 0 && s.engine.IsDeleting(strconv.FormatInt(p.TaskID, 10)) {
 		writeErr(w, 409, locale.Text(responseLanguage(w), "Task is being archived or deleted"))
 		return

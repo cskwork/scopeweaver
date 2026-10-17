@@ -85,6 +85,10 @@ func (s *Server) dispatchChatInput(gate, selected string) error {
 		return err
 	}
 	s.chatMu.Lock()
+	if s.chatClosing || s.ctx.Err() != nil {
+		s.chatMu.Unlock()
+		return context.Canceled
+	}
 	ref, err := s.m.pg.ChatGateSession(s.ctx, gate)
 	if err != nil {
 		s.chatMu.Unlock()
@@ -119,8 +123,10 @@ func (s *Server) dispatchChatInput(gate, selected string) error {
 	ctx, cancel := context.WithCancelCause(s.ctx)
 	s.chatBusy[key] = true
 	s.chatCancel[key] = cancel
+	s.chatWG.Add(1)
 	s.chatMu.Unlock()
 	go func() {
+		defer s.chatWG.Done()
 		status := "failed"
 		defer func() {
 			if problem := recover(); problem != nil {
