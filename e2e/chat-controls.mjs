@@ -20,8 +20,22 @@ export async function runChatQueueChecks({base,token,step,check,openPage,recover
    await p.goto(url);const input=p.locator("textarea[data-chat-draft]").first();await input.waitFor();
    await p.getByRole("button",{name:t.chatResumeQueue,exact:true}).waitFor();
    const submit=async(text)=>{await input.fill(text);await p.getByRole("button",{name:t.chatQueue,exact:true}).click();await p.waitForFunction(()=>document.querySelector("textarea[data-chat-draft]")?.value==="")};
-   await submit("first");await submit("second");await submit("third");
+   await submit("first");
+   await input.evaluate(element=>{const data=new DataTransfer();data.items.add(new File(["queued document"],"queue-report.txt",{type:"text/plain"}));element.dispatchEvent(new ClipboardEvent("paste",{bubbles:true,cancelable:true,clipboardData:data}))});
+   await p.getByRole("button",{name:"queue-report.txt",exact:true}).waitFor();await p.waitForFunction(()=>!document.querySelector("[data-attachment-id] .animate-spin"));
+   await submit("second");await submit("third");
    const rows=p.locator("[data-queue-input]");await rows.nth(2).waitFor();
+   const beforePatch=await (await api.get(path)).json();const originalOrder=beforePatch.inputs.map(item=>item.id);
+   for(const [index,attachments] of [[0,undefined],[2,null]]){
+    const item=beforePatch.inputs[index];const data={expected_revision:item.revision,message:item.prompt.text};if(attachments!==undefined)data.attachments=attachments;
+    const response=await api.patch(actionPath(`inputs/${item.id}`),{data});check(response.ok(),`text-only API edit failed: ${await response.text()}`);const edited=await response.json();
+    check(Array.isArray(edited.prompt.attachments)&&edited.prompt.attachments.length===0,"text-only API edit returned absent attachment manifest");check(edited.revision===String(BigInt(item.revision)+1n)&&edited.ordinal===item.ordinal,"text-only API edit changed revision or ordinal incorrectly");
+   }
+   const afterPatch=await (await api.get(path)).json();check(afterPatch.revision===String(BigInt(beforePatch.revision)+2n)&&afterPatch.paused===beforePatch.paused,"API edits changed queue pause or gate revision incorrectly");check(JSON.stringify(afterPatch.inputs.map(item=>item.id))===JSON.stringify(originalOrder),"API edits reordered queue");check(JSON.stringify(afterPatch.inputs[1])===JSON.stringify(beforePatch.inputs[1]),"API edits changed attachment-bearing input");
+   await p.reload();await rows.nth(2).waitFor();check(JSON.stringify(await rows.evaluateAll(elements=>elements.map(element=>element.getAttribute("data-queue-input"))))===JSON.stringify(originalOrder),"reload changed queue order");
+   for(const index of [0,2]){await rows.nth(index).getByRole("button",{name:t.chatQueueEdit,exact:true}).click();const dialog=p.getByRole("dialog");await dialog.locator("textarea").waitFor();check(await dialog.locator("textarea").inputValue()===beforePatch.inputs[index].prompt.text,"text-only editor did not restore API prompt");check(await dialog.locator("[data-attachment-id]").count()===0,"text-only editor restored unexpected attachments");await dialog.getByRole("button",{name:t.chatCancelEdit,exact:true}).click();await dialog.waitFor({state:"hidden"})}
+   await rows.nth(1).getByRole("button",{name:t.chatQueueEdit,exact:true}).click();await p.getByRole("dialog").getByRole("button",{name:"queue-report.txt",exact:true}).waitFor();await p.getByRole("dialog").getByRole("button",{name:t.chatQueueSave,exact:true}).click();await p.getByRole("dialog").waitFor({state:"hidden"});
+   const attachmentEdit=await (await api.get(path)).json();check(JSON.stringify(attachmentEdit.inputs[1].prompt)===JSON.stringify(beforePatch.inputs[1].prompt),"queue editor changed attachment manifest");check(attachmentEdit.inputs[1].revision===String(BigInt(beforePatch.inputs[1].revision)+1n),"attachment edit did not advance revision once");
    await rows.nth(2).getByRole("button",{name:t.chatMoveUp,exact:true}).click();
    await p.waitForFunction(()=>document.querySelectorAll("[data-queue-input] summary")[1]?.textContent==="third");
    await rows.nth(0).getByRole("button",{name:t.chatQueueRemove,exact:true}).click();await p.waitForFunction(()=>document.querySelectorAll("[data-queue-input]").length===2);
