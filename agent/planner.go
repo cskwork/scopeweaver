@@ -352,7 +352,8 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// Put changing situation data (completed intents and prefetched graph) in this
 	// round's user input, leaving static system instructions cacheable across rounds.
 	// It may be compacted during long rounds, but planner rounds are usually short.
-	situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+	overview := tsx.graphOverviewData()
+	situational := renderTriggers(ts, triggers) + renderGraphOverview(overview)
 	// The context carries task deadline/final-round state (taskclock.go). In the final
 	// round, append task-timeout settlement to user input as the round's operating
 	// instruction: assess goals one last time without generating intents.
@@ -363,6 +364,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// Create this task's working directory: <workDir>/tasks/<taskID>.
 	taskDir := ensureRunDir(p.workDir, taskID, 0)
 	ctx = intercept.WithReviewContext(ctx, taskDir, intercept.ReviewBackground{})
+	situational += renderPlannerEvidence(ctx, overview, triggers, tools, ts.ID(), taskDir)
 	sysBody := plannerSystem(goal, p.workDir, taskDir, locale.FromContext(ctx))
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts, locale.FromContext(ctx)) // Inject operating constraints to bound exploration.
