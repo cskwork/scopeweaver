@@ -93,6 +93,9 @@ func scanChatAdmission(row interface{ Scan(...any) error }) (a chatstate.Admissi
 	if err == nil {
 		err = json.Unmarshal(prompt, &a.Prompt)
 	}
+	if err == nil && a.Prompt.Attachments == nil {
+		a.Prompt.Attachments = []chatstate.Attachment{}
+	}
 	return
 }
 func chatInput(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRef, id string) (chatstate.Admission, error) {
@@ -285,6 +288,9 @@ func (d *DB) UpdateChatInput(ctx context.Context, ref chatstate.SessionRef, id s
 		}
 		if strings.TrimSpace(prompt.Text) == "" && len(prompt.Attachments) == 0 {
 			return locale.Errorf("prompt is required")
+		}
+		if prompt.Attachments == nil {
+			prompt.Attachments = []chatstate.Attachment{}
 		}
 		payload, _ := json.Marshal(prompt)
 		_, e = tx.ExecContext(ctx, `UPDATE chat_control_inputs SET prompt=$2,revision=revision+1 WHERE id=$1`, id, payload)
