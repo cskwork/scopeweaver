@@ -1,12 +1,157 @@
 package db
 
 import (
+	"encoding/json"
 	"errors"
 	"github.com/Autumn-27/artex/chatstate"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
 )
+
+func TestChatInputEditAttachmentManifest(t *testing.T) {
+	for _, tc := range []struct{ name, payload string }{
+		{"nil", ""},
+		{"omitted", `{"text":"revised"}`},
+		{"null", `{"text":"revised","attachments":null}`},
+		{"empty", `{"text":"revised","attachments":[]}`},
+		{"nonempty", `{"text":"revised","attachments":[{"name":"report.pdf","path":"uploads/report.pdf","size":4}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, ref := controlFixture(t)
+			first := queueInput(t, d, ref, "first")
+			second := queueInput(t, d, ref, "second")
+			before, err := d.ChatControlState(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prompt := chatstate.Prompt{Text: "revised"}
+			if tc.payload != "" {
+				if err := json.Unmarshal([]byte(tc.payload), &prompt); err != nil {
+					t.Fatal(err)
+				}
+			}
+			want := prompt
+			if want.Attachments == nil {
+				want.Attachments = []chatstate.Attachment{}
+			}
+			edited, err := d.UpdateChatInput(t.Context(), ref, first.ID, first.Revision, prompt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(edited.Prompt, want) || edited.Revision != first.Revision+1 || edited.Ordinal != first.Ordinal {
+				t.Errorf("edited admission = %+v; want prompt %+v and one revision increment", edited, want)
+			}
+			var raw []byte
+			if err := d.QueryRow(`SELECT prompt FROM chat_control_inputs WHERE id=$1`, first.ID).Scan(&raw); err != nil {
+				t.Fatal(err)
+			}
+			var stored chatstate.Prompt
+			if err := json.Unmarshal(raw, &stored); err != nil || !reflect.DeepEqual(stored, want) {
+				t.Errorf("stored prompt = %s; want %+v; error %v", raw, want, err)
+			}
+			after, err := d.ChatControlState(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.Revision != before.Revision+1 || len(after.Inputs) != 2 || !reflect.DeepEqual(after.Inputs[0], edited) || !reflect.DeepEqual(after.Inputs[1], second) {
+				t.Fatalf("edit changed queue order or unrelated input: %+v", after)
+			}
+			if _, err := d.UpdateChatInput(t.Context(), ref, first.ID, first.Revision, chatstate.Prompt{Text: "stale"}); !errors.Is(err, chatstate.ErrConflict) {
+				t.Fatalf("stale edit = %v; want conflict", err)
+			}
+			stale, err := d.ChatControlState(t.Context(), ref)
+			if err != nil || !reflect.DeepEqual(stale, after) {
+				t.Fatalf("stale edit wrote state: %+v, %v", stale, err)
+			}
+		})
+	}
+}
+
+func TestChatInputLegacyAttachmentManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name, payload string
+		invalid       bool
+	}{
+		{"omitted", `{"text":"first"}`, false},
+		{"null", `{"text":"first","attachments":null}`, false},
+		{"empty", `{"text":"first","attachments":[]}`, false},
+		{"nonempty", `{"text":"first","attachments":[{"name":"report.pdf","path":"uploads/report.pdf","size":4}]}`, false},
+		{"string", `{"text":"first","attachments":"invalid"}`, true},
+		{"object", `{"text":"first","attachments":{}}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, ref := controlFixture(t)
+			first := queueInput(t, d, ref, "first")
+			second := queueInput(t, d, ref, "second")
+			if err := d.PauseChatGate(t.Context(), ref, -1); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Exec(`UPDATE chat_control_inputs SET prompt=$2 WHERE id=$1`, first.ID, tc.payload); err != nil {
+				t.Fatal(err)
+			}
+			snapshot := func() string {
+				t.Helper()
+				var raw string
+				if err := d.QueryRow(`SELECT jsonb_build_object('inputs',(SELECT jsonb_agg(to_jsonb(i) ORDER BY i.ordinal,i.id) FROM chat_control_inputs i WHERE i.gate_key=$1),'gate',(SELECT to_jsonb(g) FROM chat_control_gates g WHERE g.gate_key=$1))::text`, ref.GateKey()).Scan(&raw); err != nil {
+					t.Fatal(err)
+				}
+				return raw
+			}
+			before := snapshot()
+			for range 2 {
+				state, err := d.ChatControlState(t.Context(), ref)
+				if tc.invalid {
+					var typeErr *json.UnmarshalTypeError
+					if !errors.As(err, &typeErr) {
+						t.Fatalf("invalid manifest read = %v; want explicit JSON type error", err)
+					}
+					continue
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				want := first
+				if err := json.Unmarshal([]byte(tc.payload), &want.Prompt); err != nil {
+					t.Fatal(err)
+				}
+				if want.Prompt.Attachments == nil {
+					want.Prompt.Attachments = []chatstate.Attachment{}
+				}
+				if !state.Paused || len(state.Inputs) != 2 || !reflect.DeepEqual(state.Inputs[0], want) || !reflect.DeepEqual(state.Inputs[1], second) {
+					t.Errorf("legacy read changed admission or returned absent attachment list: %+v", state)
+				}
+			}
+			if after := snapshot(); after != before {
+				t.Fatal("read changed stored rows, revisions or ordering")
+			}
+			if tc.invalid {
+				_, err := d.UpdateChatInput(t.Context(), ref, first.ID, first.Revision, chatstate.Prompt{Text: "replacement"})
+				var typeErr *json.UnmarshalTypeError
+				if !errors.As(err, &typeErr) || snapshot() != before {
+					t.Fatalf("invalid stored manifest edit must fail without writes: %v", err)
+				}
+				return
+			}
+			state, err := d.ChatControlState(t.Context(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := d.ResumeChatGate(t.Context(), ref, state.Revision); err != nil {
+				t.Fatal(err)
+			}
+			run, err := d.ClaimNextChatInput(t.Context(), ref.GateKey())
+			if err != nil || run == nil || run.InputID != first.ID || !reflect.DeepEqual(run.Prompt, state.Inputs[0].Prompt) {
+				t.Fatalf("legacy claim lost manifest or order: %+v, %v", run, err)
+			}
+			saved, err := d.ChatRun(t.Context(), run.ID)
+			if err != nil || !reflect.DeepEqual(saved.Prompt, run.Prompt) {
+				t.Fatalf("claimed prompt was not persisted: %+v, %v", saved, err)
+			}
+		})
+	}
+}
 
 func TestChatAdmission(t *testing.T) {
 	d, err := Open(testDSN(t))

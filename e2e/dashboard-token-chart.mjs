@@ -59,7 +59,7 @@ const cleanupErrors = [];
 let bodyError;
 async function startServer() {
   runtime = fs.mkdtempSync(path.join(os.tmpdir(), "scopeweaver-dashboard-"));
-  const isolatedBinary = path.join(runtime, "scopeweaver");
+  const isolatedBinary = path.join(runtime, process.platform === "win32" ? "scopeweaver.exe" : "scopeweaver");
   // BaseDir also anchors self-update files, so isolate the executable itself.
   fs.copyFileSync(binary, isolatedBinary);
   fs.chmodSync(isolatedBinary, 0o700);
