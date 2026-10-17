@@ -2,6 +2,41 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Trigger evidence in the first planner request (2026-10-18)
+
+Local candidate on original head `ffe260435fed6576394d613991aaf6e8010d3f48`, with the shared CLI correction backported. Normally a finding or completed-worker event wakes the planner with trigger summaries and a compact `graph_overview`; `prove_goal` still requires the recorded evidence for every goal condition. The compact entries lacked full finding/fact fields, so reading `node_detail` before proof was legitimate.
+
+Abridged actual change in [Planner.Plan](../agent/planner.go), with unchanged intervening task-context setup omitted:
+
+```go
+// Before
+situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+// After
+overview := tsx.graphOverviewData()
+situational := renderTriggers(ts, triggers) + renderGraphOverview(overview)
+// After ensureRunDir and WithReviewContext:
+situational += renderPlannerEvidence(ctx, overview, triggers, tools, ts.ID(), taskDir)
+```
+
+The first new line captures the existing bounded overview once; the second renders that same snapshot. The last line appends full detail for its current-exploration fact/finding candidates yielded by concrete `finding`/`done` trigger intents, after task/review context exists. It does not traverse `related_tasks` or expand global lineage. The [attachment implementation](../agent/planner_evidence.go) makes at most **4 read attempts** and admits whole nodes only within **32,768 UTF-8 bytes for the entire attachment**, including its localized header, JSON envelope and `omitted_count`; an oversized node is omitted rather than truncated. Repeated candidates are deduplicated.
+
+Only the final resolved `node_detail` capability may read: its schema must accept the input, `IsReadOnly` must hold, and permissions must explicitly allow an unchanged input. Wrappers, defaults, metering, restricted results and errors remain effective; unsafe or incomplete results are omitted with no raw-helper fallback. The header is complete in EN/KO/zh-Hans and labels recorded content as untrusted observations. Existing explicit reads, including associated direct-source nodes, retain their original access rules.
+
+Concrete row from the **CLI-owned synthetic loopback R22 lab**, not an original-production incident: goal `2` remained open after intent `3` completed one owned GET and persisted fact `4` plus finding `5`. The goal required the exact finding name `SYNTHETIC LAB ONLY public debug marker`, severity `low`, marker and observations. At **2026-10-17 22:42:31+09:00**, the planner legitimately read `node_detail` `5` and `4` for those missing full fields. Harness cleanup paused it at **22:42:54+09:00** before proof; this was not a human pause. R22 failed after **470.50 seconds overall** under the unchanged **420-second task budget**. The underlying model/provider latency cause is **unknown**. With the correction, eligible full details for those same snapshot candidates reach the first request of the triggered round; they do not establish proof by themselves.
+
+| Local candidate check | Observed result |
+| --- | --- |
+| Original complete `agent` package, exact production source without overlay | 598 tests/subtests passed, 0 failures/skips; CLI equivalent 607 passed, 0 failures/skips |
+| New regressions in three `planner_evidence*test.go` files | 31 test/subtest passes; actual `Planner.Plan` streaming/nonstreaming first-request equality, nine permission cases, count/byte bounds, deduplication/isolation, missing/deleted/late/hidden evidence, explicit recovery, no automatic proof and multiple goals |
+| Original focused server proof/locale checks and complete `locale` package | 5 and 19 passed respectively, 0 failures/skips; strict completeness retained for **1,986 keys × 3 languages**, updating the expected count from 1,985 for the new header |
+| Original `go build ./...`, `go vet ./...` | Both native exit 0 |
+| Linux `-race`, current equivalent CLI source | Focused checks 49 passed and complete `agent` package 607 passed, 0 failures/skips; both actual Go exits 0, no `DATA RACE`. All 1,175 snapshot source files verified; this is not an original-module run |
+| Real packaged CLI loopback acceptance, all five cases | Native exit 0 for core 19.14s, GLM LOW 82.63s, Flash LOW 114.84s, OAuth LOW 108.12s and Flash HIGH 317.83s, each at the unchanged 420-second task budget. These single lab runs are not a performance comparison |
+
+The unchanged original baseline failed the streaming and nonstreaming missing-context assertions (two leaf failures plus their parent), without setup failure. Controlled-provider usage in regression fixtures is synthetic, not paid-token evidence. Real `prove_goal`, authentic usage/receipts and the existing terminal proof gate remain required; phase, worker, effort, deadline and retry behavior are unchanged. Counterexample: a disabled, restricted, missing, oversized, untriggered or inherited node receives no automatic full detail. When available, an explicit read can recover omitted/fresh evidence; reading data alone cannot complete a goal, and proving one of multiple goals cannot complete the task.
+
+These are local working-tree results, not exact-new-head CI. The unchanged Windows `TestChatBranchCopyRejectsDestinationSymlink` privilege failure also reproduced on CLI baseline `650dc82910e5e36668161a5276455506f64713fe`; no check was weakened, and full native-server success is not claimed. All seven required hosted checks on the new candidate remain pending. PR #40 remains unmerged with final human review pending; this section claims no publication or release. No public API, schema or migration changes are introduced. Earlier dated sections retain their historical results.
+
 ## Chat context readiness (2026-10-17)
 
 Local UI candidate on top of PR #40 head c9fb642. The inspector can open before its initial controls request finishes. Previously it identified an unresolved session as draft, then treated the first resolved session as a switch and closed the panel. The Chinese desktop task case failed with an unstable, then detached close button in [checks run 39031048389](https://github.com/cskwork/scopeweaver/actions/runs/39031048389). That hosted head remains failure evidence; these new results are local.
