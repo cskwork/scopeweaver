@@ -2,6 +2,37 @@
 
 English · [한국어](ko/VERIFICATION.md) · [简体中文](zh-Hans/VERIFICATION.md) · [繁體中文](zh-Hant/VERIFICATION.md) · [日本語](ja/VERIFICATION.md) · [Español](es/VERIFICATION.md)
 
+## Chat context readiness (2026-10-17)
+
+Local UI candidate on top of PR #40 head c9fb642. The inspector can open before its initial controls request finishes. Previously it identified an unresolved session as draft, then treated the first resolved session as a switch and closed the panel. The Chinese desktop task case failed with an unstable, then detached close button in [checks run 39031048389](https://github.com/cskwork/scopeweaver/actions/runs/39031048389). That hosted head remains failure evidence; these new results are local.
+
+Abridged reset logic (binding is the requested controls key; session is its resolved identity):
+~~~ts
+// Before: every change from draft to resolved identity ran the reset.
+epoch.current++;
+setOpen(false);
+// After: qualify the change before the existing reset.
+const previous = hydrated.current;
+hydrated.current = { binding, session };
+if (previous.binding === binding && !previous.session) return;
+epoch.current++;
+setOpen(false);
+~~~
+The first added line reads the previous binding and session; the second remembers the current pair. The third preserves an opened panel only while the same binding has not yet resolved its first session. A different requested binding or a later resolved-session change still reaches the epoch bump and full view/form reset, including focus and retention count. The hook exposes its existing requested key; no server API or translated label changes.
+
+Concrete controlled row: task 1, exploration 1, segment 0 was paused through the real task API. Its first controls response was held until /context had opened. Releasing that real response previously closed the trigger and made the normal click time out after 15 seconds (Go exit 1); the byte-identical browser oracle now retains the open trigger and closes normally (exit 0), with zero provider calls. Task pause is distinct from the chat gate's paused field.
+
+| Local check on frozen fixed source | Observed result |
+| --- | --- |
+| Existing frontend tests | 65 passed, 0 failures/skips |
+| Fresh static frontend build | TypeScript and 31 pages completed; verified native exit 0 |
+| Unchanged independent delayed-first-response oracle | 1 Go test passed, 0 failures/skips; zero provider calls |
+| Canonical context browser fixture | All 12 EN/KO/zh-Hans × 1440/390 × standalone/task cases plus hydration and requested-binding guards passed (14 browser steps; 1 Go test, 0 failures/skips) |
+
+The added guard uses the real first backend response, then synthetic route state for a later resolved-session change and a held old context response. Every replacement response stays held until the stale-content assertion, preventing a fresh result from hiding a leak. Nondefault focus and retention 7 reset to empty focus and default 2. Counterexample: a genuine requested binding or later resolved session must still reset; late results must not restore old context. A second real task-query switch (task 7 to 8 in the full run) observed the new controls URL while its response was held, retained the identical connected inspector trigger and document, reset focus/retention and rejected the late old context before replacement data could mask it. This proves a mounted requested-binding change rather than a remount. Late error/compaction-success branches remain source-reviewed rather than separately exercised. The synthetic identity guards prove client handling, not server exploration replacement. Other context cases use the controlled loopback provider; no paid/external provider was called.
+
+Initial shell-wrapper attempts stopped on environment/capture setup; final build/test exits are recorded separately with warnings retained and no source/assertion workaround. Prior planner/shutdown changes are preserved. Paired documentation records these local results; independent final review and all seven hosted checks on the next committed head remain required. PR readiness is not maintainer approval, merge or a public release.
+
 ## Log writer shutdown ownership (2026-10-17)
 
 The server keeps logs in memory and persists them through an asynchronous database writer. Canceling the server context previously did not join that writer: an insert using a background context could remain active while `Manager.Close` closed its pool. The latest backend run on PR #40 head `14b5403` exposed this in the unchanged occupied-port shutdown test.
