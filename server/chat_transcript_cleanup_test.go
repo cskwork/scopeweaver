@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Autumn-27/artex/chatstate"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/artex/sidequestion"
 	"github.com/Autumn-27/norma/llm"
 )
@@ -135,5 +136,42 @@ func TestChatTranscriptRestartCleanupPreservesReferencedAndUnknownFiles(t *testi
 	}
 	if _, err := os.Stat(f.store.MainPath(uncertain.TranscriptID)); err != nil {
 		t.Fatal("database uncertainty removed bytes", err)
+	}
+}
+
+func TestChatTranscriptRecoveryValidatesStorage(t *testing.T) {
+	originalLanguage := locale.ServerDefault()
+	defer locale.SetServerDefault(originalLanguage)
+	for _, lang := range []locale.Lang{locale.En, locale.Ko, locale.ZhHans} {
+		t.Run(string(lang), func(t *testing.T) {
+			locale.SetServerDefault(lang)
+			s := &Server{m: &Manager{dir: t.TempDir()}}
+			if err := s.recoverChatTranscripts(t.Context()); err != nil {
+				t.Fatalf("missing transcript directory: %v", err)
+			}
+			root := filepath.Join(s.m.dir, "transcripts")
+			fixture := []byte("untranslated user bytes %s 한국어 中文")
+			if err := os.WriteFile(root, fixture, 0600); err != nil {
+				t.Fatal(err)
+			}
+			err := s.recoverChatTranscripts(t.Context())
+			want := locale.Text(lang, "transcript path is not a directory: %s", root)
+			if err == nil || err.Error() != want {
+				t.Fatalf("invalid directory error = %v; want %q", err, want)
+			}
+			data, err := os.ReadFile(root)
+			if err != nil || string(data) != string(fixture) {
+				t.Fatalf("transcript fixture changed: %q, %v", data, err)
+			}
+			if err := os.Remove(root); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Mkdir(root, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.recoverChatTranscripts(t.Context()); err != nil {
+				t.Fatalf("empty transcript directory: %v", err)
+			}
+		})
 	}
 }
