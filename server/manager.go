@@ -844,6 +844,10 @@ func (m *Manager) Close() error {
 	if m.traffic != nil {
 		m.traffic.Close()
 	}
+	// Detach log persistence for exactly this manager's DB and JOIN the sink's
+	// async writer before the pool closes, so an in-flight InsertLog cannot hit
+	// "sql: database is closed" (CI PR40 failure).
+	logSink.StopDB(m.pg)
 	return m.pg.Close()
 }
 

@@ -2,6 +2,34 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Log writer shutdown ownership (2026-10-17)
+
+The server keeps logs in memory and persists them through an asynchronous database writer. Canceling the server context previously did not join that writer: an insert using a background context could remain active while `Manager.Close` closed its pool. The latest backend run on PR #40 head `14b5403` exposed this in the unchanged occupied-port shutdown test.
+
+Abridged flow across the writer and manager:
+```go
+// Before: writer, then manager shutdown
+pg.InsertLog(level, tag, text) // background context
+return m.pg.Close()           // no writer join
+// After: writer, then manager shutdown
+pg.InsertLogContext(writeCtx, level, tag, text)
+logSink.StopDB(m.pg)
+return m.pg.Close()
+```
+The first new line makes the actual insert cancelable; the initial history restore uses the same context. The second detaches only this exact pool, cancels outstanding SQL and waits for writer completion outside the sink lock. Every same-owner stop shares that completion; another manager's pool cannot stop it. Only then does the third line close the pool. Existing context-free DB methods delegate to the same SQL; ring, stderr and SSE delivery remain available, and the enqueue channel is never closed.
+
+One observed row: backend run [39028154916](https://github.com/cskwork/scopeweaver/actions/runs/39028154916), job `117383132313`, failed `TestMainServeFailureRunsShutdown` at **2026-10-17 11:18:45 UTC**. The expected occupied-port bind failure was followed by shutdown and `[logsink] db write: sql: database is closed`. Independently, a real PostgreSQL table lock reproduced `Manager.Close` returning with its writer still blocked on unchanged `14b5403` (Go exit 1). The exact same fixture now passes while the lock remains held, before pool close; no diagnostic is filtered.
+
+| Original local R19 check | Observed result |
+| --- | --- |
+| Unchanged independent blocked-insert regression | 1 passed, 0 failures/skips; baseline behavioral RED retained |
+| Genuine SQL-rejection guard | 1 passed, 0 failures/skips; SQLSTATE `23514` visible, rejected row absent and later valid row persisted |
+| Frozen `TestStopDB*` fixtures | 6 passed, 0 failures/skips: no binding, blocked insert, foreign pool, canceled context, concurrent stops and stderr continuity |
+| Unchanged occupied-port shutdown test | 1 run plus 20 repeated runs passed; expected child failure retained, parent Go exit 0 |
+| `go build ./...`, `go vet ./...` | Both exit 0 |
+
+Counterexample: a genuine live-context SQL rejection must still be reported; cancellation/join does not turn it into a successful insert. This remains best-effort logging, without a new flush guarantee for queued lines. The concurrent fixture checks aggregate completion; per-waiter shared-join behavior is also verified in source review, rather than claimed as a separate runtime oracle. All database runs use disposable test databases; independent child fixtures require the already documented isolated-test CREATE DATABASE privilege. Production privileges, HTTP/schema contracts and existing planner tests are unchanged. These are local results, not a full native-server or release claim: the inherited Windows symlink privilege limitation remains, and all seven hosted checks must pass on the next committed candidate.
+
 ## Terminal goal completion (2026-10-17)
 
 These are local R17 candidate results; final independent source review and the exact-candidate hosted gates are separate. The R17 shared correction keeps a completed proof turn on the normal SDK path, then ends the planner locally before another upstream request. Normally `prove_goal` links a confirmed fact/finding to its goal and marks that goal met; only proof of every goal sets `GoalMet`. Previously `Plan` waited for `captureRun` to finish before returning that flag to the engine, so the engine could not complete while the session waited on another model response.
