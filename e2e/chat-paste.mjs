@@ -15,9 +15,16 @@ async function pasteFiles(input, names, text = "") {
 }
 
 async function pasteText(page, input, text) {
+  // Native Windows clipboard text uses CRLF before the application receives it.
+  await input.evaluate((element) => {
+    window.chatPasteReceived = null;
+    element.addEventListener("paste", (event) => { window.chatPasteReceived = event.clipboardData.getData("text/plain"); }, { capture: true, once: true });
+  });
   await page.evaluate((value) => navigator.clipboard.writeText(value), text);
   await input.focus();
   await input.press("Control+V");
+  await page.waitForFunction(() => typeof window.chatPasteReceived === "string");
+  return page.evaluate(() => window.chatPasteReceived);
 }
 
 export async function runChatPasteChecks({ base, token, step, check, openPage, mutation = false }) {
@@ -68,14 +75,28 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
           await input.press("Control+Z");
           check(await input.inputValue() === "", "native paste undo failed");
           const long = "  한글\n中文\n" + "z".repeat(3001);
-          await pasteText(p, input, long);
+          const uploadResponse = p.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/chat/upload");
+          const received = await pasteText(p, input, long);
+          const normalized = await p.evaluate((text) => { const textarea = document.createElement("textarea"); textarea.value = text; return textarea.value; }, received);
+          const uploadedResponse = await uploadResponse;
+          check(uploadedResponse.ok(), "long paste upload failed");
+          const upload = await uploadedResponse.json();
+          check(upload.attachments?.length === 1, "long paste upload must contain one file");
+          const owner = new URL(uploadedResponse.url()).searchParams;
+          const scope = owner.get("scope"), ownerID = owner.get("id");
+          check(["task", "session"].includes(scope) && /^[A-Za-z0-9_-]+$/.test(ownerID || ""), "unexpected fixture upload owner");
+          check(/^uploads\/[^/\\]+$/.test(upload.attachments[0].path), "unexpected fixture upload path");
+          const filePath = (scope === "task" ? "tasks" : "sessions") + "/" + ownerID + "/" + upload.attachments[0].path;
+          const downloaded = await api.get("/api/workspace/download?path=" + encodeURIComponent(filePath));
+          check(downloaded.ok(), "long paste file download failed");
+          check((await downloaded.body()).equals(Buffer.from(received)), "long paste upload changed received bytes");
           await p.getByRole("button", { name: labels[locale].chatPastedContent, exact: true }).click();
-          check(await p.getByRole("dialog").locator("pre").textContent() === long, "paste preview changed content");
+          check(await p.getByRole("dialog").locator("pre").textContent() === received, "paste preview changed received content");
           await p.getByRole("dialog").press("Escape");
           await input.fill("later edits");
           await p.getByRole("button", { name: labels[locale].chatPastedContent, exact: true }).click();
           await p.getByRole("button", { name: labels[locale].chatInsertAsText, exact: true }).click();
-          check(await input.inputValue() === `later edits${long}`, "restore overwrote later edits");
+          check(await input.inputValue() === `later edits${normalized}`, "restore overwrote later edits");
           let fail = true;
           await p.route("**/api/chat/upload?**", (route) => fail ? route.fulfill({ status: 503, body: "fixture upload offline" }) : route.continue());
           await pasteFiles(input, ["retry.pdf"]);
@@ -84,7 +105,7 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
           await p.getByRole("button", { name: labels[locale].chatUploadRetry, exact: true }).click();
           await p.waitForFunction(() => !document.querySelector("[data-attachment-id] .animate-spin"));
           check(await p.getByRole("button", { name: labels[locale].chatUploadRetry, exact: true }).count() === 0, "retry did not finish");
-          check(await input.inputValue() === `later edits${long}`, "failed upload changed draft");
+          check(await input.inputValue() === `later edits${normalized}`, "failed upload changed draft");
           for (const mode of ["enter", "ctrl-enter"]) {
             await p.evaluate((value) => { localStorage.setItem("artex_chat_send_mode", value); window.dispatchEvent(new Event("storage")); }, mode);
             await input.fill("@");
