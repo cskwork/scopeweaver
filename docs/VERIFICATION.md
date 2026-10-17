@@ -2,6 +2,59 @@
 
 [한국어](ko/VERIFICATION.md)
 
+## Terminal goal completion (2026-10-17)
+
+These are local R17 candidate results; final independent source review and the exact-candidate hosted gates are separate. The R17 shared correction keeps a completed proof turn on the normal SDK path, then ends the planner locally before another upstream request. Normally `prove_goal` links a confirmed fact/finding to its goal and marks that goal met; only proof of every goal sets `GoalMet`. Previously `Plan` waited for `captureRun` to finish before returning that flag to the engine, so the engine could not complete while the session waited on another model response.
+
+Abridged control flow (`...` is the unchanged activity callback):
+```go
+// Before
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+// After
+installTerminalProofGateOn(&opts, tsx)
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+```
+The first old line waits for the whole session; the second exposes its goal result only afterward. The added line installs the next-request boundary before capture starts. It lets the current response, actual tool result, late usage and transcript finish, then supplies a content-free local `end_turn` with zero upstream usage and skips unnecessary post-proof `Compactor.Pre`. It preserves the selected compactor, optional `ContextView`, normal pre-proof/recovery behavior and existing provider/tool wrappers. Original `ToolUseID` and successful/failed response qualification prevent a delayed handler from attributing an old failed proof to a later successful response. The newest proof origin is retained with compare-and-swap; an older or unknown origin cannot erase a newer valid proof. Failure bookkeeping runs before yielding an error, including when its consumer stops immediately.
+
+Concrete lab row: in the **standalone CLI R11 candidate**, not an original-production incident, finding node `5` proved goal `2` at **2026-10-17 18:36:24+09:00**. Model output was still active when the unchanged 420-second harness paused at **18:37:48+09:00**, 84 seconds later. That run had exactly one GET, one intent and one finding. The receipt is `scopeweaver-cli/dist/pi-glm-flash-fix-20261017/r11-flash-high-digest.txt`; it demonstrates the completion wait, not an underlying provider-latency cause. Counterexample: partial/rejected proof must continue normally; a failed proof response retains its real error/recovery path and cannot qualify local completion.
+
+Original-source proof uses controlled providers and disposable PostgreSQL, with no paid inference:
+
+| Local candidate check | Observed result |
+| --- | --- |
+| Complete `agent` package, R17 with corrected owned-fact fixture | 567 tests/subtests passed, 0 failures, 0 skips; includes streaming/nonstreaming, partial/rejected proof, parent cancellation, error/recovery, compaction/view and delayed-origin cases |
+| `TestWireTools`, stock-runtime S7 and actual-engine S18 | 28 passed, 0 failures, 0 skips; S18 persists done after one real provider call, authentic proof/terminal receipts and exact input/output/cache-read/cache-write usage **11/7/3/2**, also in the raw transcript |
+| Real pause/provider-error guards in S18 | Honest error/cause receipts retain emitted usage **11/0/3/0** for user pause and **11/7/3/2** for provider failure; post-proof pause-versus-task-completion status precedence is observed without a new policy assertion |
+| Complete `locale`, build and vet | 19 tests passed, 0 failures, 0 skips; `go build ./...` and `go vet ./...` exit 0 |
+
+The saved original S18 baseline failed because it attempted provider call 2 and had no terminal result/completion; its cancellation/provider-error receipt guards passed. The independent immutable R14 regression also failed with calls=2 instead of 3 when an old failed handler borrowed a later response's identity; the candidate retains the three-call regression. The reviewer then reproduced the converse order on the original R16 candidate: an old failed response-1 handler finished after a valid response-2 proof and erased its origin, causing an unnecessary third request. The unchanged actual-session overlay failed with calls=3 before R17 and now passes with calls=2/origin=2 and one authentic new proof result. Both delayed-handler orderings pass in the [boundary regressions](../agent/terminal_boundary_test.go); the [actual engine regression](../server/engine_terminal_proof_test.go) separately preserves completion/receipt/usage checks. The first integrated agent run failed only because a new fixture expected `CreateExploration` to create an origin fact. R16 seeds its own confirmed fact; all assertions and production code are unchanged by that fixture correction. Earlier failing receipts remain retained.
+
+S18 reuses S7's owned child-database helper and test-only CREATE DATABASE requirement, closing stores before dropping its own child; production privileges are unchanged. The unchanged `TestChatBranchCopyRejectsDestinationSymlink` still fails locally at `server/chat_history_test.go:270` because Windows denies symlink creation. Full native-server success and the seven exact-candidate hosted checks are not claimed; CI/frontend/browser delivery remains pending. Root owns separate race/live acceptance; this section reports only these original local checks.
+
+## Planner/tool contract and stored-stock compatibility (2026-10-17)
+
+Local Windows results for `fix/glm-agent-contracts`, based on `dev` commit `d7365ec`. The planner's `parent_ids` guidance now matches the existing fact/finding-only handler, and batched `add_intent` metadata describes its fields and required `summary`. Planner/worker guidance preserves fresh validation and retests, requires evidence for every goal condition, and ends rounds only after successful dispatch or confirmed final-goal proof. EN/KO/zh-Hans resources are paired.
+
+Exact previous stock planner/worker prompts and `add_intent` schemas resolve to corrected runtime defaults. User edits, bindings, enabled flags, stored rows and prompt history remain unchanged; there is no production database migration or handler-semantic change. See [contract regressions](../agent/planner_contract_test.go), [stock compatibility regressions](../agent/legacy_stock_compat_test.go), and [HTTP/runtime PostgreSQL proof](../server/tools_stock_schema_test.go).
+
+Tests-first proof compiled and produced **8 top-level agent assertion failures** and **9 S7 stock-schema subcase failures** on the baseline. The temporary unchanged-tail extraction and pass-through resolver used only to compile the tests were removed before applying the fix. Candidate results:
+
+| Local check | Observed result |
+| --- | --- |
+| Complete `agent` package with disposable PostgreSQL | 549 tests/subtests passed, 0 failures, 0 skips |
+| Complete `locale` package | 19 passed, 0 failures, 0 skips |
+| Focused server locale/tool/provenance checks | 11 passed, 0 failures, 0 skips; 1,985 production keys retain raw three-language completeness checks |
+| `TestExplorationDirectSourceReadView` | Passed with disposable PostgreSQL |
+| `TestStockMetadataRuntimePostgres` plus `TestWireTools`, `-count=2` | 48 tests/subtests passed, 0 failures, 0 skips; actual loopback HTTP handlers, runtime resolution and stored-row/history readback |
+| Saved public-tool scenarios | S11: all 10 main-agent/planner callback cases passed; S12: historical lineage, source provenance and unrelated/indirect parent rejection passed; S3: invalid-kind/blank-summary rejection, partial errors and omitted/empty/null origin linkage passed |
+| `go build ./...`, `go vet ./...`, diff whitespace | Passed |
+
+`TestStockMetadataRuntimePostgres` requires an explicit disposable `ARTEX_TEST_DSN` selecting `scopeweaver_test_*` and a test role with **CREATE DATABASE on an isolated test server**. It creates its own `scopeweaver_test_stock_*` child, preserves connection options, closes its stores and drops only that child without `FORCE`; a leaked connection makes cleanup fail visibly. Production database privileges are unchanged. Reproduce the suite-isolation check with `go test ./server -run '^Test(WireTools|StockMetadataRuntimePostgres)$' -count=2` after setting that test-only DSN.
+
+The first S3 harness attempt failed while seeding a hint with invalid state `open`; the fixture was corrected to the existing `active` state, with no product/assertion change, before the passing rerun. The final S7 setup also passed twice after other tests populated the parent database. These checks establish contract and compatibility behavior, not the cause of the earlier live Flash duplicate/timeout. Full `go test ./...`, frontend/browser checks and the seven required exact-candidate CI jobs remain pending for this branch; no merge or release is claimed.
+
 ## Shared runtime fixes from standalone CLI verification (2026-10-17)
 
 Candidate branch `fix/cli-discovered-runtime-bugs`, based on `dev` commit `3f0ef25`. These are local results; the PR's exact-head hosted checks are separate. This change does not add the standalone CLI or subscription providers to the original application.
