@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -26,13 +27,14 @@ func (s *Server) captureChatContext(_ context.Context, ref chatstate.SessionRef,
 	}
 	return nil
 }
-func (s *Server) flushChatContexts() {
+func (s *Server) flushChatContexts() error {
 	s.side.mu.Lock()
 	pending := make([]pendingChatContext, 0, len(s.side.contextPending))
 	for _, v := range s.side.contextPending {
 		pending = append(pending, v)
 	}
 	s.side.mu.Unlock()
+	var flushErr error
 	for _, v := range pending {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		err := s.m.pg.SaveChatContext(ctx, v.ref, v.runID, v.view)
@@ -43,8 +45,11 @@ func (s *Server) flushChatContexts() {
 				delete(s.side.contextPending, v.ref.Key())
 			}
 			s.side.mu.Unlock()
+		} else {
+			flushErr = errors.Join(flushErr, fmt.Errorf("chat context %s: %w", v.ref.Key(), err))
 		}
 	}
+	return flushErr
 }
 
 // Resolve capacity from the current selection, even before its next completion.
