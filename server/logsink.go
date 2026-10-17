@@ -40,7 +40,17 @@ type logSinkT struct {
 	out  io.Writer // passthrough (stderr)
 
 	dbOnce sync.Once
-	dbCh   chan dbWriteReq // buffered async channel; nil until SetDB is called
+	dbCh   chan dbWriteReq // buffered enqueue; nil once detached (never closed)
+	// Writer lifecycle, bound to exactly dbPG: dbWriteCancel bounds in-flight DB
+	// work; dbStop asks the writer to finish; dbDone is closed by the writer on
+	// exit and joined by every same-owner StopDB. dbStopping makes close/cancel
+	// happen exactly once; ownership fields survive the stop so repeated
+	// same-owner stops keep sharing the same completion.
+	dbWriteCancel context.CancelFunc
+	dbStop        chan struct{}
+	dbDone        chan struct{}
+	dbPG          *db.DB
+	dbStopping    bool
 }
 
 var logSink = &logSinkT{cap: 3000, subs: map[chan LogLine]struct{}{}, out: os.Stderr}
@@ -59,12 +69,22 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 	}
 	s.dbOnce.Do(func() {
 		ch := make(chan dbWriteReq, 2000)
+		stop := make(chan struct{})
+		done := make(chan struct{})
+		// writeCtx bounds every DB operation the sink performs (restore and
+		// inserts): StopDB cancels it, so a stuck query cannot make the shutdown
+		// join unbounded.
+		writeCtx, writeCancel := context.WithCancel(ctx)
 		s.mu.Lock()
 		s.dbCh = ch
+		s.dbWriteCancel = writeCancel
+		s.dbStop = stop
+		s.dbDone = done
+		s.dbPG = pg
 		s.mu.Unlock()
 
 		// Restore last 100 rows from DB → prepend to ring as history context.
-		if logs, err := pg.RecentLogs(100); err == nil && len(logs) > 0 {
+		if logs, err := pg.RecentLogsContext(writeCtx, 100); err == nil && len(logs) > 0 {
 			s.mu.Lock()
 			restored := make([]LogLine, 0, len(logs))
 			for _, l := range logs {
@@ -86,16 +106,20 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 			s.mu.Unlock()
 		}
 
-		// Async writer: picks from channel and inserts into server_logs.
-		// Uses os.Stderr directly to report errors and avoids recursive log calls.
+		// Async writer: drains the queue into server_logs. Errors go to stderr
+		// directly (no recursive logging). It exits on stop, on ctx.Done, or if
+		// the channel is ever closed, and always closes done so StopDB joins
+		// deterministically. Inserts run under writeCtx so a stuck query is
+		// canceled at shutdown instead of blocking the join forever.
 		go func() {
+			defer close(done)
 			for {
 				select {
 				case req, ok := <-ch:
 					if !ok {
 						return
 					}
-					id, err := pg.InsertLog(req.ll.Level, req.ll.Tag, req.ll.Text)
+					id, err := pg.InsertLogContext(writeCtx, req.ll.Level, req.ll.Tag, req.ll.Text)
 					if err != nil {
 						_, _ = os.Stderr.Write([]byte("[logsink] db write: " + err.Error() + "\n"))
 						continue
@@ -109,12 +133,43 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 						}
 					}
 					s.mu.Unlock()
+				case <-stop:
+					return
 				case <-ctx.Done():
 					return
 				}
 			}
 		}()
 	})
+}
+
+// StopDB detaches DB persistence for exactly pg and joins the writer, so the
+// caller can close pg without racing it. It cancels the writer's DB context
+// first, bounding any in-flight query, then asks it to finish and waits for
+// completion. Nil-safe and idempotent; concurrent same-owner stops share the
+// same completion; a pg that was never bound (or a different manager's DB) is
+// ignored. The ring, stderr passthrough and SSE subscribers keep working. The
+// join waits without sink.mu (the writer stamps DBIDs under that lock), and
+// dbCh is never closed (add sends after unlocking, so a close would race an
+// enqueue; detached references only fill the abandoned buffer).
+func (s *logSinkT) StopDB(pg *db.DB) {
+	if pg == nil {
+		return
+	}
+	s.mu.Lock()
+	if s.dbPG != pg {
+		s.mu.Unlock()
+		return
+	}
+	if !s.dbStopping {
+		s.dbStopping = true
+		s.dbCh = nil // detach: no new enqueue can observe the channel
+		s.dbWriteCancel()
+		close(s.dbStop)
+	}
+	done := s.dbDone
+	s.mu.Unlock()
+	<-done // shared join: every same-owner stop waits for the same completion
 }
 
 // Write implements io.Writer for the log package: one call per log.Printf line.
