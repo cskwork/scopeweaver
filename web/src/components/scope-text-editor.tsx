@@ -12,10 +12,17 @@ import type { CompanyScopeKind } from "@/lib/types";
 
 const SCOPE_KIND_LABELS: Record<CompanyScopeKind, string> = {
   get domain() { return swt("interface.m0232"); },
+  get host() { return swt("interface.m2883"); },
   ip: "IP",
   cidr: "CIDR",
   icp: "ICP",
   get keyword() { return swt("interface.m0599"); },
+};
+
+// Hover hints explain the breadth difference between the two name kinds.
+const SCOPE_KIND_HINTS: Partial<Record<CompanyScopeKind, string>> = {
+  get domain() { return swt("interface.m2885"); },
+  get host() { return swt("interface.m2884"); },
 };
 
 export function ScopeTextEditor({
@@ -61,7 +68,12 @@ export function ScopeTextEditor({
           {Object.entries(SCOPE_KIND_LABELS).map(([kind, kindLabel]) => {
             const count = counts.get(kind as CompanyScopeKind) ?? 0;
             return count > 0 ? (
-              <Badge key={kind} variant="secondary" className="font-mono tabular-nums">
+              <Badge
+                key={kind}
+                variant="secondary"
+                className="font-mono tabular-nums"
+                title={SCOPE_KIND_HINTS[kind as CompanyScopeKind]}
+              >
                 {kindLabel} {count}
               </Badge>
             ) : null;
