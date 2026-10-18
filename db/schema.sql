@@ -115,17 +115,20 @@ CREATE TRIGGER trg_av2_upd BEFORE UPDATE ON assets
 CREATE TABLE IF NOT EXISTS company_scope (
     id         BIGSERIAL PRIMARY KEY,
     company_id BIGINT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-    kind       TEXT NOT NULL CHECK (kind IN ('domain','ip','cidr','icp','keyword')),
+    kind       TEXT NOT NULL CHECK (kind IN ('domain','host','ip','cidr','icp','keyword')),
     domain     TEXT,
     net        CIDR,
     value      TEXT,
     raw        TEXT NOT NULL,
     reason     TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- A `host` entry shares the domain column with `domain`, so a host entry
+    -- whose value equals an existing domain entry of the same company is a
+    -- skipped duplicate: the domain entry already covers that name.
     CONSTRAINT uq_sv2_domain UNIQUE (company_id, domain),
     CONSTRAINT uq_sv2_net    UNIQUE (company_id, net),
     CONSTRAINT ck_company_scope_payload CHECK (
-        (kind = 'domain' AND domain IS NOT NULL AND net IS NULL AND value IS NULL)
+        (kind IN ('domain','host') AND domain IS NOT NULL AND net IS NULL AND value IS NULL)
         OR (kind IN ('ip','cidr') AND domain IS NULL AND net IS NOT NULL AND value IS NULL)
         OR (kind IN ('icp','keyword') AND domain IS NULL AND net IS NULL AND value IS NOT NULL)
     )
@@ -134,14 +137,14 @@ CREATE TABLE IF NOT EXISTS company_scope (
 ALTER TABLE company_scope ADD COLUMN IF NOT EXISTS value TEXT;
 ALTER TABLE company_scope DROP CONSTRAINT IF EXISTS company_scope_kind_check;
 ALTER TABLE company_scope ADD CONSTRAINT company_scope_kind_check
-    CHECK (kind IN ('domain','ip','cidr','icp','keyword'));
+    CHECK (kind IN ('domain','host','ip','cidr','icp','keyword'));
 ALTER TABLE company_scope DROP CONSTRAINT IF EXISTS ck_company_scope_payload;
 ALTER TABLE company_scope ADD CONSTRAINT ck_company_scope_payload CHECK (
-    (kind = 'domain' AND domain IS NOT NULL AND net IS NULL AND value IS NULL)
+    (kind IN ('domain','host') AND domain IS NOT NULL AND net IS NULL AND value IS NULL)
     OR (kind IN ('ip','cidr') AND domain IS NULL AND net IS NOT NULL AND value IS NULL)
     OR (kind IN ('icp','keyword') AND domain IS NULL AND net IS NULL AND value IS NOT NULL)
 );
-CREATE INDEX IF NOT EXISTS idx_sv2_domain  ON company_scope(domain)   WHERE kind = 'domain';
+CREATE INDEX IF NOT EXISTS idx_sv2_domain  ON company_scope(domain)   WHERE kind IN ('domain','host');
 CREATE INDEX IF NOT EXISTS idx_sv2_net     ON company_scope USING GIST(net inet_ops) WHERE kind IN ('ip','cidr');
 CREATE UNIQUE INDEX IF NOT EXISTS uq_sv2_value ON company_scope(company_id, kind, value) WHERE kind IN ('icp','keyword');
 CREATE INDEX IF NOT EXISTS idx_sv2_icp ON company_scope(value) WHERE kind = 'icp';

@@ -364,7 +364,8 @@ export interface TaskScopeRow {
   reason?: string;
 }
 
-export type CompanyScopeKind = "domain" | "ip" | "cidr" | "icp" | "keyword";
+// `domain` covers the name and every name under it; `host` covers exactly the name.
+export type CompanyScopeKind = "domain" | "host" | "ip" | "cidr" | "icp" | "keyword";
 
 // Structured asset-scope rules submitted when creating a company.
 export interface CompanyScopeRule {
@@ -387,7 +388,7 @@ export interface ScopeRow {
   id: number;
   company_id: number;
   kind: CompanyScopeKind;
-  domain?: string; // Populated for kind=domain.
+  domain?: string; // Populated for kind=domain or host.
   net?: string; // Populated for kind=ip or cidr.
   value?: string; // May be returned directly by the backend for kind=icp or keyword.
   raw: string; // Original user input for display and form refill.

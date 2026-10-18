@@ -86,6 +86,63 @@ func TestRegisterTaskAssetScopesCreatesAssetsAndPersistsTextScope(t *testing.T) 
 	}
 }
 
+// A host rule from the shared scope editor is exactly one hostname, so it must
+// land as task scope kind=subdomain (not root_domain) on its own asset row.
+func TestRegisterTaskAssetScopesHostIsExactSubdomain(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+
+	task, err := d.CreateTask("host scope registration", "goal", nil, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = d.DeleteTask(task.ID) })
+	suffix := time.Now().UnixNano()
+	apex := fmt.Sprintf("host-scope-%d.com", suffix)
+	host := "cms." + apex
+
+	mutation, err := d.Assets().RegisterTaskAssetScopes(task.ID, []ScopeInput{{Kind: "host", Value: host}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.AssetsLinked != 1 || mutation.ScopesAdded != 1 {
+		t.Fatalf("unexpected host mutation: %+v", mutation)
+	}
+	t.Cleanup(func() {
+		_, _ = d.Exec(`DELETE FROM assets WHERE domain IN ($1,$2)`, host, apex)
+	})
+	scopes, err := d.Assets().ListTaskScope(task.ID)
+	if err != nil || len(scopes) != 1 || scopes[0].Kind != "subdomain" || scopes[0].Domain != host {
+		t.Fatalf("host task scope=%+v err=%v", scopes, err)
+	}
+	var subdomainAssets int
+	if err := d.QueryRow(`SELECT count(*) FROM assets WHERE type='subdomain' AND domain=$1 AND $2=ANY(task_ids)`, host, task.ID).Scan(&subdomainAssets); err != nil {
+		t.Fatal(err)
+	}
+	if subdomainAssets != 1 {
+		t.Fatalf("host rule linked %d subdomain assets, want 1", subdomainAssets)
+	}
+
+	// An apex host reuses the root_domain asset instead of a subdomain row.
+	mutation, err = d.Assets().RegisterTaskAssetScopes(task.ID, []ScopeInput{{Kind: "host", Value: apex}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mutation.ScopesAdded != 1 {
+		t.Fatalf("unexpected apex host mutation: %+v", mutation)
+	}
+	var apexSubdomains int
+	if err := d.QueryRow(`SELECT count(*) FROM assets WHERE type='subdomain' AND domain=$1`, apex).Scan(&apexSubdomains); err != nil {
+		t.Fatal(err)
+	}
+	if apexSubdomains != 0 {
+		t.Fatalf("apex host created %d subdomain rows", apexSubdomains)
+	}
+}
+
 func TestTaskAssetAttachDetachPreservesGlobalAssetAndAnchors(t *testing.T) {
 	d, err := Open(testDSN(t))
 	if err != nil {
