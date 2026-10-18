@@ -85,6 +85,7 @@ func init() {
 	Register("Network is too broad (IPv4 requires >= /16): %s", "Network is too broad (IPv4 requires >= /16): %s", "네트워크 범위가 너무 넓습니다(IPv4는 /16 이상 필요): %s")
 	Register("Network is too broad (IPv6 requires >= /32): %s", "Network is too broad (IPv6 requires >= /32): %s", "네트워크 범위가 너무 넓습니다(IPv6는 /32 이상 필요): %s")
 	Register("No uniquely linked original tool call was found; the record may have been deleted, or a legacy approval may lack its linking ID", "No uniquely linked original tool call was found; the record may have been deleted, or a legacy approval may lack its linking ID", "고유하게 연결된 원본 도구 호출을 찾을 수 없습니다. 기록이 삭제되었거나 이전 승인 기록에 연결 ID가 없을 수 있습니다")
+	Register("Not a valid host: %s", "Not a valid host: %s", "유효한 호스트가 아닙니다: %s")
 	Register("Not a valid domain/IP/CIDR: %s", "Not a valid domain/IP/CIDR: %s", "유효한 도메인/IP/CIDR이 아닙니다: %s")
 	Register("Notification channel not found", "Notification channel not found", "알림 채널을 찾을 수 없습니다")
 	Register("Obtain administrator access to example.com", "Obtain administrator access to example.com", "example.com 관리자 권한 확보")
