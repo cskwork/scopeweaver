@@ -393,6 +393,7 @@
   "Network is too broad (IPv4 requires >= /16): %s": "网段过宽(IPv4 需 >= /16): %s",
   "Network is too broad (IPv6 requires >= /32): %s": "网段过宽(IPv6 需 >= /32): %s",
   "Not a valid domain/IP/CIDR: %s": "无法识别为有效域名/IP/CIDR: %s",
+  "Not a valid host: %s": "无法识别为有效主机: %s",
   "Use CIDR notation for IP ranges (e.g. 1.2.3.0/24): %s": "IP 段请用 CIDR 表示(如 1.2.3.0/24): %s",
   "A bare TLD cannot be used as a scope: %s": "不能用裸 TLD 作为范围: %s",
   "Built-in default": "内置默认",
