@@ -2599,6 +2599,7 @@ function CategoryPicker({
 
 const COMPANY_SCOPE_LABELS: Record<string, string> = {
   get domain() { return swt("interface.m0232"); },
+  get host() { return swt("interface.m2883"); },
   ip: "IP",
   cidr: "CIDR",
   icp: "ICP",
