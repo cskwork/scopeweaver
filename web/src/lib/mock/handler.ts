@@ -1692,7 +1692,8 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         const scope: TaskScopeRow = {
           id: Date.now() + currentScopes.length,
           task_id: numericTaskID,
-          kind: rule.kind === "domain" || rule.kind === "host" ? "root_domain" : rule.kind,
+          // A host rule is exactly one hostname, the task scope `subdomain` kind.
+          kind: rule.kind === "domain" ? "root_domain" : rule.kind === "host" ? "subdomain" : rule.kind,
           source: "manual",
           reason: swt("interface.m2814"),
         };
