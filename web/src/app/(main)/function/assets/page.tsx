@@ -62,7 +62,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import { parseCompanyScopeText } from "@/lib/company-scope";
+import { companyScopeRuleText, parseCompanyScopeText } from "@/lib/company-scope";
 import type { Asset, Company, CompanyScopeRule } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -1004,9 +1004,7 @@ function savedScopeRules(company: Company): CompanyScopeRule[] {
 }
 
 function savedScopeText(company: Company): string {
-  return savedScopeRules(company)
-    .map((scope) => scope.value)
-    .join("\n");
+  return savedScopeRules(company).map(companyScopeRuleText).join("\n");
 }
 
 // Add companies in the same right-side drawer pattern as tasks and LLM profiles.
@@ -1099,7 +1097,11 @@ function EditScopeDialog({ company, onSaved }: { company: Company; onSaved: () =
   const [scopeText, setScopeText] = React.useState("");
   const [reason, setReason] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const preservedScopeRules = React.useMemo(() => savedScopeRules(company), [swLocale, company]);
+  // Host rules carry their kind in the `host:` prefix, so they are not preserved by value.
+  const preservedScopeRules = React.useMemo(
+    () => savedScopeRules(company).filter((rule) => rule.kind !== "host"),
+    [swLocale, company],
+  );
   const parsedScope = React.useMemo(
     () => parseCompanyScopeText(scopeText, { preservedRules: preservedScopeRules }),
     [swLocale, preservedScopeRules, scopeText],
