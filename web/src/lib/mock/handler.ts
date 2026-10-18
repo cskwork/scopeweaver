@@ -786,7 +786,7 @@ function mockScopeRows(
     }
     const normalized = normalizeCompanyScopeValue(rule);
     const row: ScopeRow = { id: nextID++, company_id: companyID, kind: rule.kind, raw: rule.value.trim() };
-    if (rule.kind === "domain") row.domain = normalized;
+    if (rule.kind === "domain" || rule.kind === "host") row.domain = normalized;
     else if (rule.kind === "ip") row.net = `${normalized}/${normalized.includes(":") ? 128 : 32}`;
     else if (rule.kind === "cidr") row.net = normalized;
     else row.value = normalized;
@@ -1692,11 +1692,12 @@ function route(m: string, path: string, seg: string[], q: URLSearchParams, b: Re
         const scope: TaskScopeRow = {
           id: Date.now() + currentScopes.length,
           task_id: numericTaskID,
-          kind: rule.kind === "domain" ? "root_domain" : rule.kind,
+          // A host rule is exactly one hostname, the task scope `subdomain` kind.
+          kind: rule.kind === "domain" ? "root_domain" : rule.kind === "host" ? "subdomain" : rule.kind,
           source: "manual",
           reason: swt("interface.m2814"),
         };
-        if (rule.kind === "domain") scope.domain = normalized;
+        if (rule.kind === "domain" || rule.kind === "host") scope.domain = normalized;
         else if (rule.kind === "ip") scope.net = `${normalized}/${normalized.includes(":") ? 128 : 32}`;
         else if (rule.kind === "cidr") scope.net = normalized;
         else scope.value = normalized;
