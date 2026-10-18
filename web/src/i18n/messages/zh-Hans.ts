@@ -3169,6 +3169,9 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m2880": "最近出现",
   "m2881": "来源",
   "m2882": "详情",
+  "m2883": "主机",
+  "m2884": "仅此主机(写作 host:名称)",
+  "m2885": "此域名及其所有子域名",
 };
 export { interfaceMessages as interface };
 import type { en as providersSource } from './providers.ts';

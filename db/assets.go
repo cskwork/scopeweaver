@@ -124,11 +124,14 @@ func (s *AssetStore) withCompanyScopeMutation(fn func(*AssetStore) (int64, error
 	return id, nil
 }
 
-func (s *AssetStore) resolveCompanyWithICP(rootDomain, ipStr, icp string) (*int64, error) {
+// resolveCompanyWithICP resolves the owning company for an asset. `host` is
+// the asset's full host name (its `domain` column), not the registrable root;
+// pass "" for assets with no host name.
+func (s *AssetStore) resolveCompanyWithICP(host, ipStr, icp string) (*int64, error) {
 	if s.tx != nil {
-		return resolveCompanyWithICP(s.tx, rootDomain, ipStr, icp)
+		return resolveCompanyWithICP(s.tx, host, ipStr, icp)
 	}
-	return s.company.ResolveCompanyWithICP(rootDomain, ipStr, icp)
+	return s.company.ResolveCompanyWithICP(host, ipStr, icp)
 }
 
 // =====================================================================
@@ -466,8 +469,8 @@ func (s *AssetStore) UpsertSubdomain(req UpsertSubdomainReq) (id int64, err erro
 		rootDomain = domain
 	}
 
-	// Resolve by root domain first, then the asset's exact normalized ICP.
-	companyID, err := s.resolveCompanyWithICP(rootDomain, "", req.ICP)
+	// Resolve by the asset's own host name first, then its exact normalized ICP.
+	companyID, err := s.resolveCompanyWithICP(domain, "", req.ICP)
 	if err != nil {
 		return 0, err
 	}
@@ -700,7 +703,7 @@ func (s *AssetStore) UpsertHTTPService(req UpsertHTTPServiceReq) (int64, error) 
 	}
 
 	cseg := calcCSegment(req.IP)
-	companyID, err := s.resolveCompanyWithICP(rootDomain, req.IP, "")
+	companyID, err := s.resolveCompanyWithICP(domain, req.IP, "")
 	if err != nil {
 		return 0, err
 	}
@@ -849,7 +852,7 @@ func (s *AssetStore) UpsertOtherService(req UpsertOtherServiceReq) (int64, error
 	}
 
 	cseg := calcCSegment(req.IP)
-	companyID, err := s.resolveCompanyWithICP(rootDomain, req.IP, "")
+	companyID, err := s.resolveCompanyWithICP(domain, req.IP, "")
 	if err != nil {
 		return 0, err
 	}
@@ -984,7 +987,7 @@ func (s *AssetStore) UpsertEndpoint(req UpsertEndpointReq) (int64, error) {
 	}
 
 	cseg := calcCSegment(req.IP)
-	companyID, err := s.resolveCompanyWithICP(rootDomain, req.IP, "")
+	companyID, err := s.resolveCompanyWithICP(domain, req.IP, "")
 	if err != nil {
 		return 0, err
 	}

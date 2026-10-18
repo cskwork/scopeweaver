@@ -2966,7 +2966,10 @@ export const en = {
   "m2879": "Task IDs",
   "m2880": "Last seen",
   "m2881": "Source",
-  "m2882": "Details"
+  "m2882": "Details",
+  "m2883": "Host",
+  "m2884": "Exactly this host (write host:name)",
+  "m2885": "This domain and all its subdomains"
 };
 export const ko: Record<keyof typeof en, string> = {
   chatContext: "컨텍스트",
@@ -5935,5 +5938,8 @@ export const ko: Record<keyof typeof en, string> = {
   "m2879": "작업 ID",
   "m2880": "마지막 관측",
   "m2881": "출처",
-  "m2882": "세부 정보"
+  "m2882": "세부 정보",
+  "m2883": "호스트",
+  "m2884": "정확히 이 호스트 (host:이름 형식)",
+  "m2885": "이 도메인과 모든 하위 도메인"
 };
