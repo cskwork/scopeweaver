@@ -1,7 +1,11 @@
 package agent
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/Autumn-27/norma/llm"
@@ -89,5 +93,86 @@ func TestFromEnvOpenCodeGoExplicitBlankKey(t *testing.T) {
 	}
 	if cfg.APIKey != "" {
 		t.Fatalf("explicit blank API key suppressed fallback, got %q", cfg.APIKey)
+	}
+}
+
+func TestFromEnvOpenCodeGoFileCredentials(t *testing.T) {
+	for _, tc := range []struct {
+		name, provider, fileKey, legacyKey, modernKey, want string
+		legacy, modern, noOpenCodeKey                       bool
+	}{
+		{name: "plain provider", provider: "opencode-go", want: "opencode-subscription-key"},
+		{name: "padded provider", want: "opencode-subscription-key"},
+		{name: "missing subscription key never inherits openai", noOpenCodeKey: true},
+		{name: "file key", fileKey: "file-key", want: "file-key"},
+		{name: "legacy override", fileKey: "file-key", legacy: true, legacyKey: "legacy-key", want: "legacy-key"},
+		{name: "modern override", fileKey: "file-key", legacy: true, legacyKey: "legacy-key", modern: true, modernKey: "modern-key", want: "modern-key"},
+		{name: "modern blank", fileKey: "file-key", legacy: true, legacyKey: "legacy-key", modern: true},
+		{name: "legacy blank", fileKey: "file-key", legacy: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateLLMEnvironment(t)
+			if !tc.noOpenCodeKey {
+				t.Setenv("OPENCODE_API_KEY", "opencode-subscription-key")
+			}
+			if tc.legacy {
+				t.Setenv("ARTEX_LLM_API_KEY", tc.legacyKey)
+			}
+			if tc.modern {
+				t.Setenv("SCOPEWEAVER_LLM_API_KEY", tc.modernKey)
+			}
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				key := tc.want
+				if key == "" {
+					key = "scopeweaver-local"
+				}
+				if r.Method != http.MethodPost || r.URL.Path != "/chat/completions" || r.Header.Get("Authorization") != "Bearer "+key {
+					t.Errorf("gateway received %s %s Authorization=%q, want POST /chat/completions with Bearer %s", r.Method, r.URL.Path, r.Header.Get("Authorization"), key)
+				}
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`)
+			}))
+			defer srv.Close()
+			provider := tc.provider
+			if provider == "" {
+				provider = " \topencode-go\n "
+			}
+			path := filepath.Join(t.TempDir(), "config.json")
+			if err := os.WriteFile(path, []byte(fmt.Sprintf(`{"llm":{"provider":%q,"api_key":%q,"base_url":%q}}`, provider, tc.fileKey, srv.URL)), 0600); err != nil {
+				t.Fatal(err)
+			}
+			t.Setenv("SCOPEWEAVER_CONFIG", path)
+			cfg, ok := FromEnv()
+			if !ok {
+				t.Fatal("local gateway configuration is not ready")
+			}
+			cfg.Retry = RetryConfig{ConnectAttempts: -1, EmptyAttempts: -1}
+			client, err := cfg.NewProvider()
+			if err != nil {
+				t.Fatal(err)
+			}
+			msg, _, _, err := client.Complete(t.Context(), llm.CompletionRequest{Messages: []llm.Message{llm.UserText("ping")}, MaxTokens: 64})
+			if err != nil || msg.Text() != "OK" || calls != 1 || cfg.APIKey != tc.want {
+				t.Fatalf("gateway reply=%q err=%v calls=%d configured key=%q, want %q", msg.Text(), err, calls, cfg.APIKey, tc.want)
+			}
+		})
+	}
+}
+
+func TestFromEnvWhitespaceFileProviderInference(t *testing.T) {
+	isolateLLMEnvironment(t)
+	path := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(path, []byte(`{"llm":{"provider":" \t\n "}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SCOPEWEAVER_CONFIG", path)
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	os.Unsetenv("OPENAI_API_KEY")
+	t.Setenv("OPENCODE_API_KEY", "opencode-subscription-key")
+	cfg, ok := FromEnv()
+	if !ok || cfg.APIKey != "opencode-subscription-key" || cfg.BaseURL != "https://opencode.ai/zen/go/v1" {
+		t.Fatalf("whitespace provider inferred base=%q key=%q ready=%v, want OpenCode Go", cfg.BaseURL, cfg.APIKey, ok)
 	}
 }
