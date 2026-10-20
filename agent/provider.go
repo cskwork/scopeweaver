@@ -168,7 +168,7 @@ func compactionConfig(windowTokens int) *compaction.Config {
 //	ANTHROPIC_API_KEY / OPENAI_API_KEY / OPENCODE_API_KEY = credentials
 func FromEnv() (Config, bool) {
 	file := runtimeconfig.ResolveLLM()
-	prov := file.Provider
+	prov := strings.TrimSpace(file.Provider)
 	if prov == "" {
 		switch {
 		case os.Getenv("ANTHROPIC_API_KEY") != "":
@@ -420,6 +420,9 @@ type quotaAwareTransport struct {
 }
 
 func (t quotaAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if _, explicit := req.Header["User-Agent"]; !explicit {
+		req.Header.Set("User-Agent", "scopeweaver")
+	}
 	if t.claude != nil {
 		if err := t.claude.rewrite(req); err != nil {
 			return nil, err
