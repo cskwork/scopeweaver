@@ -3,7 +3,11 @@ on:
   push:
     branches: [dev, main]
   pull_request:
+    # edited stays: retargeting a PR's base fires `edited`, and the branch-policy check reads base_ref.
     types: [opened, synchronize, reopened, edited]
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
