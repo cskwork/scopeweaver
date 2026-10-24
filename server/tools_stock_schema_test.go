@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -24,22 +25,22 @@ import (
 
 // TestStockMetadataRuntimePostgres is a database-backed integration receipt, not a live
 // inference test. It uses the actual catalog HTTP handlers, wireTools resolver,
-// and PostgreSQL readback. Its owned child database isolates it from other tests.
+// and PostgreSQL readback. Its owned schema isolates it from other tests.
 func TestStockMetadataRuntimePostgres(t *testing.T) {
 	dsn := dbtest.DSN(t)
 	cfg, err := pgconn.ParseConfig(dsn)
 	if err != nil || !strings.HasPrefix(cfg.Database, "scopeweaver_test_") {
 		t.Fatal("ARTEX_TEST_DSN must select a disposable scopeweaver_test_* database")
 	}
-	childDSN, childDatabase := proofCreateStockDatabase(t, dsn)
+	childDSN, childSchema := proofCreateStockSchema(t, dsn)
 	pg, err := db.Open(childDSN)
 	if err != nil {
 		t.Fatalf("open disposable PostgreSQL fixture: %v", err)
 	}
 	defer pg.Close()
-	var database string
-	if err := pg.QueryRow("SELECT current_database()").Scan(&database); err != nil || database != childDatabase {
-		t.Fatal("database readback does not match the guarded test database")
+	var schema string
+	if err := pg.QueryRow("SELECT current_schema()").Scan(&schema); err != nil || schema != childSchema {
+		t.Fatal("schema readback does not match the owned test fixture")
 	}
 	for _, table := range []string{"tools", "agent_prompts", "llm_profiles"} {
 		var n int
@@ -214,51 +215,119 @@ func TestStockMetadataRuntimePostgres(t *testing.T) {
 	})
 }
 
-// proofCreateStockDatabase owns only the child name whose CREATE succeeded. The
-// existing test DSN is guarded by dbtest before this function is called; retain
-// all its connection options while changing only the selected database.
-func proofCreateStockDatabase(t *testing.T, parentDSN string) (string, string) {
+// Keep public fixtures intact and constrain every pooled connection to the owned
+// schema; checking after the nested test also observes its registered cleanup.
+func TestStockFixtureIsolationAndCleanup(t *testing.T) {
+	parentDSN := dbtest.DSN(t)
+	parentConfig, err := pgconn.ParseConfig(parentDSN)
+	if err != nil || !strings.HasPrefix(parentConfig.Database, "scopeweaver_test_") {
+		t.Fatal("ARTEX_TEST_DSN must select disposable scopeweaver_test_* database")
+	}
+	ctx := context.Background()
+	parent, err := pgx.Connect(ctx, parentDSN)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer parent.Close(ctx)
+	var parentSchema string
+	if err := parent.QueryRow(ctx, "SELECT current_schema()").Scan(&parentSchema); err != nil {
+		t.Fatal(err)
+	}
+	marker := fmt.Sprintf("stock_parent_%d_%d", os.Getpid(), time.Now().UnixNano())
+	qualifiedMarker := pgx.Identifier{parentSchema, marker}.Sanitize()
+	if _, err := parent.Exec(ctx, "CREATE TABLE "+qualifiedMarker+" (value text); INSERT INTO "+qualifiedMarker+" VALUES ('parent unchanged')"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if _, err := parent.Exec(ctx, "DROP TABLE "+qualifiedMarker); err != nil {
+			t.Errorf("drop parent sentinel: %v", err)
+		}
+	}()
+	var owned string
+	t.Run("owned_fixture", func(t *testing.T) {
+		fixtureDSN, name := proofCreateStockSchema(t, parentDSN)
+		owned = name
+		pg, err := db.Open(fixtureDSN)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer pg.Close()
+		var connections []*sql.Conn
+		defer func() {
+			for _, conn := range connections {
+				conn.Close()
+			}
+		}()
+		for range 3 {
+			conn, err := pg.Conn(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			connections = append(connections, conn)
+			var database, schema, appName string
+			var visibleMarker *string
+			if err := conn.QueryRowContext(ctx, "SELECT current_database(), current_schema(), current_setting('application_name'), to_regclass($1)::text", marker).Scan(&database, &schema, &appName, &visibleMarker); err != nil {
+				t.Fatal(err)
+			}
+			if database != parentConfig.Database || schema != owned || appName != parentConfig.RuntimeParams["application_name"] || visibleMarker != nil {
+				t.Fatalf("fixture escaped schema or changed connection options: database=%s schema=%s app=%s parent_marker=%v", database, schema, appName, visibleMarker)
+			}
+		}
+	})
+	var remaining int
+	if err := parent.QueryRow(ctx, "SELECT count(*) FROM pg_namespace WHERE nspname=$1", owned).Scan(&remaining); err != nil || remaining != 0 {
+		t.Fatalf("owned schema was not removed: count=%d err=%v", remaining, err)
+	}
+	var value string
+	if err := parent.QueryRow(ctx, "SELECT value FROM "+qualifiedMarker).Scan(&value); err != nil || value != "parent unchanged" {
+		t.Fatalf("parent fixture changed: value=%q err=%v", value, err)
+	}
+}
+
+// Own only the schema whose CREATE succeeded; every connection uses only that
+// schema, so public fixtures remain invisible and test roles need no CREATEDB.
+func proofCreateStockSchema(t *testing.T, parentDSN string) (string, string) {
 	t.Helper()
+	parentConfig, err := pgconn.ParseConfig(parentDSN)
+	if err != nil || !strings.HasPrefix(parentConfig.Database, "scopeweaver_test_") {
+		t.Fatal("ARTEX_TEST_DSN must select disposable scopeweaver_test_* database")
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	admin, err := pgx.Connect(ctx, parentDSN)
 	if err != nil {
 		t.Fatal("connect to guarded parent test database failed")
 	}
-	name := fmt.Sprintf("scopeweaver_test_stock_%d_%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("stock_%d_%d", os.Getpid(), time.Now().UnixNano())
 	identifier := pgx.Identifier{name}.Sanitize()
-	if _, err := admin.Exec(ctx, "CREATE DATABASE "+identifier); err != nil {
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+identifier); err != nil {
 		_ = admin.Close(context.Background())
-		t.Fatalf("create owned disposable stock database failed (test role needs CREATE DATABASE): %v", err)
+		t.Fatalf("create owned disposable stock schema failed: %v", err)
 	}
 	t.Cleanup(func() {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cleanupCancel()
 		defer admin.Close(cleanupCtx)
-		// db.Close runs in the test body's defer before testing invokes Cleanup.
-		// No FORCE: a leaked connection must fail visibly rather than be killed.
-		if _, err := admin.Exec(cleanupCtx, "DROP DATABASE "+identifier); err != nil {
-			t.Errorf("drop owned disposable database %s failed: %v", name, err)
+		// Test bodies close stores and return pooled connections before Cleanup.
+		if _, err := admin.Exec(cleanupCtx, "DROP SCHEMA "+identifier+" CASCADE"); err != nil {
+			t.Errorf("drop owned disposable schema %s failed: %v", name, err)
 		}
 	})
-	childDSN := parentDSN
+	fixtureDSN := parentDSN
 	if parsed, err := url.Parse(parentDSN); err == nil && (parsed.Scheme == "postgres" || parsed.Scheme == "postgresql") {
-		parsed.Path = "/" + name
-		parsed.RawPath = ""
 		query := parsed.Query()
-		query.Set("dbname", name)
+		query.Set("search_path", name)
 		parsed.RawQuery = query.Encode()
-		childDSN = parsed.String()
+		fixtureDSN = parsed.String()
 	} else {
-		// Generated name has only ASCII letters, digits, and underscores. A final
-		// keyword overrides an earlier dbname without reconstructing credentials.
-		childDSN += " dbname=" + name
+		// Generated schema contains only ASCII letters, digits and underscores.
+		fixtureDSN += " search_path=" + name
 	}
-	childConfig, err := pgconn.ParseConfig(childDSN)
-	if err != nil || childConfig.Database != name {
-		t.Fatal("owned child DSN did not select the newly created database")
+	fixtureConfig, err := pgconn.ParseConfig(fixtureDSN)
+	if err != nil || fixtureConfig.Database != parentConfig.Database || fixtureConfig.RuntimeParams["search_path"] != name {
+		t.Fatal("fixture DSN did not retain the database and isolate the owned schema")
 	}
-	return childDSN, name
+	return fixtureDSN, name
 }
 
 func proofClone(t *testing.T, value map[string]any) map[string]any {
