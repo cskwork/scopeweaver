@@ -7,6 +7,7 @@ import (
 	"github.com/Autumn-27/artex/locale"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/Autumn-27/artex/db"
 	acperm "github.com/Autumn-27/norma/permission"
@@ -69,9 +70,11 @@ type ToolSet struct {
 	// touches get anchored to it as lineage/provenance (NOT visibility — the asset
 	// graph is global and shared). Worker = its claimed intent; planner = begin root.
 	ownerNode int64
-	GoalMet   bool
-	Reason    string
-	writes    WriteCounts
+	// goalMu protects terminal tool writes and the planner's cancellation snapshot.
+	goalMu  sync.Mutex
+	GoalMet bool
+	Reason  string
+	writes  WriteCounts
 	// killWork, if set, terminates a running work by intent id (engine callback,
 	// wired by the planner). nil = the kill_work tool reports unavailable.
 	killWork func(intentID int64) error
@@ -1245,8 +1248,7 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 					}
 				}
 				if allMet {
-					t.GoalMet = true
-					t.Reason = fmt.Sprintf(locale.Text(locale.FromContext(ctx), "All %d goals are met (last triggered by goal %d)"), len(goals), goal)
+					t.markGoalMet(fmt.Sprintf(locale.Text(locale.FromContext(ctx), "All %d goals are met (last triggered by goal %d)"), len(goals), goal))
 					t.markTerminalProof(toolUseIDOf(tc)) // bind to the ORIGINATING call (terminal_proof.go)
 					return actool.Text(fmt.Sprintf(locale.Text(locale.FromContext(ctx), "goal %d marked met; all task objectives are achieved and the task completes automatically"), goal)), nil
 				}
@@ -1255,14 +1257,25 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 		})
 }
 
+func (t *ToolSet) markGoalMet(reason string) {
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
+	t.GoalMet, t.Reason = true, reason
+}
+
+func (t *ToolSet) goalResult() (bool, string) {
+	t.goalMu.Lock()
+	defer t.goalMu.Unlock()
+	return t.GoalMet, t.Reason
+}
+
 func (t *ToolSet) goalMet() actool.CoreTool {
 	return writeToolTC("goal_met", locale.Text(t.language, "End the ENTIRE task immediately only when ALL objectives are truly achieved. One objective/flag/vulnerability alone is insufficient; use prove_goal for that goal instead. This is NOT for ending a planning round: no new intents or waiting for workers means simply end the round without calling this tool; zero intents can be normal. Prefer proving goals individually with prove_goal. goal_met bypasses individual proof to close the whole engagement."),
 		obj(map[string]any{"reason": str(locale.Text(t.language, "Evidence that the objective was genuinely achieved, not a reason to end this round such as no new directions"))}, "reason"),
 		func(_ context.Context, in json.RawMessage, tc *actool.ToolContext) (actool.Result, error) {
 			var a struct{ Reason string }
 			_ = json.Unmarshal(in, &a)
-			t.GoalMet = true
-			t.Reason = a.Reason
+			t.markGoalMet(a.Reason)
 			t.markTerminalProof(toolUseIDOf(tc)) // bind to the ORIGINATING call (terminal_proof.go)
 			return actool.Text("acknowledged: goal marked met"), nil
 		})
