@@ -450,5 +450,6 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 				emit(r)
 			}
 		})
-	return tsx.GoalMet, tsx.Reason, err
+	goalMet, reason := tsx.goalResult()
+	return goalMet, reason, err
 }

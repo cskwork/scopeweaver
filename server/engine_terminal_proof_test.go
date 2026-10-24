@@ -91,8 +91,7 @@ func (p *s18Provider) Complete(ctx context.Context, req llm.CompletionRequest) (
 	return accumulateStreamForTest(ctx, p.Stream, req)
 }
 
-// Staged through a Go overlay until the terminal delta is approved. Reuses the
-// existing S7 child-DB helper: no parent fixtures or real providers are modified.
+// Reuses the stock fixture schema: no parent fixtures or real providers are modified.
 func TestEngineTerminalProofPersistsAuthenticReceipt(t *testing.T) {
 	t.Setenv("AGENT_CORE_DISABLE_INTERACTIVE_SHELL", "1")
 	priorAugment, priorResolve, priorPrompt, priorTraffic := agent.ToolAugment, agent.ToolResolve, agent.PromptOverride, agent.FindingTrafficBindingEnabled
@@ -103,15 +102,15 @@ func TestEngineTerminalProofPersistsAuthenticReceipt(t *testing.T) {
 	for _, mode := range []string{"success", "parent_pause", "provider_error"} {
 		t.Run(mode, func(t *testing.T) {
 			parentDSN := dbtest.DSN(t)
-			childDSN, childName := proofCreateStockDatabase(t, parentDSN)
-			pg, err := db.Open(childDSN)
+			fixtureDSN, fixtureSchema := proofCreateStockSchema(t, parentDSN)
+			pg, err := db.Open(fixtureDSN)
 			if err != nil {
-				t.Fatal("open owned S18 child database failed")
+				t.Fatal("open owned S18 fixture schema failed")
 			}
 			defer pg.Close()
 			var actual string
-			if err := pg.QueryRow("SELECT current_database()").Scan(&actual); err != nil || actual != childName {
-				t.Fatal("owned child identity mismatch")
+			if err := pg.QueryRow("SELECT current_schema()").Scan(&actual); err != nil || actual != fixtureSchema {
+				t.Fatal("owned fixture schema identity mismatch")
 			}
 			row, err := pg.CreateTask("S18 owned synthetic proof", "prove the single stored fact", nil, 0, 600)
 			if err != nil {
