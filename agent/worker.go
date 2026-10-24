@@ -405,8 +405,16 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 				// reruns and retries remain idempotent.
 				// Do not accumulate metric scope when coverage is disabled.
 				if coverageEnabled {
-					for _, a := range assets {
-						_ = as.AddAutoScope(taskID, a.Type, a.Domain, a.URL, a.IP)
+					if hits, err := as.CheckAssetsInterceptForLanguage(locale.FromContext(ctx), taskID, ids); err == nil {
+						blocked := make(map[int64]bool, len(hits))
+						for _, hit := range hits {
+							blocked[hit.Asset.ID] = true
+						}
+						for _, a := range assets {
+							if !blocked[a.ID] {
+								_ = as.AddAutoScope(taskID, a.Type, a.Domain, a.URL, a.IP)
+							}
+						}
 					}
 				}
 			}
