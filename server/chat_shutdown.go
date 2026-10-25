@@ -7,7 +7,8 @@ import (
 )
 
 // DrainChats refuses further dispatches and waits for admitted background chats,
-// including side answers, checkpoint publication and run finalization. The caller must cancel the
+// including side answers, checkpoint publication and run finalization, and all
+// startup/periodic DB workers. The caller must cancel the
 // server context and drain HTTP handlers first, and keep the database open until
 // this method returns. A deadline bounds uncooperative tools or providers.
 func (s *Server) DrainChats(ctx context.Context) error {
@@ -35,6 +36,8 @@ func (s *Server) DrainChats(ctx context.Context) error {
 				// It is now stopped and all admitted runs have finished publishing.
 				s.chatDrainErr = errors.Join(s.flushSideSnapshots(), s.flushChatContexts())
 			}
+			s.backgroundWG.Wait()
+			s.archiveWG.Wait()
 			close(s.chatDrainDone)
 		}()
 	}
