@@ -96,6 +96,8 @@
 
 「LLM → 新增」表单提供 Z.ai General API 的 GLM-5.3 配置模板，以及另行标示的 Coding Plan 参考配置。请自行加入 API 密钥；选取模板不会保存、启用或联络供应商。Coding Plan 仅限官方支持的工具使用，ScopeWeaver 不在清单内。详见[供应商配置与支持限制](docs/zh-Hans/llm-providers.md)。若要减少云端 token 用量，请参阅[控制 token 用量](docs/zh-Hans/llm-providers.md#controlling-token-use)。
 
+可选的 **OpenCode SDK 桥接器**支持固定的 `native` CLI／客户端 **2.1.4**（默认）与 `legacy` SDK／CLI **1.19.4**，使用独立桥接令牌及 `providerID/modelID`。宿主工具和审批仍由 ScopeWeaver 的 Norma 管理。旧版保留安全 JSON 结构，但可规范化空白／转义，不保留原始字节，并拒绝不安全整数。两个运行时均不支持 Windows；先前运行测试范围为 macOS arm64，Linux 托管 CI 结果尚待验证。下游可能是云端，因此仅本地 LLM 模式拒绝桥接器。见 [SDK 设置、限制与降级准备](docs/zh-Hans/llm-providers.md#opencode-sdk-bridge)；SDK 配置仍存在时，旧二进制无法启动。
+
 可选的**原生 Ollama** 配置不需要 API 密钥。三种模板分别适用于同一台电脑、从 Docker 存取主机，以及选择性启用的 `docker compose --profile local-llm` 服务。选取模板会读取已安装模型并预填一个模型，优先选择声明支持工具的模型；不会下载或运行模型。默认传送 32K 上下文（`num_ctx` 32,768）、每次一个请求，以及 30 分钟的 keep-alive。选择性启用的**仅限本地 LLM 网络**配置默认关闭，仅允许环回地址与明确信任的推论 CIDR；LAN 与 Docker 地址必须加入允许清单。此配置也会封锁所有智能体网页搜寻与更新检查／下载，但仍可查看本地版本与回滚。目标工具仍可存取网络；主机／远程 Ollama 必须另设 `OLLAMA_NO_CLOUD=1`。非严格模式仍可使用云端格式、自定义 URL 与代理服务器。原生请求会将下一个可用名额优先提供给排队中的裁决／主要智能体／侧问请求；原生裁决默认为 90 秒／ask，并有上下文边界保护。详见[原生 Ollama](docs/zh-Hans/llm-providers.md#native-ollama-local-inference)。
 
 > 需要 **PostgreSQL** 数据库。探索需要已配置的 **LLM**（`ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、免密钥 Ollama 配置，或在界面中配置）。

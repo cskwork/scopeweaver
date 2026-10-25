@@ -3278,8 +3278,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   chooseTemplate: "選擇模板…",
   general: "Z.ai GLM-5.3 · 通用 API（推薦）",
   coding: "Z.ai GLM-5.3 · Coding Plan（參考）",
-  introduction:
-    "可選：預填連線欄位。設定名稱、代理、工作階段標頭和其他偏好會保留。雲端模板還會保留已輸入的 API 金鑰；Ollama 模板會清除未儲存的金鑰，避免雲端憑據被髮送到本地端點。選擇 Ollama 會讀取伺服器上已安裝的模型；雲端模板不會傳送請求。選擇模板不會儲存或啟用設定。準備好後請儲存，再單獨啟用。所有欄位仍可編輯。",
+  introduction: "模板僅填入新設定，不會儲存或啟用。雲端模板保留已輸入的金鑰；Ollama 和 SDK 模板會清除金鑰。Ollama 自動查詢已安裝的模型；SDK 需按下「載入模型」才會查詢。SDK 也會清除代理與工作階段標頭設定。其他設定仍可編輯。",
   generalHelp:
     "使用通用 API 端點並按 API 計費，與 Coding Plan 訂閱額度相互獨立。請確認 Z.ai 帳號的模型權限和計費方式。",
   codingHelp:
@@ -3307,6 +3306,18 @@ export const providers: Record<keyof typeof providersSource, string> = {
     "透過 OpenRouter 使用 DeepSeek V4.1 Flash。強度 low，輸出上限 16,384 token（以 max_tokens 傳送），上下文視窗 0（預設 200K）。OpenRouter 會自動快取重複的字首。節省效果未經測量。",
   opencodeGoHelp:
     "OpenCode Go 訂閱閘道器（https://opencode.ai/zen/go/v1，OpenAI 相容）。推理強度 max，輸出上限 16,384 token（以 max_tokens 傳送），上下文視窗 0（預設 200K）。閘道器會拒絕缺少 x-opencode-session 標頭的請求，因此該模板會自動填寫“工作階段標頭”欄位。使用你的 OpenCode 訂閱金鑰（opencode 中的 OPENCODE_API_KEY）。該金鑰受 opencode 訂閱條款約束，儲存前請確認允許在 ScopeWeaver 中使用。",
+  opencodeSdk: "OpenCode SDK · 橋接服務",
+  sdkGroup: "SDK 橋接服務",
+  sdkHelp: "橋接執行階段：native CLI／用戶端 2.1.4（預設，保留原始工具引數）或 legacy SDK 1.19.4（安全的結構化 JSON，不保留原始位元組）。兩者均不支援 Windows。主機工具執行與核准仍由 ScopeWeaver 管理。",
+  sdkSecurity: "回環橋接服務仍可能呼叫雲端提供者，因此無法用於僅限本機 LLM 模式。免費模型 ID 僅表示目前可用，不代表訂閱使用權或無限使用額度。",
+  sdkToken: "橋接權杖",
+  sdkTokenPlaceholder: "必填橋接權杖",
+  sdkTokenHelp: "請輸入橋接服務設定的獨立 SCOPEWEAVER_OPENCODE_TOKEN，而非雲端 API 金鑰。留白僅保留同一 SDK 端點已儲存的權杖。修改 URL 會清除已輸入的權杖；變更端點或格式不會保留已儲存的權杖。不會匯入已儲存的提供者憑證。",
+  sdkModelHelp: "使用 providerID/modelID 格式。按下「載入模型」才會讀取橋接目錄，不執行推論。選擇模板不會載入模型、儲存或啟用設定。",
+  sdkOptionsHelp: "輸出受原生模型宣告的上限約束。請使用所選模型支援的推理選項；不支援的設定可能在提供者端失敗。此輸出欄位選擇器不適用。",
+  sdkSessionHelp: "此橋接服務不支援自訂工作階段標頭。ScopeWeaver 會為每次請求提供對話歷程。",
+  sdkEndpoint: "橋接 URL",
+  sdkProxyHelp: "不支援橋接代理。請使用回環 URL，並在橋接服務上設定下游提供者連線。",
   officialModel: "GLM-5.3 模型指南",
   officialPolicy: "Coding Plan 使用政策",
   groupCloud: "雲端服務商",

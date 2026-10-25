@@ -2,7 +2,9 @@
 
 [English](../llm-providers.md) · [한국어](../ko/llm-providers.md) · [简体中文](../zh-Hans/llm-providers.md) · [繁體中文](../zh-Hant/llm-providers.md) · [日本語](../ja/llm-providers.md) · Español
 
-ScopeWeaver admite cuatro formatos de perfil: **Anthropic**, **OpenAI Chat Completions**, **OpenAI Responses** y **Ollama** nativo. Todos conservan URL base personalizada, proxy, cabecera de sesión, reintentos, frecuencia y concurrencia, por lo que siguen funcionando sin cambios proveedores de nube, pasarelas y servidores autoalojados compatibles con OpenAI. Ollama es opcional y los proveedores de nube siguen siendo la ruta compatible predeterminada.
+ScopeWeaver admite **Anthropic**, **OpenAI Chat Completions**, **OpenAI Responses**, **Ollama** nativo y el **puente OpenCode SDK** opcional. Los cuatro formatos anteriores conservan URL base, proxy, cabecera de sesión, reintentos, frecuencia y concurrencia; los proveedores de nube, pasarelas y servidores OpenAI compatibles siguen funcionando. SDK usa credenciales independientes y los límites descritos abajo; no sustituye API/OpenCode Go.
+
+La plantilla SDK tampoco hace solicitudes; el descubrimiento requiere pulsar **Cargar modelos** explícitamente.
 
 Una plantilla rellena el **formulario de un perfil nuevo** sin guardar credenciales, activar perfiles ni modificar los existentes. Las de Ollama también leen modelos instalados del servidor elegido; las de nube no hacen solicitudes. El formato, URL base y modelo siguen editables tras cualquier plantilla.
 
@@ -33,6 +35,55 @@ GLM-5.3 acepta texto, tiene ventana de contexto de 1M de tokens y requiere razon
 Introduce nombre de perfil y tu clave API. Aplicar cualquiera de las plantillas conserva nombre, clave, proxy, cabecera de sesión y preferencias ajenas ya introducidas. Guarda cuando esté listo; un perfil nuevo se activa por separado. Los controles existentes **Probar conexión** y **Cargar modelos** hacen solicitudes reales solo al pulsarlos; este cambio no realiza pruebas reales de proveedor.
 
 Verificado con documentación oficial el **2026-10-03**. La disponibilidad, derechos de cuenta y políticas pueden cambiar.
+
+<a id="opencode-sdk-bridge"></a>
+
+## Puente OpenCode SDK
+
+`opencode-sdk` es un formato de perfil opcional e independiente, no la API HTTP interna de OpenCode. El entorno Norma de ScopeWeaver conserva conversación, herramientas, aprobaciones, alcance, reintentos y compactación. El puente solo transmite un paso del modelo y captura solicitudes de herramientas del anfitrión.
+
+| `SCOPEWEAVER_OPENCODE_RUNTIME` | Entorno fijado | Límites de argumentos e historial |
+| --- | --- | --- |
+| `native` (predeterminado) | CLI, cliente y SDK oficiales **2.1.4** | Conserva JSON original de argumentos, incluidos enteros de 64 bits, en respuestas e historial. Rechaza números inseguros fuera de los argumentos originales autoritativos. |
+| `legacy` | SDK y CLI **1.19.4** | JSON estructuralmente válido y representable con seguridad; enteros de valor absoluto no superior a **9,007,199,254,740,991**. Puede normalizar espacios y escapes HTML/Unicode equivalentes, sin conservar bytes originales. Rechaza enteros inseguros e historial opaco/firmado de razonamiento. Usa `native` para fidelidad de argumentos originales. |
+
+El modo nativo usa el CLI auténtico fijado con `serve --stdio` y `run --server --session`; el cliente oficial gestiona sesiones, eventos e interrupción. Cada llamada controla home/configuración/datos temporales privados y su base de datos. Conserva las definiciones e implementaciones nativas reales, con permisos ASK y sin `--auto`; un hook público `execute.before` bloquea todas las herramientas ajenas al anfitrión antes de ejecutarse. Solo devuelve las capturas a Norma para ejecución y aprobación. Conserva el contexto generado de modelo/entorno/herramientas junto con system e historial del anfitrión. Rechaza fuentes de configuración de sistema/MDM no controladas sin leerlas ni modificarlas; consulta la guía del adaptador.
+
+Los proveedores personalizados heredados usan un mapeo explícito compatible con OpenAI. **Ninguno de los dos entornos admite Windows**, porque no está implementada la limpieza necesaria del árbol POSIX. La verificación real previa cubrió **macOS arm64**. Linux CI está configurada, pero su ejecución alojada sigue sin verificarse. No se afirman resultados en otras plataformas; versiones SDK no probadas requieren verificación independiente.
+
+Sigue el [inicio del adaptador](../../adapters/opencode-sdk/README.es.md) con **Bun 1.3.14**. El puente tiene configuración propia y no importa credenciales guardadas de OpenCode ni de nube. Define un `SCOPEWEAVER_OPENCODE_TOKEN` independiente de al menos **32 caracteres no blancos** y úsalo en **LLM → Nuevo → Plantilla de configuración → Puente OpenCode SDK**. No pegues una clave API de OpenCode Go/Console.
+
+```sh
+cd adapters/opencode-sdk
+bun install --frozen-lockfile --ignore-scripts
+export SCOPEWEAVER_OPENCODE_TOKEN="$(openssl rand -hex 32)"
+bun run start
+```
+
+Conserva el token para el campo **Token del puente**. El entorno predeterminado es `native`; define `SCOPEWEAVER_OPENCODE_RUNTIME=legacy` antes del inicio para elegir el antiguo. Escucha en `127.0.0.1:4097`. Para proveedores explícitos, usa un JSON dedicado mediante `SCOPEWEAVER_OPENCODE_PROVIDER_CONFIG`, siguiendo el esquema del adaptador, no un archivo de autenticación del usuario. Conserva las dependencias opcionales de plataforma.
+
+`SCOPEWEAVER_OPENCODE_TIMEOUT_MS` admite **0–86,400,000 ms**, con **0** predeterminado bajo control de cancelación del anfitrión. La solicitud tiene un máximo de **16 MiB** y el exceso falla explícitamente. Los demás límites de salida y limpieza están en la guía del adaptador.
+
+| Campo | Valor |
+| --- | --- |
+| Formato | `opencode-sdk` |
+| URL del puente | `http://127.0.0.1:4097` |
+| Modelo | `providerID/modelID`, mediante **Cargar modelos** o entrada explícita |
+| Token del puente | `SCOPEWEAVER_OPENCODE_TOKEN`, no una clave API de nube |
+| Streaming | Activado, con el entorno fijado seleccionado |
+| Razonamiento / esfuerzo | Omitidos por la plantilla; usa solo valores admitidos por el modelo |
+| Límite de salida | `0` usa el valor existente de la ruta del anfitrión; el puente aplica el límite declarado menor del modelo |
+| Proxy / cabecera de sesión personalizada | No admitidos; la plantilla borra ambos |
+
+La plantilla borra claves de nube sin guardar, deja el modelo vacío y **no descubre, infiere, guarda ni activa**. Introduce el token y pulsa **Cargar modelos** para consultar el catálogo sin inferencia. Guarda y activa por separado cuando esté listo. **Probar conexión** solo hace una solicitud al modelo al pulsarlo; descubrir metadatos no demuestra acceso de inferencia.
+
+**Verificación gratuita anterior — 2026-10-25 KST:** si figura en la lista, selecciona `opencode/deepseek-v4.1-flash-free`. La ejecución anterior sin iniciar sesión en macOS arm64, con CLI auténtico 2.1.4, superó conexión de interfaz, escritura Bash del anfitrión tras aprobación ASK manual, archivo con `FREE_OK` exacto más salto de línea y respuesta final. Hubo **3 POST de inferencia**, salida máxima **1,024**, reintentos desactivados, sin modelo de pago alternativo ni ejecución nativa observada. Solo demuestra un pequeño flujo aislado de esa fecha, no una repetición actual, disponibilidad permanente ni uso ilimitado. Verifica disponibilidad, elegibilidad y límites actuales. El acceso gratuito alojado heredado sigue sin verificarse.
+
+Al editar, un token vacío conserva el guardado solo en el mismo endpoint SDK. Cambiar URL borra el token introducido; cambiar endpoint o formato con token vacío no reutiliza credenciales. `localhost`, `127.0.0.1` y `::1` son ámbitos distintos. ID y límites de salida proceden de metadatos actuales. El razonamiento depende del proveedor/modelo y falla explícitamente si no es compatible.
+
+**Red y cuentas:** el puente loopback debe compartir el espacio de nombres de red con ScopeWeaver; localhost dentro de un contenedor es el propio contenedor. El destino puede ser nube, por lo que el modo **LLM solo local** rechaza SDK. El puente no admite proxies; configura la conectividad del proveedor en el puente. Un ID gratuito no demuestra derechos de suscripción, continuidad ni uso ilimitado; revisa términos y límites. No selecciona alternativas de pago ni importa cuentas. La política de failover configurada por el anfitrión es independiente. Los perfiles API/OpenCode Go existentes siguen separados.
+
+**Preparar una degradación:** la restricción de formato `CHECK` de la base de datos añade `opencode-sdk`. Un binario anterior no arranca mientras queden perfiles SDK. Respalda la base y usa la versión actual para convertirlos a un formato antiguo admitido o eliminarlos antes de degradar. La verificación previa usó bases desechables, sin migrar producción.
 
 ## OpenCode Go (pasarela de suscripción opencode)
 

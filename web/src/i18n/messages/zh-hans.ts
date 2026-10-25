@@ -3278,8 +3278,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   chooseTemplate: "选择模板…",
   general: "Z.ai GLM-5.3 · 通用 API（推荐）",
   coding: "Z.ai GLM-5.3 · Coding Plan（参考）",
-  introduction:
-    "可选：预填连接字段。配置名称、代理、会话标头和其他偏好会保留。云端模板还会保留已输入的 API 密钥；Ollama 模板会清除未保存的密钥，避免云端凭据被发送到本地端点。选择 Ollama 会读取服务器上已安装的模型；云端模板不会发送请求。选择模板不会保存或启用配置。准备好后请保存，再单独启用。所有字段仍可编辑。",
+  introduction: "模板只填充新配置，不会保存或激活。云端模板保留已输入的密钥；Ollama 和 SDK 模板会清除密钥。Ollama 自动查询已安装模型；SDK 需要点击“加载模型”才查询。SDK 还会清除代理和会话请求头设置。其他设置仍可编辑。",
   generalHelp:
     "使用通用 API 端点并按 API 计费，与 Coding Plan 订阅额度相互独立。请确认 Z.ai 账号的模型权限和计费方式。",
   codingHelp:
@@ -3307,6 +3306,18 @@ export const providers: Record<keyof typeof providersSource, string> = {
     "通过 OpenRouter 使用 DeepSeek V4.1 Flash。强度 low，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。OpenRouter 会自动缓存重复的前缀。节省效果未经测量。",
   opencodeGoHelp:
     "OpenCode Go 订阅网关（https://opencode.ai/zen/go/v1，OpenAI 兼容）。推理强度 max，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。网关会拒绝缺少 x-opencode-session 标头的请求，因此该模板会自动填写“会话标头”字段。使用你的 OpenCode 订阅密钥（opencode 中的 OPENCODE_API_KEY）。该密钥受 opencode 订阅条款约束，保存前请确认允许在 ScopeWeaver 中使用。",
+  opencodeSdk: "OpenCode SDK · 桥接服务",
+  sdkGroup: "SDK 桥接服务",
+  sdkHelp: "桥接运行时：native CLI/客户端 2.1.4（默认，保留原始工具参数）或 legacy SDK 1.19.4（安全的结构化 JSON，不保留原始字节）。两者均不支持 Windows。主机工具执行和审批仍由 ScopeWeaver 管理。",
+  sdkSecurity: "回环桥接服务仍可能调用云端提供商，因此不能用于仅限本地 LLM 模式。免费模型 ID 只表示当前可用性，不代表订阅使用权或无限使用额度。",
+  sdkToken: "桥接令牌",
+  sdkTokenPlaceholder: "必填桥接令牌",
+  sdkTokenHelp: "请输入桥接服务配置的独立 SCOPEWEAVER_OPENCODE_TOKEN，而非云端 API 密钥。留空仅保留同一 SDK 端点已保存的令牌。修改 URL 会清除已输入的令牌；更换端点或格式不会保留已保存的令牌。不会导入已保存的提供商凭据。",
+  sdkModelHelp: "使用 providerID/modelID 格式。点击“加载模型”才会读取桥接目录，不执行推理。选择模板不会加载模型、保存或激活配置。",
+  sdkOptionsHelp: "输出受原生模型声明的上限约束。请使用所选模型支持的推理选项；不支持的设置可能在提供商端失败。此输出字段选择器不适用。",
+  sdkSessionHelp: "此桥接服务不支持自定义会话请求头。ScopeWeaver 会为每次请求提供对话历史。",
+  sdkEndpoint: "桥接 URL",
+  sdkProxyHelp: "不支持桥接代理。请使用回环 URL，并在桥接服务上配置下游提供商连接。",
   officialModel: "GLM-5.3 模型指南",
   officialPolicy: "Coding Plan 使用政策",
   groupCloud: "云端服务商",
