@@ -1466,6 +1466,9 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// reasoning_effort/thinking field fails the test too (no false "test ok, run 400").
 	cfg.ThinkingType = req.ThinkingType
 	cfg.ReasoningEffort = req.ReasoningEffort
+	if cfg.Provider() == opencodesdk.Format && req.MaxTokens > 0 {
+		cfg.MaxTokens = req.MaxTokens
+	}
 	// Test the profile's chosen transport mode so endpoints supporting only one mode fail here,
 	// rather than passing the test but failing in an actual conversation.
 	if req.Streaming != nil {

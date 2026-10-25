@@ -161,6 +161,97 @@ func TestSDKStoredTokenMatchesEndpointAndFormat(t *testing.T) {
 		}
 	}
 }
+
+func TestSDKConnectionHTTPHonorsFormAndStoredTokenLimits(t *testing.T) {
+	t.Setenv("SCOPEWEAVER_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
+	t.Setenv("SCOPEWEAVER_LOCAL_LLM_ONLY", "false")
+	m := backportTestManager(t)
+	for _, stream := range []bool{false, true} {
+		for _, tc := range []struct {
+			name               string
+			form, stored, want int
+		}{
+			{"submitted", 1024, 0, 1024},
+			{"stored profile", 0, 1024, 1024},
+			{"submitted overrides stored", 512, 2048, 512},
+			{"unspecified", 0, 0, 8192},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.name, stream), func(t *testing.T) {
+				var calls, maxTokens atomic.Int32
+				bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("Authorization") != "Bearer bridge-token" {
+						t.Error("connection request did not use its scoped token")
+						http.Error(w, "unauthorized", http.StatusUnauthorized)
+						return
+					}
+					if r.URL.Path == "/v1/capabilities" {
+						fmt.Fprint(w, sdkCaps)
+						return
+					}
+					if r.Method == http.MethodDelete {
+						return
+					}
+					var body struct {
+						MaxTokens int `json:"max_tokens"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+						http.Error(w, "invalid request", http.StatusBadRequest)
+						return
+					}
+					calls.Add(1)
+					maxTokens.Store(int32(body.MaxTokens))
+					if stream {
+						w.Header().Set("Content-Type", "application/x-ndjson")
+						fmt.Fprintln(w, `{"type":"message_start"}`)
+						fmt.Fprintln(w, `{"type":"text_delta","text":"OK"}`)
+						fmt.Fprintln(w, `{"type":"message_delta","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0}}`)
+						fmt.Fprintln(w, `{"type":"message_stop"}`)
+					} else {
+						fmt.Fprint(w, `{"message":{"role":"assistant","content":[{"type":"text","text":"OK"}]},"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0}}`)
+					}
+				}))
+				defer bridge.Close()
+				s := &Server{m: m}
+				body := map[string]any{"provider": opencodesdk.Format, "model": "opencode/test", "base_url": bridge.URL, "streaming": stream}
+				if tc.form > 0 {
+					body["max_tokens"] = tc.form
+				}
+				if tc.stored > 0 {
+					id, err := m.pg.SaveProfile(&db.LLMProfile{Name: "SDK-connection-token-cap", Format: opencodesdk.Format, BaseURL: bridge.URL, Model: "opencode/test", APIKey: "bridge-token", MaxTokens: tc.stored, Streaming: stream})
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer m.pg.DeleteProfile(id)
+					body["profile_id"] = id
+				} else {
+					body["api_key"] = "bridge-token"
+				}
+				api := httptest.NewServer(http.HandlerFunc(s.testLLM))
+				defer api.Close()
+				raw, err := json.Marshal(body)
+				if err != nil {
+					t.Fatal(err)
+				}
+				response, err := api.Client().Post(api.URL, "application/json", bytes.NewReader(raw))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer response.Body.Close()
+				var got struct {
+					OK           bool `json:"ok"`
+					Reply, Error string
+				}
+				if err := json.NewDecoder(response.Body).Decode(&got); err != nil {
+					t.Fatal(err)
+				}
+				if response.StatusCode != http.StatusOK || !got.OK || got.Reply != "OK" || calls.Load() != 1 || int(maxTokens.Load()) != tc.want {
+					t.Fatalf("HTTP %d result=%+v inference calls=%d max_tokens=%d want 1/%d", response.StatusCode, got, calls.Load(), maxTokens.Load(), tc.want)
+				}
+			})
+		}
+	}
+}
 func TestSDKMetadataLocalOnlyRejectedBeforeBridge(t *testing.T) {
 	t.Setenv("SCOPEWEAVER_CONFIG", filepath.Join(t.TempDir(), "missing.json"))
 	t.Setenv("SCOPEWEAVER_LOCAL_LLM_ONLY", "true")

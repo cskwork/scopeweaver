@@ -24,6 +24,71 @@ func TestConfigFromOpenCodeSDK(t *testing.T) {
 		t.Fatal("SDK must require its bridge token even on loopback")
 	}
 }
+
+func TestSDKConnectionHonorsConfiguredTokenLimit(t *testing.T) {
+	for _, stream := range []bool{false, true} {
+		for _, tc := range []struct {
+			name, provider   string
+			configured, want int
+		}{
+			{"SDK configured", opencodesdk.Format, 1024, 1024},
+			{"SDK unspecified", opencodesdk.Format, 0, 8192},
+			{"SDK nonpositive", opencodesdk.Format, -1, 8192},
+			{"OpenAI default unchanged", "openai", 1024, 8192},
+		} {
+			t.Run(fmt.Sprintf("%s/stream=%v", tc.name, stream), func(t *testing.T) {
+				var calls, maxTokens atomic.Int32
+				bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Header.Get("Authorization") != "Bearer bridge-token" {
+						t.Error("connection request did not use its dedicated token")
+						http.Error(w, "unauthorized", http.StatusUnauthorized)
+						return
+					}
+					if r.URL.Path == "/v1/capabilities" {
+						fmt.Fprint(w, `{"protocol":"scopeweaver-opencode-sdk","version":1,"runtime":"native","sdk_version":"2.1.4","tool_execution":"capture-only","streaming":true}`)
+						return
+					}
+					if r.Method == http.MethodDelete {
+						return
+					}
+					var body struct {
+						MaxTokens int `json:"max_tokens"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+						http.Error(w, "invalid request", http.StatusBadRequest)
+						return
+					}
+					calls.Add(1)
+					maxTokens.Store(int32(body.MaxTokens))
+					if tc.provider == opencodesdk.Format {
+						if stream {
+							w.Header().Set("Content-Type", "application/x-ndjson")
+							fmt.Fprintln(w, `{"type":"message_start"}`)
+							fmt.Fprintln(w, `{"type":"text_delta","text":"OK"}`)
+							fmt.Fprintln(w, `{"type":"message_delta","stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0}}`)
+							fmt.Fprintln(w, `{"type":"message_stop"}`)
+						} else {
+							fmt.Fprint(w, `{"message":{"role":"assistant","content":[{"type":"text","text":"OK"}]},"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cache_write_tokens":0}}`)
+						}
+					} else if stream {
+						w.Header().Set("Content-Type", "text/event-stream")
+						fmt.Fprint(w, "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"},\"finish_reason\":null}]}\n\ndata: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n")
+					} else {
+						fmt.Fprint(w, `{"choices":[{"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+					}
+				}))
+				defer bridge.Close()
+				cfg := ConfigFrom(tc.provider, "fixture/model", bridge.URL, "bridge-token", "")
+				cfg.Stream, cfg.MaxTokens = stream, tc.configured
+				_, reply, err := TestConnection(t.Context(), cfg)
+				if err != nil || reply != "OK" || calls.Load() != 1 || int(maxTokens.Load()) != tc.want {
+					t.Fatalf("reply=%q error=%v inference calls=%d max_tokens=%d want 1/%d", reply, err, calls.Load(), maxTokens.Load(), tc.want)
+				}
+			})
+		}
+	}
+}
 func TestFromEnvOpenCodeSDKTokenIsolation(t *testing.T) {
 	for _, tc := range []struct {
 		name, modern, dedicated string

@@ -645,12 +645,16 @@ func TestConnection(ctx context.Context, c Config) (time.Duration, string, error
 	// yielding finish=length and confusing interruption/resume indications despite
 	// transport success. A sufficient budget lets the model emit OK and stop cleanly.
 	// Keep EscalateMaxTokens false to avoid wasteful retry/resume loops after truncation.
+	maxTokens := 8192
+	if c.Provider() == opencodesdk.Format && c.MaxTokens > 0 {
+		maxTokens = c.MaxTokens
+	}
 	reply, err := agentcore.Run(ctx, agentcore.Options{
 		Provider:       prov,
 		SystemPrompt:   []string{locale.Text(locale.FromContext(ctx), "This is a connection test. Output exactly the two characters OK, with no reasoning, explanation, or other content.")},
 		PermissionMode: acperm.ModeBypass,
 		MaxTurns:       1,
-		MaxTokens:      8192,
+		MaxTokens:      maxTokens,
 		NonStreaming:   !c.Stream, // Test using this profile's actual streaming/non-streaming mode.
 	}, "ping")
 	lat := time.Since(start)
