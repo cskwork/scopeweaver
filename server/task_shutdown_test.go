@@ -86,11 +86,6 @@ func TestShutdownWaitsForRestoredTaskWrite(t *testing.T) {
 	if err := s.DrainChats(drainCtx); err != nil {
 		t.Fatal(err)
 	}
-	// Join even on the red baseline before inspecting the cancellation write.
-	s.engine.runtimeMu.Lock()
-	rt := s.engine.runtimes[task.ID]
-	s.engine.runtimeMu.Unlock()
-	rt.wg.Wait()
 	node, err := task.Store.GetNode(intentID)
 	if err != nil || node == nil || node.State != "open" {
 		t.Fatalf("cancelled worker did not release its intent: node=%+v err=%v", node, err)
@@ -219,11 +214,6 @@ func TestShutdownWaitsForDeadlineWrite(t *testing.T) {
 	if err := s.DrainChats(drainCtx); err != nil {
 		t.Fatal(err)
 	}
-	// The baseline also needs an explicit join before reading its final write.
-	s.engine.runtimeMu.Lock()
-	rt := s.engine.runtimes[task.ID]
-	s.engine.runtimeMu.Unlock()
-	rt.wg.Wait()
 	if status := m.TaskStatus(task.ID); status != "timeout" {
 		t.Fatalf("deadline settlement status=%s, want timeout", status)
 	}

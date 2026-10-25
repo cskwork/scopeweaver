@@ -499,7 +499,7 @@ func (w *Worker) execute(ctx context.Context, name string, taskID int64, as *db.
 	applyRuntimePolicy(&opts, RuntimePolicy{NativeOllama: w.nativeOllamaFn != nil && w.nativeOllamaFn(), ContextWindow: w.compactionWindow()})
 	enableNoa(&opts, w.noaEnabledFn, w.workDir, noaSession, noaWarn(noaSession))
 	ctx = attachSideCapture(ctx, &opts)
-	s := agentcore.NewSession(opts)
+	s := newOwnedSession(ctx, opts)
 	defer s.Close() // release the session's background-task manager (temp dir + processes)
 
 	// Resume prior conversation if this intent was paused/blocked/exhausted and is

@@ -72,6 +72,8 @@ type Server struct {
 	chatBusy      map[string]bool
 	chatClosing   bool
 	chatWG        sync.WaitGroup
+	httpWG        sync.WaitGroup
+	chatDrainOnce sync.Once
 	chatDrainDone chan struct{}
 	chatDrainErr  error
 	// chatCancel holds the cancel func for each in-flight conversation run (keyed by
@@ -167,8 +169,10 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
-		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		provByProfile:  map[int64]*provEntry{},
+		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	s.ctx = agent.WithCallbackOwner(s.ctx, s.reserveBackgroundWork)
+	s.llmHealth = newLLMHealthRegistry(m.pg, s.startBackgroundWork)
 	// Recovery must finish before any internal producer or task runtime starts.
 	if err := s.recoverChatControls(); err != nil {
 		return nil, fmt.Errorf("chat startup recovery: %w", err)
@@ -995,7 +999,7 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
-	return root
+	return s.trackHTTP(root)
 }
 
 // --- handlers ---
@@ -1651,11 +1655,7 @@ func (s *Server) validateTaskProfileIDs(ids []int64) error {
 // HTTP Close can leave handlers running; serialize their background admission
 // with DrainChats so none can register after its Wait begins.
 func (s *Server) startBackgroundReconcile() {
-	s.chatMu.Lock()
-	defer s.chatMu.Unlock()
-	if !s.chatClosing {
-		s.backgroundWG.Go(s.reconcileConcurrency)
-	}
+	s.startBackgroundWork(s.reconcileConcurrency)
 }
 
 func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {

@@ -188,6 +188,10 @@ func (e *Engine) Pause(taskID string, cause error) {
 // paused/queued if cleanup fails.
 func (e *Engine) BeginDelete(taskID string) bool {
 	e.deleteMu.Lock()
+	if e.closing {
+		e.deleteMu.Unlock()
+		return false
+	}
 	if _, loaded := e.deleting.LoadOrStore(taskID, true); loaded {
 		e.deleteMu.Unlock()
 		return false
