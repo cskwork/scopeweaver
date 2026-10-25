@@ -1,6 +1,6 @@
 # 검증 결과와 알려진 한계
 
-[English](../VERIFICATION.md)
+[English](../VERIFICATION.md) · 한국어 · [简体中文](../zh-Hans/VERIFICATION.md) · [繁體中文](../zh-Hant/VERIFICATION.md) · [日本語](../ja/VERIFICATION.md) · [Español](../es/VERIFICATION.md)
 
 ## 독립 CLI 검증에서 확인한 공통 런타임 수정 (2026-10-17)
 

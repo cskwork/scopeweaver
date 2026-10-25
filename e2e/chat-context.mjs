@@ -1,8 +1,7 @@
 import {request} from "playwright";
-import {en,ko} from "../web/src/i18n/messages/interface.ts";
-import {interface as zh} from "../web/src/i18n/messages/zh-Hans.ts";
 import {waitChatState} from "./chat-controls.mjs";
-const labels={en,ko,"zh-Hans":zh};
+import { LOCALES, namespaceMessages } from "./locale-resources.mjs";
+const labels = namespaceMessages("interface");
 async function closeContext(page, label) {
  const button=page.getByRole("button",{name:label,exact:true});
  try { await button.click(); } catch(error) {
@@ -13,7 +12,7 @@ async function closeContext(page, label) {
 const actionURL=(base,action)=>{const [p,q]=base.split("?");return `${p}/${action}${q?`?${q}`:""}`};
 export async function runChatContextChecks({base,token,fixture,step,check,openPage}){
  const api=await request.newContext({baseURL:base,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
- for(const locale of ["en","ko","zh-Hans"])for(const width of [1440,390])for(const surface of ["standalone","task"]){
+ for(const locale of LOCALES)for(const width of [1440,390])for(const surface of ["standalone","task"]){
   if(process.env.CHAT_CONTEXT_CASE&&`${locale}/${width}/${surface}`!==process.env.CHAT_CONTEXT_CASE)continue;
   const t=labels[locale];let path,url;
   await fixture.setBudget(64);
@@ -41,7 +40,7 @@ export async function runChatContextChecks({base,token,fixture,step,check,openPa
 }
 export async function runChatRuntimeChecks({base,token,fixture,step,check,openPage}){
  const api=await request.newContext({baseURL:base,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
- for(const locale of ["en","ko","zh-Hans"])for(const width of [1440,390])for(const surface of ["standalone","task"]){
+ for(const locale of LOCALES)for(const width of [1440,390])for(const surface of ["standalone","task"]){
   if(process.env.CHAT_RUNTIME_CASE&&`${locale}/${width}/${surface}`!==process.env.CHAT_RUNTIME_CASE)continue;
   const t=labels[locale];await fixture.resetTools();let path,url,otherPath;
   if(surface==="standalone"){const response=await api.post("/api/conversations",{data:{agent_key:"auto",title:"Steer fixture"}});check(response.ok(),await response.text());const c=await response.json();path=`/api/conversations/${c.id}/controls`;url=`${base}/chat?c=${c.id}`}

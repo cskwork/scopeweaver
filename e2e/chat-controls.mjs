@@ -1,14 +1,13 @@
 import assert from "node:assert/strict";
 import {request} from "playwright";
-import {en,ko} from "../web/src/i18n/messages/interface.ts";
-import {interface as zh} from "../web/src/i18n/messages/zh-Hans.ts";
-const labels={en,ko,"zh-Hans":zh};
+import { LOCALES, namespaceMessages } from "./locale-resources.mjs";
+const labels = namespaceMessages("interface");
 
 export async function waitChatState(api,path,predicate,timeout=20000){const deadline=Date.now()+timeout;let state;while(Date.now()<deadline){const response=await api.get(path);assert.ok(response.ok(),await response.text());state=await response.json();if(predicate(state))return state;await new Promise(resolve=>setTimeout(resolve,75))}throw new Error(`chat state did not settle: ${JSON.stringify(state)}`)}
 
 export async function runChatQueueChecks({base,token,step,check,openPage,recoverInput,fixture}){
  const api=await request.newContext({baseURL:base,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
- for(const locale of ["en","ko","zh-Hans"])for(const width of [1440,390])for(const surface of ["standalone","task"]){
+ for(const locale of LOCALES)for(const width of [1440,390])for(const surface of ["standalone","task"]){
   if(process.env.CHAT_QUEUE_CASE && `${locale}/${width}/${surface}`!==process.env.CHAT_QUEUE_CASE)continue;
   const t=labels[locale];let path,url,task;
   if(surface==="standalone"){const r=await api.post("/api/conversations",{data:{agent_key:"auto",title:"Queue browser fixture"}});check(r.ok(),"conversation creation failed");const conv=await r.json();path=`/api/conversations/${conv.id}/controls`;url=`${base}/chat?c=${conv.id}`}
@@ -59,7 +58,7 @@ export async function runChatQueueChecks({base,token,step,check,openPage,recover
 
 export async function runChatHistoryChecks({base,token,step,check,openPage,fixture}){
  const api=await request.newContext({baseURL:base,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
- for(const locale of ["en","ko","zh-Hans"])for(const width of [1440,390])for(const surface of ["standalone","task"]){
+ for(const locale of LOCALES)for(const width of [1440,390])for(const surface of ["standalone","task"]){
   if(process.env.CHAT_HISTORY_CASE&&`${locale}/${width}/${surface}`!==process.env.CHAT_HISTORY_CASE)continue;
   const t=labels[locale];let parent,path,url,task;
   if(surface==="standalone"){const r=await api.post("/api/conversations",{data:{agent_key:"auto",title:"History browser fixture"}});check(r.ok(),"conversation fixture failed");parent=await r.json();path=`/api/conversations/${parent.id}/controls`;url=`${base}/chat?c=${parent.id}`}

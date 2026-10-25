@@ -1,6 +1,6 @@
 # ScopeWeaver provenance and modifications
 
-[한국어](ko/PROVENANCE.md)
+English · [한국어](ko/PROVENANCE.md) · [简体中文](zh-Hans/PROVENANCE.md) · [繁體中文](zh-Hant/PROVENANCE.md) · [日本語](ja/PROVENANCE.md) · [Español](es/PROVENANCE.md)
 
 ScopeWeaver is a standalone derivative of [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX), based on commit `160fe13`. It is maintained separately at [cskwork/scopeweaver](https://github.com/cskwork/scopeweaver), without a GitHub fork-network relationship.
 

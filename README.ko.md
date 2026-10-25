@@ -4,7 +4,7 @@
 
 LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 + Next.js 프런트엔드)
 
-[English](README.md) · 한국어
+[English](README.md) · 한국어 · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md) · [日本語](README.ja.md) · [Español](README.es.md)
 
 </div>
 
@@ -23,9 +23,11 @@ LLM 멀티 에이전트 기반 자율 침투 테스트 시스템 (Go 백엔드 +
 
 ## 언어
 
-기본 언어는 영어이며 화면에서 영어/한국어/간체 중국어(`zh-Hans`)를 선택합니다.
+기본 언어는 영어이며 화면에서 영어, 한국어, 간체 중국어(`zh-Hans`), 번체 중국어(`zh-Hant`),
+일본어(`ja`), 스페인어(`es`)를 선택합니다.
 `zh`, `zh-CN`, `zh-SG`는 간체로 일치하며 명시된 Hans는 번체 지역과 결합해도 간체를 유지합니다.
-선언되지 않은 번체 태그(`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`)는 간체로 바꾸지 않고 다음 설정을
+`zh-TW`, `zh-HK`, `zh-MO`는 번체로 일치하며 명시된 Hant는 간체 지역과 결합해도 번체를
+유지합니다. 일본어와 스페인어 지역 태그는 `ja`와 `es`로 일치합니다. 지원하지 않는 언어는 다음 설정을
 사용합니다. [기여자 언어 안내](web/src/i18n/README.ko.md)를 참고하세요. 서버의 저장된 기본값은 시스템 설정의
 `language`이고 환경 대안은 `SCOPEWEAVER_LANGUAGE` 또는 `ARTEX_LANGUAGE`입니다. 운영체제
 `LANG`은 앱 언어를 선택하지 않습니다.
@@ -125,9 +127,9 @@ cd scopeweaver
 실행되면 **http://localhost:8787**을 엽니다 (첫 방문은 관리자 비밀번호를 설정하는 `/setup`으로
 연결됩니다).
 
-> 스크립트는 기본적으로 영어로 안내합니다. 한국어 안내를 원하면 실행 전에
-> `SCOPEWEAVER_LANGUAGE=ko`(또는 `ARTEX_LANGUAGE=ko`)를 설정하세요. 예:
-> `SCOPEWEAVER_LANGUAGE=ko ./install.sh`.
+> 스크립트 안내는 기본이 영어입니다. `SCOPEWEAVER_LANGUAGE`(또는 `ARTEX_LANGUAGE`)에
+> `en`, `ko`, `zh-Hans`, `zh-Hant`, `ja`, `es` 중 하나를 설정하세요. 예:
+> `SCOPEWEAVER_LANGUAGE=ko ./install.sh`. `y/n` 같은 응답과 명령·플래그 이름은 그대로 사용합니다.
 
 ### 방법 2: Docker Compose (수동)
 
@@ -608,11 +610,11 @@ ScopeWeaver는 [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)의 업스�
 - **제품 이름**: 사용자에게 보이는 문서·스크립트·배포에서 "ARTEX" → "ScopeWeaver". Go
   모듈(`github.com/Autumn-27/artex`), 빌드 소스 경로(`./cmd/artex`), `ARTEX_*` 설정/환경 키,
   `artex` 데이터베이스 기본값은 호환을 위해 **유지**합니다.
-- **문서 언어**: 영어가 기본이며, 한국어 번역은 [README.ko.md](README.ko.md)와 [docs/ko](docs/ko/README.md) 아래에
-  있습니다.
-- **스크립트 언어**: 설치/빌드/시작/업데이트/비밀번호 재설정 안내는 기본이 영어이고,
-  `SCOPEWEAVER_LANGUAGE=ko`(`ARTEX_LANGUAGE=ko`도 동작)로 한국어를 선택할 수 있습니다. 네트워크
-  번역은 쓰지 않습니다.
+- **문서 언어**: 영어가 기본이며, 유지 관리하는 사용자·기여자 안내에는 한국어, 간체 중국어, 번체 중국어,
+  일본어, 스페인어 번역이 있습니다. 각 안내의 언어 링크를 이용하세요.
+- **스크립트 언어**: 설치/빌드/시작/업데이트/비밀번호 재설정/개발 안내는 기본이 영어이며,
+  `SCOPEWEAVER_LANGUAGE`(`ARTEX_LANGUAGE`도 동작)로 `en`, `ko`, `zh-Hans`, `zh-Hant`,
+  `ja`, `es`를 선택합니다. 네트워크 번역은 쓰지 않습니다.
 - **배포**: 출력 바이너리는 `scopeweaver`, 릴리스 아카이브는
   `scopeweaver-<version>-<os>-<arch>.zip`, 저장소는 `https://github.com/cskwork/scopeweaver`,
   컨테이너 이미지는 이 저장소의 GHCR을 대상으로 합니다. 업스트림의 Docker Hub

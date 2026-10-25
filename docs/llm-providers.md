@@ -1,5 +1,7 @@
 # LLM provider templates
 
+English · [한국어](ko/llm-providers.md) · [简体中文](zh-Hans/llm-providers.md) · [繁體中文](zh-Hant/llm-providers.md) · [日本語](ja/llm-providers.md) · [Español](es/llm-providers.md)
+
 ScopeWeaver supports four profile formats: **Anthropic**, **OpenAI Chat Completions**, **OpenAI Responses** and native **Ollama**. Every format keeps its custom base URL, proxy, session header, retry, rate and concurrency settings, so cloud providers, gateways and self-hosted OpenAI-compatible servers keep working unchanged. Ollama is optional, and cloud providers remain the default-compatible path.
 
 A template fills a **new profile's form** without saving credentials, activating a profile, or modifying existing profiles. Ollama templates also read installed models from the selected server; cloud templates make no requests. Format, base URL and model stay editable after any template.
