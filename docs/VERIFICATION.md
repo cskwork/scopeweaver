@@ -8,9 +8,35 @@ Only the four intended commits from `aebea3e..9b04754` were rebuilt on `f354c920
 
 Broader cancellation/race coverage exposed an existing unsynchronized planner result: the streaming session can return during pause while the real `prove_goal` handler is still setting `GoalMet` and its reason. Both terminal tool writers and the planner's result snapshot now share a private mutex. This preserves the exported fields, authentic tool/terminal receipts and current pause-versus-completion precedence; it adds no provider request or production schema change.
 
+The terminal-proof gate also requires an **authentic successful SDK tool-result receipt** matching the marked tool-use ID and originating model response. The private capture observer runs before the next compaction or inference boundary; handler completion or a `PostToolUse` hook alone cannot qualify it. The adversarial regression used real `goal_met`, a **30 ms** run budget and a **120 ms** post-tool hook: the old gate swallowed settlement after an interrupted receipt, making **1 provider call instead of 2**, while the native reason remained `timeout` and the error remained nil. The corrected path keeps that interrupted receipt, permits the real settlement call and its compaction, and rejects late-hook qualification. A second synchronized regression holds the hook until capture observes the interruption, proving the real handler ran before the timeout receipt; normal successful proof, parent cancellation, reactive overflow and late-origin guards remain covered. See [terminal-proof regressions](../agent/terminal_proof_test.go).
+
 The initial reconstruction still had an inherited shutdown gap: on untouched `f354c920`, `TestMainServeFailureRunsShutdown` failed **3 of 10** isolated runs, including scheduler writes after database close. The follow-up repair registers scheduler ownership before launch. `Manager.Close` cancels and joins schedulers outside the manager lock for at most **5 seconds** before stopping the log writer and closing the database. If scheduler SQL remains blocked, Close returns `context.DeadlineExceeded` and **keeps the database open**; after the work finishes, a retry can close it. The CLI already reports a close failure and exits 1. This does not claim that existing non-context SQL calls become cancelable. A pre-canceled scheduler no longer initializes watermarks or starts another tick. The [held-SQL regression](../server/scheduler_shutdown_test.go) checks concurrent close timeouts, an open database while work is active, and successful concurrent retries after release. A first parallel all-package run also failed the log-sink test's global row-count assertion while other package subprocesses used the same database; cross-package interference is a hypothesis, so final verification follows CI's separate disposable database per package. These historical receipts do not claim final exact-head hosted CI, native Windows or live-provider verification.
 
 The delivery follow-up also updates web Next.js to **16.4.3** and Zod to **4.6.7**, and adapter Zod to **4.6.7**, with compatible lockfile fixes for body-parser **2.4.0**, fast-uri **3.1.9**, ip-address **10.7.4** and qs **6.16.1**. The adapter SDK pin remains **1.32.0**. Clean `npm ci` passed for both packages; web tests passed **72/72**, the cold static build exported **31 pages** on its first attempt, adapter tests passed **7/7** and its syntax check passed. Both current `npm audit --audit-level=low` checks report **0 vulnerabilities**. These results supersede the initial Next.js 16.4.0 advisory/build-failure limitation; the original receipts remain historical evidence. Native paste/undo browser keys now use `ControlOrMeta+V` and `ControlOrMeta+Z`, preserving assertions and timeouts. Final canonical browser runs and exact-head hosted CI are separate gates and are not claimed here.
+
+### Patched SDK and model-specific context windows
+
+The nested Norma suite is required in the backend CI job. Run
+`(cd third_party/norma && go test ./... -count=1)` separately from root packages;
+see [source and modification notices](PROVENANCE.md#norma-execution-and-compaction-fixes--2026-10-25).
+
+The regression set covers the original 30 ms / 120 ms interrupted-tool race,
+small-window pacing and long-session bounds, worthwhile summary consolidation,
+actual overflow retry views, monotonic learned ceilings and output errors that
+must not trigger context recovery. Existing numeric bounds and original history
+are retained. The old assertion that 40K cannot reach tier two was already false
+on unchanged upstream; its replacement requires actual consolidation, token
+reclamation and bounded summaries using the same fixture.
+
+`TestNoaRetainsConfiguredModelContextWindow` exercises actual Noa sessions at
+40K, 128K, 200K, 250K, 400K and 1M. Before the host fix, all non-200K cases became
+200K. `enableNoa` now passes the positive resolved profile window before clearing
+the replaced compactor. Separate tests cover missing-window fallback, disabled
+Noa, damaged-state recovery and the existing local Ollama policy. `MaxTokens`
+continues to limit output independently. The 200K fallback is for an unset
+window; it is not a universal model limit. SDK default values at 200K and above
+remain unchanged, while worthwhile-summary count eligibility intentionally
+changes across windows.
 
 ## Trigger evidence in the first planner request (2026-10-18)
 

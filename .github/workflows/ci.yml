@@ -187,6 +187,9 @@ jobs:
         run: |
           bash e2e/package-notices.sh
           python3 -m unittest discover -s e2e -p 'test_release_notices.py' -v
+      - name: Test patched Norma SDK
+        working-directory: third_party/norma
+        run: go test ./... -count=1
       - name: Run all Go packages with separate disposable databases
         env:
           PGHOST: localhost

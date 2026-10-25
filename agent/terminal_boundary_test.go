@@ -65,8 +65,8 @@ func TestOrdinaryPreProofCompactionIsForwarded(t *testing.T) {
 	})
 	provider := &twoTurnProvider{firstTool: "noop_probe"}
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{noop}, PermissionMode: permission.ModeBypass, Compactor: cmp}
-	installTerminalProofGateOn(&opts, ts)
-	if _, _, err := captureRun(context.Background(), opts, "run", func(db.Activity) {}); err != nil {
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	if _, _, err := captureRun(context.Background(), opts, "run", func(db.Activity) {}, observeProof); err != nil {
 		t.Fatal(err)
 	}
 	if provider.calls != 2 {
@@ -96,8 +96,8 @@ func TestPostProofCompactionPreSkippedNoFurtherProviderWork(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe}, PermissionMode: permission.ModeBypass, Compactor: cmp}
-	installTerminalProofGateOn(&opts, ts)
-	if _, _, err := captureRun(context.Background(), opts, "run", func(db.Activity) {}); err != nil {
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	if _, _, err := captureRun(context.Background(), opts, "run", func(db.Activity) {}, observeProof); err != nil {
 		t.Fatal(err)
 	}
 	if provider.callsCount() != 1 {
@@ -265,9 +265,9 @@ func TestRecoverableOverflowAfterProofDoesNotLocalComplete(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe}, PermissionMode: permission.ModeBypass, Compactor: cmp}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var acts []db.Activity
-	_, _, err := captureRun(context.Background(), opts, "prove", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(context.Background(), opts, "prove", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if err != nil {
 		t.Fatalf("overflow recovery must complete natively, got %v", err)
 	}
@@ -337,8 +337,8 @@ func TestOverflowInvalidatedArmingSurvivesCleanRetry(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe, noop}, PermissionMode: permission.ModeBypass, Compactor: cmp}
-	installTerminalProofGateOn(&opts, ts)
-	if _, _, err := captureRun(context.Background(), opts, "prove", func(db.Activity) {}); err != nil {
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	if _, _, err := captureRun(context.Background(), opts, "prove", func(db.Activity) {}, observeProof); err != nil {
 		t.Fatal(err)
 	}
 	if provider.calls != 3 {
@@ -368,8 +368,8 @@ func TestLateToolCompletionAfterStreamErrorArmsSafely(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{lateProbe}, PermissionMode: permission.ModeBypass, Compactor: cmp}
-	installTerminalProofGateOn(&opts, ts)
-	if _, _, err := captureRun(context.Background(), opts, "prove", func(db.Activity) {}); err != nil {
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	if _, _, err := captureRun(context.Background(), opts, "prove", func(db.Activity) {}, observeProof); err != nil {
 		t.Fatal(err)
 	}
 	if provider.calls != 2 {
@@ -411,6 +411,9 @@ func TestTerminalFailureFinalizedWhenConsumerRejectsError(t *testing.T) {
 		}
 	}
 	for range deps.CallModel(context.Background(), llm.CompletionRequest{}) {
+	}
+	if got := ts.terminalProof.failedThrough.Load(); got != 1 {
+		t.Fatalf("rejected transport error was not finalized before yield(false): failedThrough=%d", got)
 	}
 	if ts.terminalProofReady() {
 		t.Fatal("failed proof response became terminal-ready after a later successful call; error finalization was skipped on yield(false)")
@@ -527,9 +530,9 @@ func TestDelayedFailedTurnProofCannotBorrowLaterCallSequence(t *testing.T) {
 		return actool.Text("ordinary non-proof work completed"), nil
 	}})
 	opts := agentcore.Options{Provider: p, SystemPrompt: []string{"review"}, Tools: []actool.CoreTool{proof, noop}, PermissionMode: permission.ModeBypass, Compactor: staleReactiveCompactor{p.overflow}}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var activities []db.Activity
-	_, _, err := captureRun(ctx, opts, "controlled delayed proof recovery", func(a db.Activity) { activities = append(activities, a) })
+	_, _, err := captureRun(ctx, opts, "controlled delayed proof recovery", func(a db.Activity) { activities = append(activities, a) }, observeProof)
 	if err != nil {
 		t.Fatalf("fixture failed before attribution assertion: %v", err)
 	}
@@ -647,9 +650,9 @@ func TestOlderFailedProofCannotEraseNewSuccessfulProof(t *testing.T) {
 		return actool.Text("new authentic successful terminal proof"), nil
 	}})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"controlled review"}, Tools: []actool.CoreTool{old, current}, PermissionMode: permission.ModeBypass, Compactor: staleReactiveCompactor{provider.overflow}}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var activities []db.Activity
-	_, _, err := captureRun(ctx, opts, "review terminal proof supersession", func(a db.Activity) { activities = append(activities, a) })
+	_, _, err := captureRun(ctx, opts, "review terminal proof supersession", func(a db.Activity) { activities = append(activities, a) }, observeProof)
 	if err != nil {
 		t.Fatalf("fixture did not complete: %v", err)
 	}
