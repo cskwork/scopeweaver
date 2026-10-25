@@ -33,8 +33,9 @@ import (
 //     recording the failed response's assistant/tool-result messages, so an
 //     arming from that response must NOT later produce a local success turn.
 //     Readiness is therefore qualified by model-call sequence: the arming's
-//     response must have completed cleanly (okCalls), and any later failure
-//     invalidates armings from that call or earlier (failedThrough). Each tool
+//     response must have completed cleanly (okCalls), its marked terminal tool
+//     must have an authentic successful result (receiptedIn), and any later
+//     model/tool-result error invalidates that call and earlier (failedThrough). Each tool
 //     keeps its originating call sequence through its tool-use ID, so a handler
 //     completing after a stream error cannot borrow a later successful response
 //     to qualify the failed proof turn.
@@ -55,7 +56,9 @@ type terminalProof struct {
 	current       atomic.Int64 // model-call sequence generator (also the in-flight seq)
 	armedIn       atomic.Int64 // ORIGINATING call of the arming tool_use (0 = unattributed)
 	okCalls       atomic.Int64 // highest sequence that completed without error
-	failedThrough atomic.Int64 // highest sequence that ended with an error
+	failedThrough atomic.Int64 // highest sequence with a model or authentic tool-result error
+	receiptedIn   atomic.Int64 // highest originating terminal call with a successful emitted result
+	markedUses    sync.Map     // terminal tool-use ID -> originating model-call sequence
 	origin        sync.Map     // tool_use ID -> originating model-call sequence
 }
 
@@ -79,6 +82,7 @@ func (t *ToolSet) markTerminalProof(toolUseID string) {
 		t.terminalProof.armed.Store(true)
 		return
 	}
+	t.terminalProof.markedUses.Store(toolUseID, origin)
 	// Retain the NEWEST originating proof monotonically. Last-completer-wins
 	// would let a late handler from an OLDER (possibly failed) response erase a
 	// newer valid proof and resurrect unnecessary post-proof inference — the
@@ -96,7 +100,7 @@ func (t *ToolSet) markTerminalProof(toolUseID string) {
 }
 
 // terminalProofReady reports whether a terminal proof belongs to a model
-// response that completed cleanly, making the next upstream inference
+// response with an authentic successful terminal tool result, making the next upstream inference
 // (main request or compaction summary) unnecessary.
 func (t *ToolSet) terminalProofReady() bool {
 	p := &t.terminalProof
@@ -104,7 +108,38 @@ func (t *ToolSet) terminalProofReady() bool {
 		return false
 	}
 	in := p.armedIn.Load()
-	return in > 0 && in <= p.okCalls.Load() && in > p.failedThrough.Load()
+	return in > 0 && in <= p.okCalls.Load() && in > p.failedThrough.Load() && in == p.receiptedIn.Load()
+}
+
+// observeTerminalProofEvent receives the executor's authentic result, after it
+// decides completed versus interrupted. A handler or PostToolUse return alone
+// cannot qualify: timeout may still win before the executor emits its result.
+func (t *ToolSet) observeTerminalProofEvent(ev harness.Event) {
+	if t == nil || ev.Kind != harness.KindToolResult || ev.ToolResult == nil {
+		return
+	}
+	p := &t.terminalProof
+	seq, ok := p.origin.Load(ev.ToolResult.ToolUseID)
+	origin, _ := seq.(int64)
+	if !ok || origin == 0 {
+		return
+	}
+	if ev.ToolResult.IsError {
+		// Also reject an interrupted sibling tool in the same response: its
+		// timeout settlement must not be swallowed by an earlier proof result.
+		t.terminalProofCallFailed(origin)
+		return
+	}
+	marked, ok := p.markedUses.Load(ev.ToolResult.ToolUseID)
+	if !ok || marked != origin {
+		return
+	}
+	for {
+		old := p.receiptedIn.Load()
+		if origin <= old || p.receiptedIn.CompareAndSwap(old, origin) {
+			return
+		}
+	}
 }
 
 // beginTerminalProofCall stamps a new model-call sequence and returns it.
@@ -129,7 +164,7 @@ func (t *ToolSet) terminalProofCallSucceeded(seq int64) {
 	}
 }
 
-// terminalProofCallFailed records that call seq ended with an error, invalidating
+// terminalProofCallFailed records a model or authentic tool-result error, invalidating
 // armings from that call and earlier.
 func (t *ToolSet) terminalProofCallFailed(seq int64) {
 	for {
@@ -274,7 +309,10 @@ func wrapTerminalProofCompactor(opts *agentcore.Options, tsx *ToolSet) {
 
 // installTerminalProofGateOn composes the gate and compactor wrap into an
 // agentcore.Options value (used by planner.Plan after all compactor selection).
-func installTerminalProofGateOn(opts *agentcore.Options, tsx *ToolSet) {
+// Its observer must be passed to captureRun so receipts qualify before any next
+// compaction/model boundary; it never manufactures a successful tool result.
+func installTerminalProofGateOn(opts *agentcore.Options, tsx *ToolSet) func(harness.Event) {
 	opts.Deps = installTerminalProofGate(opts.Deps, tsx, opts.Provider)
 	wrapTerminalProofCompactor(opts, tsx)
+	return tsx.observeTerminalProofEvent
 }

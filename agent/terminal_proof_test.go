@@ -187,9 +187,9 @@ func runProofSession(t *testing.T, ts *ToolSet, script *proofScript, hooks harne
 		Hooks:          hooks,
 		NonStreaming:   nonStreaming,
 	}
-	installTerminalProofGateOn(&opts, ts) // what planner.Plan installs
+	observeProof := installTerminalProofGateOn(&opts, ts) // what planner.Plan installs
 	var activities []db.Activity
-	_, _, err := captureRun(ctx, opts, "prove the goal", func(r db.Activity) { activities = append(activities, r) })
+	_, _, err := captureRun(ctx, opts, "prove the goal", func(r db.Activity) { activities = append(activities, r) }, observeProof)
 	return provider.callsCount(), activities, err
 }
 
@@ -261,21 +261,145 @@ func TestDelayedPostToolUseDoesNotInterruptProofResult(t *testing.T) {
 	}
 }
 
+// A clean model response is insufficient when the real terminal tool overruns
+// MaxDuration inside PostToolUse: its interrupted receipt must allow settlement.
+func TestInterruptedTerminalProofDoesNotGateSettlement(t *testing.T) {
+	ts := NewToolSet(nil, "")
+	provider := &scriptedProvider{script: &proofScript{
+		toolName: "goal_met", input: `{"reason":"synthetic objectives achieved"}`, executed: make(chan struct{}),
+		afterExecuted: func(yield func(llm.StreamEvent, error) bool, _ context.Context) {
+			yield(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "tool_use", Usage: llm.Usage{OutputTokens: 7}}, nil)
+		},
+	}}
+	cmp := &countingCompactor{}
+	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{ts.goalMet()}, PermissionMode: permission.ModeBypass,
+		MaxDuration: 30 * time.Millisecond, Hooks: delayedPostToolUse{delay: 120 * time.Millisecond}, Compactor: cmp,
+		Settlement: &harness.Settlement{Prompt: "settle interrupted tool honestly", MaxTurns: 1}}
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	var acts []db.Activity
+	_, reason, err := captureRun(context.Background(), opts, "prove", func(a db.Activity) { acts = append(acts, a) }, observeProof)
+	// Retain the original review probe's 30/120 ms timing and late-hook check.
+	time.Sleep(150 * time.Millisecond)
+	tr := toolResultOf(acts)
+	met, detail := ts.goalResult()
+	t.Logf("calls=%d reason=%s err=%v ready=%v tool_result=%+v", provider.callsCount(), reason, err, ts.terminalProofReady(), tr)
+	if !met || detail != "synthetic objectives achieved" {
+		t.Fatalf("real terminal handler did not mark its proof: met=%v reason=%q", met, detail)
+	}
+	if tr == nil || !tr.IsError || !strings.Contains(tr.Detail, "tool execution interrupted") {
+		t.Fatalf("fixture did not interrupt terminal tool: %+v", tr)
+	}
+	if err != nil || reason != harness.ReasonTimeout {
+		t.Fatalf("native timeout semantics changed: reason=%s err=%v", reason, err)
+	}
+	if provider.callsCount() != 2 {
+		t.Fatalf("interrupted proof gated real settlement request: calls=%d want 2", provider.callsCount())
+	}
+	if cmp.preCalls != 2 || ts.terminalProofReady() {
+		t.Fatalf("interrupted proof skipped settlement compaction or became ready: Pre=%d ready=%v", cmp.preCalls, ts.terminalProofReady())
+	}
+}
+
+type blockedTerminalPostHook struct {
+	entered, release, exited chan struct{}
+}
+
+func (*blockedTerminalPostHook) PreToolUse(context.Context, string, []byte) (bool, string, []byte) {
+	return false, "", nil
+}
+func (h *blockedTerminalPostHook) PostToolUse(context.Context, string, []byte, []byte, bool) {
+	close(h.entered)
+	<-h.release
+	close(h.exited)
+}
+func (*blockedTerminalPostHook) Stop(context.Context, []llm.Message) (bool, []string, string) {
+	return false, nil, ""
+}
+
+// The provider waits for the real handler and hook before ending its response;
+// the hook stays blocked until capture observes the interrupted SDK receipt.
+// A slow host cannot pass by timing out before terminal tool execution starts.
+func TestInterruptedTerminalReceiptAllowsSettlementAfterLateHook(t *testing.T) {
+	ts := NewToolSet(nil, "")
+	hook := &blockedTerminalPostHook{entered: make(chan struct{}), release: make(chan struct{}), exited: make(chan struct{})}
+	var once sync.Once
+	release := func() { once.Do(func() { close(hook.release) }) }
+	defer func() {
+		release()
+		select {
+		case <-hook.exited:
+		case <-time.After(time.Second):
+			t.Error("held terminal hook did not exit")
+		}
+	}()
+	provider := &scriptedProvider{script: &proofScript{
+		toolName: "goal_met", input: `{"reason":"synchronized terminal proof"}`, executed: make(chan struct{}),
+		afterExecuted: func(yield func(llm.StreamEvent, error) bool, ctx context.Context) {
+			select {
+			case <-hook.entered:
+				yield(llm.StreamEvent{Type: llm.SEMessageDelta, StopReason: "tool_use", Usage: llm.Usage{OutputTokens: 7}}, nil)
+			case <-ctx.Done():
+			}
+		},
+	}}
+	cmp := &countingCompactor{}
+	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{ts.goalMet()}, PermissionMode: permission.ModeBypass,
+		MaxDuration: 30 * time.Millisecond, Hooks: hook, Compactor: cmp,
+		Settlement: &harness.Settlement{Prompt: "settle interrupted tool honestly", MaxTurns: 1}}
+	observeProof := installTerminalProofGateOn(&opts, ts)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var acts []db.Activity
+	observed := false
+	_, reason, err := captureRun(ctx, opts, "prove", func(a db.Activity) {
+		acts = append(acts, a)
+		if a.Kind == "tool_result" && a.Tool == "goal_met" {
+			select {
+			case <-hook.entered:
+			default:
+				t.Error("interruption occurred before the real post-tool hook entered")
+			}
+			met, detail := ts.goalResult()
+			if !met || detail != "synchronized terminal proof" || !a.IsError {
+				t.Errorf("real terminal execution/interruption missing: met=%v reason=%q receipt=%+v", met, detail, a)
+			}
+			observed = true
+			release()
+		}
+	}, observeProof)
+	if !observed || toolResultOf(acts) == nil {
+		t.Fatal("no authentic terminal-tool interruption receipt")
+	}
+	if err != nil || reason != harness.ReasonTimeout || provider.callsCount() != 2 || cmp.preCalls != 2 {
+		t.Fatalf("settlement suppressed or native reason changed: calls=%d Pre=%d reason=%s err=%v", provider.callsCount(), cmp.preCalls, reason, err)
+	}
+	select {
+	case <-hook.exited:
+	case <-time.After(time.Second):
+		t.Fatal("released terminal hook did not finish")
+	}
+	if ts.terminalProofReady() {
+		t.Fatal("late hook completion qualified an already interrupted receipt")
+	}
+}
+
 // F3a: parent cancellation wins over an armed gate — with the context already
 // cancelled the loop aborts before any model call; the gate itself also refuses
 // to act on a cancelled context and delegates to the provider.
 func TestParentCancelWinsOverArmedGate(t *testing.T) {
 	ts := NewToolSet(nil, "")
-	ts.terminalProof.origin.Store("prior-turn-proof", int64(1))
-	ts.terminalProofCallSucceeded(1)
-	ts.markTerminalProof("prior-turn-proof") // proof completed cleanly in a prior turn
+	priorCalls, priorActs, priorErr := runProofSession(t, ts, &proofScript{toolName: "prior_terminal_proof", executed: make(chan struct{})}, nil, false, context.Background(), nil)
+	priorResult := toolResultOf(priorActs)
+	if priorErr != nil || priorCalls != 1 || priorResult == nil || priorResult.IsError || !ts.terminalProofReady() {
+		t.Fatalf("prior proof did not reach an authentic successful boundary: calls=%d result=%+v ready=%v err=%v", priorCalls, priorResult, ts.terminalProofReady(), priorErr)
+	}
 	provider := &scriptedProvider{script: &proofScript{toolName: "terminal_proof_probe", executed: make(chan struct{})}}
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, PermissionMode: permission.ModeBypass}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var acts []db.Activity
-	_, _, err := captureRun(ctx, opts, "prove", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(ctx, opts, "prove", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("parent cancellation must surface context.Canceled, got %v", err)
 	}
@@ -316,12 +440,12 @@ func TestParentCancelDuringOpenProofStreamKeepsAbortSemantics(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe}, PermissionMode: permission.ModeBypass}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	ctx, cancel := context.WithCancel(context.Background())
 	parentCancel = cancel
 	defer cancel()
 	var acts []db.Activity
-	_, _, err := captureRun(ctx, opts, "prove", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(ctx, opts, "prove", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("parent cancellation during the proof response must surface context.Canceled, got %v", err)
 	}
@@ -360,9 +484,9 @@ func TestRealStreamErrorAfterProofIsNotSuccess(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe}, PermissionMode: permission.ModeBypass}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var acts []db.Activity
-	_, _, err := captureRun(context.Background(), opts, "prove", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(context.Background(), opts, "prove", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if !errors.Is(err, upstreamErr) {
 		t.Fatalf("real provider error after proof must surface verbatim, got %v", err)
 	}
@@ -388,9 +512,9 @@ func TestRejectedProofDoesNotArmGate(t *testing.T) {
 		},
 	})
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{probe}, PermissionMode: permission.ModeBypass}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var acts []db.Activity
-	_, _, err := captureRun(context.Background(), opts, "attempt the proof", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(context.Background(), opts, "attempt the proof", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -459,9 +583,9 @@ func TestGoalMetToolMeaningSurvivesGate(t *testing.T) {
 		},
 	}}
 	opts := agentcore.Options{Provider: provider, SystemPrompt: []string{"probe"}, Tools: []actool.CoreTool{goalMetTool}, PermissionMode: permission.ModeBypass}
-	installTerminalProofGateOn(&opts, ts)
+	observeProof := installTerminalProofGateOn(&opts, ts)
 	var acts []db.Activity
-	_, _, err := captureRun(context.Background(), opts, "close the engagement", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err := captureRun(context.Background(), opts, "close the engagement", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,9 +654,9 @@ func TestRealProveGoalSessionGatesAfterFinalProof(t *testing.T) {
 		Transcript:     store,
 		SessionID:      sessionID,
 	}
-	installTerminalProofGateOn(&opts, tools)
+	observeProof := installTerminalProofGateOn(&opts, tools)
 	var acts []db.Activity
-	_, _, err = captureRun(context.Background(), opts, "prove both objectives", func(r db.Activity) { acts = append(acts, r) })
+	_, _, err = captureRun(context.Background(), opts, "prove both objectives", func(r db.Activity) { acts = append(acts, r) }, observeProof)
 	if err != nil {
 		t.Fatal(err)
 	}

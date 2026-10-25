@@ -440,7 +440,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	// Terminal goal proof gate (see terminal_proof.go): after a fully recorded
 	// successful proof turn, the session's next upstream model call is answered
 	// locally instead of issued — no mid-turn cancellation, native completion.
-	installTerminalProofGateOn(&opts, tsx)
+	observeProof := installTerminalProofGateOn(&opts, tsx)
 	// MaxDuration interrupts running tools and performs settlement on a live context;
 	// no external hard context is needed here. ctx carries pause/kill/shutdown only.
 	_, _, err = captureRun(ctx, opts, input,
@@ -449,7 +449,7 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 				r.Worker = "planner" // planner activity has no intent_id (it generates them)
 				emit(r)
 			}
-		})
+		}, observeProof)
 	goalMet, reason := tsx.goalResult()
 	return goalMet, reason, err
 }
