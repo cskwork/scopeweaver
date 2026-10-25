@@ -52,8 +52,8 @@ func StartLogCapture() { log.SetOutput(logSink) }
 // SetDB wires a postgres DB into the sink once (idempotent). It:
 //  1. Restores the last 100 log rows from DB into the ring so the /logs page
 //     shows history immediately after restart.
-//  2. Starts an async goroutine that persists every subsequent log line to DB.
-func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
+//  2. Starts an async writer tracked by the server's background drain.
+func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB, background *sync.WaitGroup) {
 	if pg == nil {
 		return
 	}
@@ -88,11 +88,13 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 
 		// Async writer: picks from channel and inserts into server_logs.
 		// Uses os.Stderr directly to report errors and avoids recursive log calls.
-		go func() {
+		background.Go(func() {
 			for {
 				select {
 				case req, ok := <-ch:
-					if !ok {
+					// Shutdown may leave queued or later lines out of the DB;
+					// Write still passes every line through to stderr.
+					if !ok || ctx.Err() != nil {
 						return
 					}
 					id, err := pg.InsertLog(req.ll.Level, req.ll.Tag, req.ll.Text)
@@ -113,7 +115,7 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 					return
 				}
 			}
-		}()
+		})
 	})
 }
 
