@@ -26,6 +26,7 @@ import (
 	"github.com/Autumn-27/artex/llmpool"
 	"github.com/Autumn-27/artex/llmrec"
 	"github.com/Autumn-27/artex/locale"
+	"github.com/Autumn-27/artex/opencodesdk"
 	"github.com/Autumn-27/artex/report"
 	"github.com/Autumn-27/artex/traffic"
 	"github.com/Autumn-27/norma/llm"
@@ -262,7 +263,7 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 		} else {
 			log.Printf("[engine] LLM configured from DB: %s / %s", cfg.Provider(), cfg.Model)
 		}
-	} else if cfg, ok := agent.FromEnv(); ok {
+	} else if cfg, ok := s.environmentLLMFallback(); ok {
 		if err := s.applyLLM(cfg); err != nil {
 			log.Printf("[engine] env provider init failed — engine idle: %v", err)
 		} else {
@@ -424,6 +425,7 @@ func (s *Server) saveLLMConfig(cfg agent.Config) error {
 func (s *Server) reapplyActiveProfile() {
 	cfg, ok := s.loadLLMConfig()
 	if !ok {
+		s.clearUnavailableSDKFallback(cfg)
 		return
 	}
 	if err := s.applyLLM(cfg); err != nil {
@@ -1391,7 +1393,14 @@ func (s *Server) setLLM(w http.ResponseWriter, r *http.Request) {
 	}
 	if cfg.APIKey == "" && !cfg.Ready() {
 		s.cfgMu.Lock()
-		cfg.APIKey = s.llmCfg.APIKey // keep existing key if not re-entered
+		active := s.llmCfg
+		if cfg.Provider() == opencodesdk.Format {
+			if sdkCredentialCompatible(cfg, active.Provider(), active.BaseURL) {
+				cfg.APIKey = active.APIKey
+			}
+		} else if active.Provider() != opencodesdk.Format {
+			cfg.APIKey = active.APIKey
+		}
 		s.cfgMu.Unlock()
 	}
 	if !cfg.Ready() {
@@ -1466,7 +1475,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 	// Likewise, fall back to the stored custom session-header name when omitted by the form.
 	if req.ProfileID != nil {
 		if p, err := s.m.pg.ProfileByID(*req.ProfileID); err == nil && p != nil {
-			if cfg.APIKey == "" && (cfg.Provider() != "ollama" || p.Format == "ollama") {
+			if cfg.APIKey == "" && (cfg.Provider() != "ollama" || p.Format == "ollama") && sdkCredentialCompatible(cfg, p.Format, p.BaseURL) {
 				cfg.APIKey = p.APIKey
 			}
 			if cfg.SessionHeaderKey == "" {
@@ -1495,7 +1504,7 @@ func (s *Server) testLLM(w http.ResponseWriter, r *http.Request) {
 		// Reuse local gateway credentials only for the same format and transport target.
 		// Other local endpoints and native Ollama remain deliberately keyless.
 		sameGateway := cfg.Provider() != "ollama" && cfg.Format == active.Format && cfg.BaseURL == active.BaseURL && cfg.Proxy == active.Proxy
-		if !cfg.Ready() || sameGateway {
+		if (cfg.Provider() == opencodesdk.Format && sdkCredentialCompatible(cfg, active.Provider(), active.BaseURL)) || (cfg.Provider() != opencodesdk.Format && active.Provider() != opencodesdk.Format && (!cfg.Ready() || sameGateway)) {
 			cfg.APIKey = active.APIKey
 		}
 	}
