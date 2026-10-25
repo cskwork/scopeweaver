@@ -101,6 +101,15 @@ activate, or contact a provider. Coding Plan use is restricted to officially sup
 ScopeWeaver is not listed. See [provider setup and support limits](docs/llm-providers.md).
 To reduce cloud token use, see [Controlling token use](docs/llm-providers.md#controlling-token-use).
 
+Optional **OpenCode SDK bridge** profiles support pinned `native` CLI/client **2.1.4** (default) and
+`legacy` SDK/CLI **1.19.4**, with a separate bridge token and `providerID/modelID`. ScopeWeaver's
+Norma runtime keeps host tools and approvals. Legacy preserves safe JSON structure, allowing benign
+whitespace/escape normalization; it does not preserve original bytes and rejects unsafe integers. Both runtimes
+are unsupported on Windows. Runtime tests cover macOS arm64; Linux hosted CI results are pending.
+Local-only LLM mode rejects this bridge because its downstream provider may be cloud-based. See
+[SDK setup, limits and downgrade preparation](docs/llm-providers.md#opencode-sdk-bridge);
+older binaries cannot start with SDK profiles present.
+
 Optional **native Ollama** profiles run without an API key. Three templates cover Ollama on the same
 machine, on the host from Docker, and the opt-in `docker compose --profile local-llm` service. Selecting one reads installed models and prefills one, preferring declared tool support;
 it does not download or run a model. They send a 32K context (`num_ctx` 32,768), one request at a time and a 30-minute keep-alive. An opt-in

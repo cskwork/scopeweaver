@@ -84,7 +84,7 @@ func isTaskLLMChainExhausted(err error) bool {
 // network failure, or 5xx does not rotate providers; the response must explicitly
 // identify quota, credits, billing balance, or payment exhaustion.
 func isQuotaExhaustedError(err error) bool {
-	return err != nil && agent.IsQuotaExhaustedMessage(err.Error())
+	return agent.IsQuotaExhaustedError(err)
 }
 
 type taskLLMSelection struct {
