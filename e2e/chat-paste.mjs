@@ -22,7 +22,7 @@ async function pasteText(page, input, text) {
   });
   await page.evaluate((value) => navigator.clipboard.writeText(value), text);
   await input.focus();
-  await input.press("Control+V");
+  await input.press("ControlOrMeta+V");
   await page.waitForFunction(() => typeof window.chatPasteReceived === "string");
   return page.evaluate(() => window.chatPasteReceived);
 }
@@ -72,7 +72,7 @@ export async function runChatPasteChecks({ base, token, step, check, openPage, m
           await input.fill("");
           await pasteText(p, input, "x".repeat(3000));
           check((await input.inputValue()).length === 3000, "short paste left native text path");
-          await input.press("Control+Z");
+          await input.press("ControlOrMeta+Z");
           check(await input.inputValue() === "", "native paste undo failed");
           const long = "  한글\n中文\n" + "z".repeat(3001);
           const uploadResponse = p.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/chat/upload");
