@@ -106,7 +106,7 @@ jobs:
           ARTEX_TEST_DSN: postgres://scopeweaver_test:test_only_password@localhost:5432/scopeweaver_test_chat_browser?sslmode=disable
           SCOPEWEAVER_CHAT_E2E: "1"
           CHAT_E2E_SUITE: standard
-        run: go test ./server -run '^TestChatControlsE2E$' -count=1 -timeout 12m -v
+        run: go test ./server -run '^TestChatControlsE2E$' -count=1 -timeout 21m -v
       - if: always()
         uses: actions/upload-artifact@v7
         with:
@@ -143,6 +143,8 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Test native six-language Windows launcher
+        run: node e2e/windows-launcher.mjs
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -175,10 +177,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
       - name: Check shell syntax
         run: |
           for script in *.sh; do bash -n "$script"; done
           sh -n start.sh
+      - name: Test six-language script messages and isolated launchers
+        run: node e2e/script-locales.mjs
       - name: Test local installer with isolated fixtures
         run: bash e2e/install-local.sh
       - name: Test Compose credential bootstrap

@@ -19,6 +19,7 @@ import (
 	"github.com/Autumn-27/artex/chatstate"
 	"github.com/Autumn-27/artex/db"
 	"github.com/Autumn-27/artex/internal/dbtest"
+	"github.com/Autumn-27/artex/locale"
 	"github.com/Autumn-27/norma/llm"
 	actool "github.com/Autumn-27/norma/tool"
 	"github.com/Autumn-27/norma/transcript"
@@ -387,8 +388,11 @@ func TestChatControlsE2E(t *testing.T) {
 	})
 	listener := httptest.NewServer(mux)
 	defer listener.Close()
-	ctx, cancel := context.WithTimeout(context.Background(), 9*time.Minute)
+	// Preserve the original three-minute budget per locale as the matrix grows.
+	browserTimeout := 3 * time.Minute * time.Duration(len(locale.Languages()))
+	ctx, cancel := context.WithTimeout(context.Background(), browserTimeout)
 	defer cancel()
+	t.Logf("chat browser gate budget: %s (%d locales)", browserTimeout, len(locale.Languages()))
 	command := exec.CommandContext(ctx, "node", "../e2e/chat-controls-runner.mjs")
 	artifacts, _ := filepath.Abs(filepath.Join("..", "dist", "chat-e2e"))
 	if err = os.MkdirAll(artifacts, 0700); err != nil {
@@ -398,6 +402,9 @@ func TestChatControlsE2E(t *testing.T) {
 	output, err := command.CombinedOutput()
 	t.Log(string(output))
 	if err != nil {
+		if ctx.Err() != nil {
+			t.Fatalf("chat browser gate exceeded %s: %v", browserTimeout, ctx.Err())
+		}
 		t.Fatalf("chat browser gate failed: %v", err)
 	}
 }

@@ -27,6 +27,15 @@ func isBuiltinPrompt(s string) bool {
 }
 
 func outputLanguageInstruction(l locale.Lang) string {
+	if l == locale.ZhHant {
+		return "請使用繁體中文撰寫面向使用者的說明、摘要和新報告。不得翻譯或變更使用者內容、原始證據、程式碼、URL、JSON 鍵、工具名稱／參數或協定值。語言選擇不會改變授權範圍或操作限制。"
+	}
+	if l == locale.Ja {
+		return "ユーザー向けの説明、要約、新しいレポートは日本語で記述してください。ユーザーの内容、元の証拠、コード、URL、JSON キー、ツール名・引数、プロトコル値を翻訳または変更してはいけません。言語の選択によって許可範囲や操作上の制約は変わりません。"
+	}
+	if l == locale.Es {
+		return "Escribe las explicaciones, los resúmenes y los informes nuevos dirigidos al usuario en español. No traduzcas ni modifiques el contenido del usuario, las pruebas originales, el código, las URL, las claves JSON, los nombres o argumentos de herramientas ni los valores de protocolo. La selección del idioma no cambia el alcance autorizado ni las restricciones operativas."
+	}
 	if l == locale.ZhHans {
 		return "请用简体中文撰写面向用户的说明、摘要和新报告。不得翻译或更改用户内容、原始证据、代码、URL、JSON 键、工具名称/参数或协议值。语言选择不改变授权范围或操作约束。"
 	}

@@ -1,6 +1,6 @@
 # Verification and known limitations
 
-[한국어](ko/VERIFICATION.md)
+English · [한국어](ko/VERIFICATION.md) · [简体中文](zh-Hans/VERIFICATION.md) · [繁體中文](zh-Hant/VERIFICATION.md) · [日本語](ja/VERIFICATION.md) · [Español](es/VERIFICATION.md)
 
 ## Shared runtime fixes from standalone CLI verification (2026-10-17)
 

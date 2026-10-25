@@ -1,19 +1,15 @@
 package agent
 
 import (
-	_ "embed"
+	"embed"
 	"encoding/json"
 	"github.com/Autumn-27/artex/locale"
 )
 
-//go:embed prompt_zh-Hans.json
-var zhHansPromptsJSON []byte
+//go:embed prompt_zh-Hans.json prompt_zh-Hant.json prompt_ja.json prompt_es.json
+var translatedPromptFiles embed.FS
 
 func init() {
-	var translated map[string]string
-	if err := json.Unmarshal(zhHansPromptsJSON, &translated); err != nil {
-		panic(err)
-	}
 	templates := map[string]string{
 		"goalsDefaultTmpl":          goalsDefaultTmpl,
 		"goalsScopeTail":            goalsScopeTail,
@@ -32,14 +28,24 @@ func init() {
 		"workerTaskTimeoutDefault":  workerTaskTimeoutDefault,
 		"plannerTaskTimeoutDefault": plannerTaskTimeoutDefault,
 	}
-	if len(translated) != len(templates) {
-		panic("Chinese agent prompt count mismatch")
-	}
-	for name, english := range templates {
-		text, ok := translated[name]
-		if !ok || text == "" {
-			panic("missing Chinese agent prompt: " + name)
+	for _, lang := range []locale.Lang{locale.ZhHans, locale.ZhHant, locale.Ja, locale.Es} {
+		raw, err := translatedPromptFiles.ReadFile("prompt_" + string(lang) + ".json")
+		if err != nil {
+			panic(err)
 		}
-		locale.RegisterAll(map[string]map[locale.Lang]string{english: {locale.ZhHans: text}})
+		var translated map[string]string
+		if err := json.Unmarshal(raw, &translated); err != nil {
+			panic(err)
+		}
+		if len(translated) != len(templates) {
+			panic(string(lang) + " agent prompt count mismatch")
+		}
+		for name, english := range templates {
+			text, ok := translated[name]
+			if !ok || text == "" {
+				panic("missing " + string(lang) + " agent prompt: " + name)
+			}
+			locale.RegisterAll(map[string]map[locale.Lang]string{english: {lang: text}})
+		}
 	}
 }

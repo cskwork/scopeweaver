@@ -1,6 +1,6 @@
 # ScopeWeaver 출처와 변경 사항
 
-[English](../PROVENANCE.md)
+[English](../PROVENANCE.md) · 한국어 · [简体中文](../zh-Hans/PROVENANCE.md) · [繁體中文](../zh-Hant/PROVENANCE.md) · [日本語](../ja/PROVENANCE.md) · [Español](../es/PROVENANCE.md)
 
 ScopeWeaver는 [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX)의 커밋 `160fe13`을 바탕으로 만든 독립 파생 프로젝트입니다. GitHub 포크 네트워크 관계 없이 [cskwork/scopeweaver](https://github.com/cskwork/scopeweaver)에서 별도로 관리합니다.
 

@@ -4,7 +4,7 @@
 
 An LLM multi-agent autonomous penetration-testing system (Go backend + Next.js frontend)
 
-English · [한국어](README.ko.md)
+English · [한국어](README.ko.md) · [简体中文](README.zh-Hans.md) · [繁體中文](README.zh-Hant.md) · [日本語](README.ja.md) · [Español](README.es.md)
 
 </div>
 
@@ -29,10 +29,12 @@ Modification date: **2026-10-02**. See [provenance and changes](docs/PROVENANCE.
 
 ## Language
 
-English is the default. Select English, Korean or Simplified Chinese (`zh-Hans`) in the interface.
+English is the default. Select English, Korean, Simplified Chinese (`zh-Hans`), Traditional Chinese
+(`zh-Hant`), Japanese (`ja`) or Spanish (`es`) in the interface.
 Bare `zh`, `zh-CN` and `zh-SG` resolve to Simplified Chinese; explicit Hans tags keep their script even
-with a Traditional region. Undeclared Traditional tags (`zh-Hant`, `zh-TW`, `zh-HK`, `zh-MO`) fall
-through to the next preference rather than select Simplified Chinese. See the
+with a Traditional region. `zh-TW`, `zh-HK` and `zh-MO` select Traditional Chinese;
+explicit Hant tags keep their script even with a Simplified region. Japanese and Spanish regional
+tags resolve to `ja` and `es`. Unsupported languages fall through to the next preference. See the
 [contributor locale guide](web/src/i18n/README.md). The server's durable default is
 `language` in system settings; `SCOPEWEAVER_LANGUAGE` (or `ARTEX_LANGUAGE`) supplies the environment
 fallback. Operating-system `LANG` does not select the application language.
@@ -129,8 +131,9 @@ The script detects (and optionally installs) Docker, then lets you choose **① 
 Once it is up, open **http://localhost:8787** (the first visit lands on `/setup` to set the admin
 password).
 
-> The scripts speak English by default. For Korean prompts, set `SCOPEWEAVER_LANGUAGE=ko` (or
-> `ARTEX_LANGUAGE=ko`) before running, for example `SCOPEWEAVER_LANGUAGE=ko ./install.sh`.
+> Script prompts default to English. Set `SCOPEWEAVER_LANGUAGE` (or `ARTEX_LANGUAGE`) to
+> `en`, `ko`, `zh-Hans`, `zh-Hant`, `ja` or `es`, for example `SCOPEWEAVER_LANGUAGE=ko ./install.sh`.
+> Response tokens such as `y/n` and command/flag names remain unchanged.
 
 ### Option 2: Docker Compose (manual)
 
@@ -616,11 +619,11 @@ ScopeWeaver is derived from [Autumn-27/ARTEX](https://github.com/Autumn-27/ARTEX
 - **Product name**: "ARTEX" → "ScopeWeaver" in the user-visible documentation, scripts, and
   distribution. The Go module (`github.com/Autumn-27/artex`), the build source path (`./cmd/artex`),
   the `ARTEX_*` config/env keys, and the `artex` database defaults are **kept** for compatibility.
-- **Documentation language**: English is the default; a Korean translation lives in
-  [README.ko.md](README.ko.md) and under [docs/ko](docs/ko/README.md).
-- **Script language**: setup/build/start/update/reset-password prompts default to English, with
-  Korean selectable via `SCOPEWEAVER_LANGUAGE=ko` (`ARTEX_LANGUAGE=ko` also works). No network
-  translation is used.
+- **Documentation language**: English is the default; maintained user/contributor guides have Korean,
+  Simplified Chinese, Traditional Chinese, Japanese and Spanish counterparts linked from each guide.
+- **Script language**: setup/build/start/update/reset-password/dev prompts default to English;
+  `SCOPEWEAVER_LANGUAGE` (`ARTEX_LANGUAGE` also works) selects `en`, `ko`, `zh-Hans`, `zh-Hant`,
+  `ja` or `es`. No network translation is used.
 - **Distribution**: the output binary is `scopeweaver`, release archives are
   `scopeweaver-<version>-<os>-<arch>.zip`, the repository is
   `https://github.com/cskwork/scopeweaver`, and container images target this repo's GHCR. Upstream's

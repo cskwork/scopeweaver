@@ -1,5 +1,7 @@
 # LLM 제공자 템플릿
 
+[English](../llm-providers.md) · 한국어 · [简体中文](../zh-Hans/llm-providers.md) · [繁體中文](../zh-Hant/llm-providers.md) · [日本語](../ja/llm-providers.md) · [Español](../es/llm-providers.md)
+
 ScopeWeaver는 **Anthropic**, **OpenAI Chat Completions**, **OpenAI Responses**, 기본 **Ollama**의 네 가지 프로필 형식을 지원합니다. 모든 형식에서 사용자 지정 기본 URL, 프록시, 세션 헤더, 재시도, 속도 제한, 동시 요청 설정을 그대로 사용할 수 있으므로 클라우드 제공자, 게이트웨이, 직접 운영하는 OpenAI 호환 서버도 이전처럼 동작합니다. Ollama는 선택 사항이며 클라우드 제공자는 기본적으로 계속 호환됩니다.
 
 템플릿은 자격 증명을 저장하거나 프로필을 활성화하거나 기존 프로필을 변경하지 않고 **새 프로필의 양식을 채웁니다**. Ollama 템플릿은 선택한 서버에 설치된 모델도 조회하며, 클라우드 템플릿은 요청을 보내지 않습니다. 템플릿을 적용한 뒤에도 형식, 기본 URL, 모델은 수정할 수 있습니다.
