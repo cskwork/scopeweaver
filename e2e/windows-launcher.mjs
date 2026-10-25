@@ -40,7 +40,7 @@ try {
 import("encoding/json";"os";"path/filepath";"strconv";"strings")
 func must(err error){if err!=nil{panic(err)}}
 func record(name string){data,err:=json.Marshal(os.Args[1:]);must(err);file,err:=os.OpenFile(filepath.Join(os.Getenv("FIXTURE_ROOT"),name),os.O_CREATE|os.O_WRONLY|os.O_APPEND,0600);must(err);_,err=file.Write(append(data,'\\n'));must(err);must(file.Close())}
-func main(){root:=os.Getenv("FIXTURE_ROOT");if strings.EqualFold(filepath.Base(os.Args[0]),"ping.exe"){record("pings.jsonl");return};n:=0;if data,err:=os.ReadFile(filepath.Join(root,"count"));err==nil{n,err=strconv.Atoi(string(data));must(err)}else if !os.IsNotExist(err){must(err)};record("args.jsonl");must(os.WriteFile(filepath.Join(root,"count"),[]byte(strconv.Itoa(n+1)),0600));var codes []int;must(json.Unmarshal([]byte(os.Getenv("FIXTURE_CODES")),&codes));if n<len(codes){os.Exit(codes[n])}}
+func main(){root:=os.Getenv("FIXTURE_ROOT");executable,err:=os.Executable();must(err);if strings.EqualFold(filepath.Base(executable),"ping.exe"){record("pings.jsonl");return};n:=0;if data,err:=os.ReadFile(filepath.Join(root,"count"));err==nil{n,err=strconv.Atoi(string(data));must(err)}else if !os.IsNotExist(err){must(err)};record("args.jsonl");must(os.WriteFile(filepath.Join(root,"count"),[]byte(strconv.Itoa(n+1)),0600));var codes []int;must(json.Unmarshal([]byte(os.Getenv("FIXTURE_CODES")),&codes));if n<len(codes){os.Exit(codes[n])}}
 `);
   const built = spawnSync('go', ['build', '-o', 'fixture.exe', 'fixture.go'], {
     cwd: fixture, env: { ...env, GOWORK: 'off', GO111MODULE: 'off', GOOS: 'windows', CGO_ENABLED: '0' },
@@ -48,9 +48,16 @@ func main(){root:=os.Getenv("FIXTURE_ROOT");if strings.EqualFold(filepath.Base(o
   });
   success(built);
   assert.ok(existsSync(join(fixture, 'fixture.exe')));
-  // cmd.exe resolves this local executable before the system ping; assert its
-  // recorded arguments below rather than relying on wall-clock delays.
+  // cmd.exe resolves this local executable before the system ping. Identify it
+  // by os.Executable(): its command-line argv[0] can remain extensionless "ping".
   copyFileSync(join(fixture, 'fixture.exe'), join(fixture, 'ping.exe'));
+  const ping = spawnSync(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', 'ping -n 2 127.0.0.1'], {
+    cwd: fixture, env, encoding: 'utf8', timeout: 30000, windowsHide: true, windowsVerbatimArguments: true,
+  });
+  success(ping);
+  assert.deepEqual(JSON.parse(contents('pings.jsonl')), ['-n', '2', '127.0.0.1']);
+  assert.ok(!existsSync(join(fixture, 'count')), 'extensionless ping was mistaken for the child');
+  clear();
   for (const [language, [missing, normal, restart, failed]] of Object.entries(messages)) {
     rmSync(join(fixture, 'scopeweaver.exe'), { force: true });
     clear();
