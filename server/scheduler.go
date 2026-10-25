@@ -38,9 +38,53 @@ func newScheduler(s *Server) *Scheduler {
 	return &Scheduler{s: s, pg: s.m.pg, tick: 5 * time.Second}
 }
 
+// Register before launching so even an immediate Close owns the scheduler.
+func (m *Manager) startScheduler(s *Server) {
+	ctx, cancel := context.WithCancel(s.ctx)
+	m.schedulerMu.Lock()
+	if m.schedulerDone != nil {
+		m.schedulerMu.Unlock()
+		cancel()
+		return
+	}
+	m.schedulerCancels = append(m.schedulerCancels, cancel)
+	m.schedulerWG.Add(1)
+	m.schedulerMu.Unlock()
+	go func() {
+		defer m.schedulerWG.Done()
+		defer cancel()
+		newScheduler(s).Run(ctx)
+	}()
+}
+
+// Freeze registration before Wait; concurrent Close calls share completion.
+// No manager lock is held while cancellation or in-flight SQL unwinds.
+func (m *Manager) stopSchedulers(ctx context.Context) error {
+	m.schedulerMu.Lock()
+	if m.schedulerDone == nil {
+		m.schedulerDone = make(chan struct{})
+		done := m.schedulerDone
+		go func() {
+			m.schedulerWG.Wait()
+			close(done)
+		}()
+	}
+	done, cancels := m.schedulerDone, m.schedulerCancels
+	m.schedulerMu.Unlock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // Run loops until ctx is done, ticking the scheduler. Started once from server New.
 func (sc *Scheduler) Run(ctx context.Context) {
-	if sc.pg == nil {
+	if sc.pg == nil || ctx.Err() != nil {
 		return
 	}
 	sc.init()
@@ -51,7 +95,13 @@ func (sc *Scheduler) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if ctx.Err() != nil {
+				return
+			}
 			sc.s.reconcileConcurrency() // Fill available concurrency slots with queued tasks.
+			if ctx.Err() != nil {
+				return
+			}
 			sc.step()
 		}
 	}

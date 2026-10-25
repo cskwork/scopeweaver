@@ -231,10 +231,15 @@ type Manager struct {
 	// this outer write lock an older request could commit first and publish last.
 	taskStateMu sync.Mutex
 	mu          sync.RWMutex
-	tasks       map[string]*Task
-	active      string
-	trafficOn   bool // Traffic capture flag (off by default; settings.traffic_capture).
-	llmRecOn    bool // LLM recording flag (off by default; settings.llm_record).
+	// schedulerMu closes registration before waiting; scheduler work can need mu.
+	schedulerMu      sync.Mutex
+	schedulerCancels []context.CancelFunc
+	schedulerWG      sync.WaitGroup
+	schedulerDone    chan struct{}
+	tasks            map[string]*Task
+	active           string
+	trafficOn        bool // Traffic capture flag (off by default; settings.traffic_capture).
+	llmRecOn         bool // LLM recording flag (off by default; settings.llm_record).
 	// Web-search flag and provider (off by default; settings.web_search_*). brave-free needs braveKey; tavily needs tavilyKey.
 	// webSearchProxy is an independent HTTP/HTTPS/SOCKS5 egress proxy, separate from the traffic-recording MITM proxy.
 	webSearchOn      bool
@@ -839,6 +844,13 @@ func (m *Manager) SetGlobalProxy(raw string) error {
 }
 
 func (m *Manager) Close() error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := m.stopSchedulers(ctx); err != nil {
+		// Keep the pool open while a scheduler still owns an in-flight query.
+		// The caller gets an explicit failure and may retry after it unwinds.
+		return err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.traffic != nil {
