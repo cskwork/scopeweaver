@@ -55,7 +55,7 @@ GLM-5.3 接受文字，上下文為 1M token，且必須保持推理啟用。支
 
 原生模式通過實際固定 CLI 的 `serve --stdio`、`run --server --session` 及官方客戶端管理工作階段、事件和中斷。每次調用擁有私有臨時 home／設定／資料路徑和資料庫。保留真實內建工具定義及原始實現；原生權限為 ASK，不使用 `--auto`，公開 `execute.before` 鈎子在執行前阻止所有非宿主工具。只有收集的宿主請求交回 Norma 執行和審批。OpenCode 生成的模型／環境／工具上下文與宿主 system、歷史共同保留。遇到無法受控的系統／MDM 設定來源時拒絕啓動，不讀取或修改它們；細節見適配器指南。
 
-舊版自定義供應商使用顯式 OpenAI 兼容設定。**兩個運行時均不支持 Windows**，因為必需的 POSIX 進程樹清理邊界尚未實現。先前實際運行測試範圍是 **macOS arm64**；Linux CI 已設定，但托管結果尚待驗證。其他平台不聲稱已驗證；其他 SDK 版本需單獨驗證。
+舊版自定義供應商使用顯式 OpenAI 兼容設定。**兩個運行時均不支持 Windows**，因為必需的 POSIX 進程樹清理邊界尚未實現。本機執行環境驗證涵蓋 **macOS arm64**。CI 在 **Linux x64** 執行實際執行環境測試；不宣稱已驗證其他平台。其他 SDK 版本需單獨驗證。
 
 按[適配器啓動指南](../../adapters/opencode-sdk/README.zh-Hant.md)使用 **Bun 1.3.14**。橋接器使用自己的供應商設定，不導入用戶 OpenCode 或雲端已保存憑證。設置至少 **32 個非空白字元**的獨立 `SCOPEWEAVER_OPENCODE_TOKEN`，在 **LLM → 新增 → 設定模板 → OpenCode SDK 橋接器**中填入；不要粘貼 OpenCode Go／Console API 密鑰。
 
