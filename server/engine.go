@@ -108,6 +108,7 @@ type Engine struct {
 	// task operation. Once BeginDelete returns, every admitted writer is reflected
 	// in inflight and every later writer is rejected.
 	deleteMu sync.RWMutex
+	closing  bool // protected by deleteMu; shutdown permanently closes task admission
 
 	// Every long-lived task goroutine (planner, workers and deadline coordinator)
 	// runs under one task-scoped context. Successful deletion cancels that context,
@@ -747,10 +748,14 @@ func (e *Engine) ReadyFor(t *Task) bool {
 // but no-op until an LLM is configured (so a task created while idle picks up
 // automatically once LLM is set from the UI).
 func (e *Engine) Run(ctx context.Context, t *Task) {
+	if !e.beginTaskOperation(t.ID) {
+		return
+	}
+	defer e.decInflight(t.ID)
 	ctx = locale.WithLang(ctx, taskLanguage(e.m.pg, t.ID))
 	workers := e.m.Workers()
 	e.deleteMu.RLock()
-	if e.IsDeleting(t.ID) {
+	if e.closing || e.IsDeleting(t.ID) {
 		e.deleteMu.RUnlock()
 		return
 	}

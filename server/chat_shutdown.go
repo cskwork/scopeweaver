@@ -8,12 +8,17 @@ import (
 
 // DrainChats refuses further dispatches and waits for admitted background chats,
 // including side answers, checkpoint publication and run finalization, and all
-// startup/periodic DB workers. The caller must cancel the
+// startup/periodic DB workers and task runtimes. The caller must cancel the
 // server context and drain HTTP handlers first, and keep the database open until
 // this method returns. A deadline bounds uncooperative tools or providers.
 func (s *Server) DrainChats(ctx context.Context) error {
 	s.chatMu.Lock()
 	s.chatClosing = true
+	if s.engine != nil {
+		s.engine.deleteMu.Lock()
+		s.engine.closing = true
+		s.engine.deleteMu.Unlock()
+	}
 	if s.chatDrainDone == nil {
 		s.chatDrainDone = make(chan struct{})
 		go func() {
@@ -38,6 +43,25 @@ func (s *Server) DrainChats(ctx context.Context) error {
 			}
 			s.backgroundWG.Wait()
 			s.archiveWG.Wait()
+			if s.engine != nil {
+				// Admission is closed, so no runtime can be added after this snapshot.
+				// StopTask only removes a runtime after joining its existing routines.
+				s.engine.runtimeMu.Lock()
+				runtimes := make([]*taskRuntime, 0, len(s.engine.runtimes))
+				for _, rt := range s.engine.runtimes {
+					runtimes = append(runtimes, rt)
+				}
+				s.engine.runtimeMu.Unlock()
+				for _, rt := range runtimes {
+					rt.wg.Wait()
+				}
+				// Bootstrap and surviving HTTP operations already own inflight reservations.
+				// Reuse the task-deletion drain to join their final writes as well.
+				s.engine.inflight.Range(func(taskID, _ any) bool {
+					_ = s.waitTaskQuiescent(context.Background(), taskID.(string))
+					return true
+				})
+			}
 			close(s.chatDrainDone)
 		}()
 	}
