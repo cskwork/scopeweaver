@@ -126,6 +126,8 @@ activa ni contacta al proveedor. Coding Plan está restringido a herramientas of
 ScopeWeaver no figura entre ellas. Consulta [configuración de proveedores y límites de compatibilidad](docs/es/llm-providers.md).
 Para reducir tokens de nube, consulta [Controlar el uso de tokens](docs/es/llm-providers.md#controlar-el-uso-de-tokens).
 
+El **puente OpenCode SDK** opcional admite `native` CLI/cliente **2.1.4** (predeterminado) y `legacy` SDK/CLI **1.19.4**, con token independiente y `providerID/modelID`. Norma de ScopeWeaver conserva herramientas y aprobaciones. El modo heredado mantiene JSON seguro, permite normalizar espacios/escapes, no conserva bytes originales y rechaza enteros inseguros. Ambos modos carecen de soporte Windows; las pruebas previas cubrieron macOS arm64 y el resultado CI alojado de Linux sigue pendiente. El modo LLM solo local lo rechaza porque el proveedor puede ser nube. Consulta [inicio, límites y preparación de degradación SDK](docs/es/llm-providers.md#opencode-sdk-bridge): los binarios anteriores no arrancan mientras existan perfiles SDK.
+
 Los perfiles opcionales de **Ollama nativo** funcionan sin clave API. Tres plantillas cubren Ollama en el mismo
 equipo, en el host desde Docker y el servicio opcional `docker compose --profile local-llm`. Elegir una consulta los modelos instalados y rellena uno, dando preferencia a la compatibilidad con herramientas declarada;
 no descarga ni ejecuta modelos. Envían un contexto de 32K (`num_ctx` 32,768), una solicitud a la vez y keep-alive de 30 minutos. El ajuste opcional
