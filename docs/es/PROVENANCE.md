@@ -22,3 +22,19 @@ de tokens del modelo de aprobación y autenticación que bloquea ante fallos con
 inicial y agrupación de conexiones de BD limitada. Los mensajes y guías de despliegue nuevos están
 disponibles en inglés y coreano. La autoría original se atribuye en los commits de adaptación;
 los demás cambios de ScopeWeaver permanecen.
+
+<a id="norma-execution-and-compaction-fixes--2026-10-25"></a>
+## Correcciones de ejecución y compresión de Norma — 2026-10-25
+
+El reemplazo mantenido por el repositorio en `third_party/norma` parte de
+[`52f17dd52d95b087265e5d5b306fe85c1ea05599`](https://github.com/Autumn-27/Norma/commit/52f17dd52d95b087265e5d5b306fe85c1ea05599).
+Ese commit añade únicamente la licencia Apache-2.0 a v0.4.3
+(`320ae32989da97dd91469bb89164cbfe87d83d5d`): 211 archivos / 1,293,448 bytes antes de los cambios locales. Esta instantánea no contiene un archivo NOTICE del proyecto original.
+
+Las correcciones locales conservan el contexto de timeout original del ejecutor hasta la resolución final, reparan el cliente ausente en la prueba de reintento, ajustan el ritmo predeterminado de compresión para ventanas pequeñas y evitan que la consolidación útil de resúmenes quede postergada indefinidamente. También aprenden solo límites de contexto menores explícitos, impiden que aumenten los límites aprendidos y distinguen los errores de longitud de salida del desbordamiento de contexto. El historial sin procesar y los archivos históricos permanecen intactos; las vistas irreducibles siguen fallando explícitamente. La prueba obsoleta de limitación de ventanas pequeñas se convierte en una prueba positiva de consolidación.
+
+`third_party/norma/README.scopeweaver.md` enumera los diez archivos originales modificados y las cuatro adiciones. Cada archivo original modificado lleva un aviso de modificación destacado. Los demás archivos originales, la licencia original y los metadatos del módulo no cambian. No cambian las firmas exportadas ni los formatos serializados; las correcciones de comportamiento enumeradas son intencionadas.
+
+El reemplazo del módulo raíz y el orden de copia de dependencias de Docker seleccionan este código. La licencia Apache completa también se incluye en `THIRD_PARTY_NOTICES.txt` para el empaquetado existente de archivos/contenedores. El trabajo CI de backend ejecuta por separado la batería completa del SDK anidado; el recorrido de paquetes raíz no la incluye. No se incluye publicación en el repositorio original ni migración de base de datos.
+
+La corrección de `enableNoa`, responsabilidad del host, transmite la ventana de contexto ya configurada, incluidas 250K y 1M, en lugar de sustituirla silenciosamente por la alternativa de 200K del SDK. Los límites de tokens de salida, Noa desactivado y las políticas de Ollama nativo son independientes y se conservan. Consulta la [guía de verificación](VERIFICATION.md) correspondiente.

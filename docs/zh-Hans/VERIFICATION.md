@@ -6,6 +6,189 @@
 
 各语言版本请见本页上方导览。
 
+<a id="current-dev-pr-40-reconstruction--2026-10-25"></a>
+
+## 基于当前 dev 重建 PR #40 — 2026-10-25
+
+最初仅将 `aebea3e..9b04754` 中预期的四个提交重建到 `f354c920` 上；未重放分叉的分支历史。随后，候选版变基到 `7af06f1`，保留其六语言整合。目前的整合要求恰好 **1,987** 个正式键具有英文、韩文、简体中文、繁体中文、日文和西班牙文的原始译文。既有 OpenCode 环境键隔离、会话标头优先级及 User-Agent 默认值均予以保留。
+
+更广的取消／竞态测试覆盖揭露了既有规划器结果未同步的问题：流式会话可能在暂停时返回，而真实的 `prove_goal` 处理程序仍在设置 `GoalMet` 及其原因。终结工具的写入方与规划器的结果快照现在共用一个私有互斥锁。这保留了导出字段、真实工具／终结回执，以及目前暂停与完成之间的优先次序；不增加供应商请求，也不改变正式数据库 schema。
+
+终结证明关卡还要求**真实且成功的 SDK 工具结果回执**，且须与标记的工具使用 ID 及发起它的模型响应相符。私有捕获观察器在下一次压缩或推理边界之前运行；仅处理程序完成或 `PostToolUse` hook 本身不能满足资格。对抗回归使用真实的 `goal_met`、**30 ms** 运行预算与 **120 ms** 工具后 hook：旧关卡在收到中断回执后吞掉了结算，使**供应商调用为 1 次而非 2 次**，而原生原因仍为 `timeout`，错误仍为 nil。修正后的路径保留该中断回执，允许真实结算调用及其压缩，并拒绝延迟 hook 赋予资格。第二个同步回归将 hook 保持等待，直到捕获观察到中断，以证明真实处理程序在超时回执之前运行；正常成功证明、父上下文取消、反应式溢出与延迟来源防护仍在覆盖范围内。详见[终结证明回归](../../agent/terminal_proof_test.go)。
+
+最初的重建仍有继承的关闭缺口：在未改动的 `f354c920` 上，`TestMainServeFailureRunsShutdown` 在 **10 次独立运行中失败 3 次**，包括数据库关闭后排程器仍写入。后续修复在启动前登记排程器归属。`Manager.Close` 在管理器锁之外取消并等待排程器结束，最多 **5 秒**，之后才停止日志写入器并关闭数据库。如果排程器 SQL 仍然阻塞，Close 返回 `context.DeadlineExceeded` 并**保持数据库开启**；工作结束后，可以重试关闭。CLI 原本就会报告关闭失败并以 1 退出。这不表示既有不带上下文的 SQL 调用变得可取消。已预先取消的排程器不再初始化水位或启动下一轮 tick。[阻塞 SQL 回归](../../server/scheduler_shutdown_test.go)检查并发关闭超时、工作仍活跃时数据库保持开启，以及解除阻塞后并发重试成功。首次并行全包运行还出现日志接收器测试的全局行数断言失败，当时其他包的子进程使用同一个数据库；跨包干扰仍属假设，因此最终验证遵循 CI，为每个包使用独立的可抛弃数据库。这些历史回执不代表最终确切提交的代管 CI、原生 Windows 或真实供应商验证。
+
+整合候选版在网页端使用 Next.js **16.4.3** 与 Zod **4.6.7**，适配器使用 Zod **4.6.7**，并在锁定文件中以兼容方式修复 body-parser **2.4.0**、fast-uri **3.1.9**、ip-address **10.7.4** 和 qs **6.16.1**。适配器 SDK 仍固定为 **1.32.0**。六语言变基后，两个包的全新 `npm ci` 均通过；网页测试通过 **75/75**，冷启动静态构建导出 **31 页**，适配器测试通过 **18/18**，语法检查也通过。先前 72/7 测试回执仍作为历史证据保留。目前两项 `npm audit --audit-level=low` 检查均报告 **0 个漏洞**。这些结果取代了最初 Next.js 16.4.0 公告／构建失败的限制；原始回执仍为历史证据。浏览器原生贴上／撤销按键现在使用 `ControlOrMeta+V` 与 `ControlOrMeta+Z`，保留断言和超时。最终标准浏览器运行及确切提交的代管 CI 是独立关卡，本节不宣称已通过。
+
+六语言整合后的兼容性检查必须覆盖每一种已发布来源语言及每一种请求输出语言的旧版内置规划器／工作器提示词与 `add_intent` schema。新增 zh-Hant／ja／es 测试数据来自不可变的 PR40 之前 dev `7af06f1`。精确识别必须保留已编辑提示词、自定义 schema 字段／默认值、已存行与原始历史。这扩展了下方原先的三语言验证。
+
+<a id="patched-sdk-and-model-specific-context-windows"></a>
+
+### 已修补 SDK 与各模型的上下文窗口
+
+后端 CI 工作必须运行嵌套的 Norma 测试套件。请在根包之外单独运行 `(cd third_party/norma && go test ./... -count=1)`；详见[来源与修改声明](PROVENANCE.md#norma-execution-and-compaction-fixes--2026-10-25)。
+
+回归集覆盖原始的 30 ms / 120 ms 工具中断竞态、小窗口节奏与长会话边界、有实质收益的摘要合并、真实溢出重试视图、单调学习上限，以及不得触发上下文恢复的输出错误。既有数值边界与原始历史保持不变。旧断言认为 40K 无法进入第二层，这在未改动的上游就已不成立；替代测试使用同一测试数据，要求真正执行合并、回收 token 并限制摘要大小。
+
+`TestNoaRetainsConfiguredModelContextWindow` 实际运行 40K、128K、200K、250K、400K 与 1M 的 Noa 会话。主应用修正前，所有非 200K 情况都会变成 200K。`enableNoa` 现在先传入已解析配置中的正数窗口，再清除被替换的压缩器。其他测试分别覆盖窗口缺失时的回退、停用 Noa、损坏状态恢复，以及既有本地 Ollama 策略。`MaxTokens` 仍独立限制输出。200K 回退适用于未设置窗口的情况；不是通用模型上限。SDK 在 200K 及以上的默认值保持不变，而有实质收益的摘要按数量决定是否合并的条件则有意作了调整，该调整适用于所有上下文窗口，与窗口大小无关。
+
+<a id="trigger-evidence-in-the-first-planner-request-2026-10-18"></a>
+
+## 首次规划器请求中的触发证据（2026-10-18）
+
+这是原始提交 `ffe260435fed6576394d613991aaf6e8010d3f48` 上的本地候选版，已回移共用 CLI 修正。通常，finding 或工作器完成事件会携带触发摘要及精简的 `graph_overview` 唤醒规划器；`prove_goal` 仍要求每个目标条件均有已记录证据。精简条目缺少完整的 finding／fact 字段，因此证明前读取 `node_detail` 是合理的。
+
+[Planner.Plan](../../agent/planner.go) 的实际变更节录如下，省略了中间未变动的任务上下文设置：
+
+```go
+// Before
+situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+// After
+overview := tsx.graphOverviewData()
+situational := renderTriggers(ts, triggers) + renderGraphOverview(overview)
+// After ensureRunDir and WithReviewContext:
+situational += renderPlannerEvidence(ctx, overview, triggers, tools, ts.ID(), taskDir)
+```
+
+第一行新代码只捕获一次既有的有界概览；第二行呈现同一快照。最后一行在任务／审查上下文建立后，为具体 `finding`／`done` 触发 intent 所产生、属于目前 exploration 的 fact／finding 候选节点附上完整详情。它不遍历 `related_tasks`，也不扩展全局谱系。[附加实现](../../agent/planner_evidence.go)最多进行 **4 次读取尝试**，且仅当**整个附件不超过 32,768 个 UTF-8 字节**时才纳入完整节点，包含本地化标头、JSON 外层与 `omitted_count`；过大的节点会被省略，不会截断。重复候选会去重。
+
+只有最终解析出的 `node_detail` 能力可以读取：其 schema 必须接受输入，`IsReadOnly` 必须成立，权限必须明确允许未改动的输入。包装器、默认值、计量、受限结果与错误均仍有效；不安全或不完整的结果会被省略，不会回退到原始辅助函数。标头在 EN／KO／zh-Hans 中均完整，并将记录内容标记为不可信观察。既有显式读取（包括关联的直接来源节点）保留原本的访问规则。
+
+具体数据行来自 **CLI 所属的合成环回 R22 实验**，并非原始正式环境事件：intent `3` 完成一次自有 GET 并持久化 fact `4` 与 finding `5` 后，目标 `2` 仍未达成。目标要求 finding 名称精确为 `SYNTHETIC LAB ONLY public debug marker`、严重程度 `low`、标记与观察内容。在 **2026-10-17 22:42:31+09:00**，规划器为取得这些缺少的完整字段，合理地读取了 `node_detail` `5` 与 `4`。测试框架清理在证明前的 **22:42:54+09:00** 将其暂停；这不是人工暂停。R22 在未变动的 **420 秒任务预算**下，于**总计 470.50 秒**后失败。底层模型／供应商延迟的原因**未知**。修正后，同一快照候选中符合资格的完整详情会进入触发回合的首次请求；详情本身并不构成证明。
+
+| 本地候选版检查 | 观察结果 |
+| --- | --- |
+| 原始完整 `agent` 包，无 overlay 的确切正式源代码 | 598 个测试／子测试通过，0 失败／略过；等效 CLI 为 607 通过，0 失败／略过 |
+| 三个 `planner_evidence*test.go` 文件中的新增回归 | 31 个测试／子测试通过；实际 `Planner.Plan` 流式／非流式首次请求相等、九种权限情况、数量／字节边界、去重／隔离、缺少／已删／延迟／隐藏证据、显式恢复、不自动证明与多个目标 |
+| 原始聚焦服务器证明／语言区域检查及完整 `locale` 包 | 分别通过 5 与 19 项，0 失败／略过；保留 **1,986 个键 × 3 种语言**的严格完整性，因新标头将预期数量由 1,985 更新 |
+| 原始 `go build ./...`、`go vet ./...` | 两者原生退出码均为 0 |
+| Linux `-race`，目前等效的 CLI 源代码 | 聚焦检查 49 项与完整 `agent` 包 607 项通过，0 失败／略过；两者实际 Go 退出码均为 0，无 `DATA RACE`。已验证全部 1,175 个快照源文件；这不是原始模块运行 |
+| 真实封装 CLI 环回验收，全部五种情况 | core 19.14s、GLM LOW 82.63s、Flash LOW 114.84s、OAuth LOW 108.12s 与 Flash HIGH 317.83s 原生退出码均为 0，各自使用未变动的 420 秒任务预算。这些单次实验运行不是性能比较 |
+
+未改动的原始基线在流式及非流式缺少上下文断言上失败（两个叶节点及其父项失败），并非设置失败。回归测试数据中的受控供应商用量为合成数据，不是付费 token 证据。仍须使用真实的 `prove_goal`、真实用量／回执与既有终结证明关卡；阶段、工作器、努力级别、截止时间与重试行为均不变。反例：停用、受限、缺少、过大、未触发或继承的节点不会自动获得完整详情。可用时，显式读取可以恢复被省略／新产生的证据；单凭读取数据不能完成目标，证明多个目标中的一个也不能完成任务。
+
+以上为本地工作树结果，并非确切新提交的 CI。未改动的 Windows `TestChatBranchCopyRejectsDestinationSymlink` 权限失败也在 CLI 基线 `650dc82910e5e36668161a5276455506f64713fe` 重现；未放宽任何检查，也不宣称完整原生服务器成功。新候选版全部七项必要代管检查仍待完成。PR #40 仍未合并，最终人工审查待完成；本节不宣称已公开或发行。不引入公共 API、schema 或迁移变更。较早日期的章节保留其历史结果。
+
+<a id="chat-context-readiness-2026-10-17"></a>
+
+## 对话上下文就绪状态（2026-10-17）
+
+这是基于 PR #40 提交 c9fb642 的本地界面候选版。检查器可以在首次 controls 请求完成之前打开。先前它会将尚未解析的会话视为草稿，再将首次解析出的会话当作切换而关闭面板。在[检查运行 39031048389](https://github.com/cskwork/scopeweaver/actions/runs/39031048389) 中，中文桌面任务案例因关闭按钮先不稳定、后脱离文档而失败。该代管提交仍是失败证据；本次新结果为本地结果。
+
+重设逻辑节录（binding 是请求的 controls 键；session 是解析出的会话标识）：
+~~~ts
+// Before: every change from draft to resolved identity ran the reset.
+epoch.current++;
+setOpen(false);
+// After: qualify the change before the existing reset.
+const previous = hydrated.current;
+hydrated.current = { binding, session };
+if (previous.binding === binding && !previous.session) return;
+epoch.current++;
+setOpen(false);
+~~~
+第一行新增代码读取先前的 binding 与 session；第二行记住目前这组值。第三行仅在同一 binding 尚未解析出首个会话时保留已打开的面板。不同请求 binding 或后续已解析会话变化，仍会增加 epoch 并完整重设视图／表单，包括焦点与保留数量。hook 暴露既有请求键；没有服务器 API 或翻译标签变更。
+
+具体受控数据行：任务 1、exploration 1、segment 0 通过真实任务 API 暂停。其首次 controls 响应被保持等待，直到 /context 打开。先前释放该真实响应会使触发按钮关闭，导致正常点击在 15 秒后超时（Go 退出码 1）；现在逐字节相同的浏览器判定检查会保留打开的触发按钮并正常关闭（退出码 0），供应商调用为零。任务暂停有别于对话关卡的 paused 字段。
+
+| 冻结修正源代码上的本地检查 | 观察结果 |
+| --- | --- |
+| 既有前端测试 | 65 通过，0 失败／略过 |
+| 全新静态前端构建 | TypeScript 与 31 页完成；已验证原生退出码 0 |
+| 未改动的独立首次响应延迟判定检查 | 1 个 Go 测试通过，0 失败／略过；供应商调用为零 |
+| 标准上下文浏览器测试数据 | 全部 12 个 EN/KO/zh-Hans × 1440/390 × 独立／任务案例，加上 hydration 与请求 binding 防护均通过（14 个浏览器步骤；1 个 Go 测试，0 失败／略过） |
+
+新增防护先使用真实的首次后端响应，再使用合成路由状态来检查后续已解析会话变化，以及被保持等待的旧上下文响应。每个替代响应均保持等待，直到旧内容断言完成，避免新结果掩盖泄漏。非默认焦点与保留数量 7 会重设为空焦点与默认值 2。反例：真实请求 binding 或后续已解析会话变化仍须重设；延迟结果不得恢复旧上下文。第二次真实任务查询切换（完整运行中从任务 7 到 8）在新 controls 响应保持等待时观察到了新 URL，保留同一个仍连接的检查器触发按钮与文档，重设焦点／保留数量，并在替代数据可能掩盖问题前拒绝延迟旧上下文。这证明了已挂载状态下请求 binding 的变化，而非重新挂载。延迟错误／压缩成功分支仍仅经源代码审查，未单独运行。合成标识防护证明的是客户端处理，不是服务器 exploration 替换。其他上下文案例使用受控环回供应商；未调用任何付费／外部供应商。
+
+最初的 shell 包装尝试因环境／捕获设置而停止；最终构建／测试退出码另行记录，保留警告，且未以源代码／断言变通来通过。先前规划器／关闭变更予以保留。配对文件记录这些本地结果；下一次已提交候选版仍须独立最终审查及全部七项代管检查。PR 就绪不等于维护者批准、合并或公开发行。
+
+<a id="log-writer-shutdown-ownership-2026-10-17"></a>
+
+## 日志写入器的关闭归属（2026-10-17）
+
+服务器将日志保存在内存中，并通过异步数据库写入器持久化。先前取消服务器上下文时不会等待该写入器结束：使用后台上下文的插入可能在 `Manager.Close` 关闭连接池时仍然活跃。PR #40 提交 `14b5403` 的最近后端运行，在未改动的连接埠占用关闭测试中揭露了此问题。
+
+写入器与管理器之间的流程节录：
+```go
+// Before: writer, then manager shutdown
+pg.InsertLog(level, tag, text) // background context
+return m.pg.Close()           // no writer join
+// After: writer, then manager shutdown
+pg.InsertLogContext(writeCtx, level, tag, text)
+logSink.StopDB(m.pg)
+return m.pg.Close()
+```
+第一行新代码使实际插入可取消；首次历史恢复也使用同一个上下文。第二行只解除这个确切连接池的绑定，取消未完成 SQL，并在接收器锁之外等待写入器结束。每次同一拥有者的停止操作都共用该完成信号；另一个管理器的连接池不能停止它。只有之后第三行才关闭连接池。既有不带上下文的 DB 方法委派给同一 SQL；环形缓冲区、stderr 与 SSE 传递仍可用，入队通道从不关闭。
+
+一条观察数据：后端运行 [39028154916](https://github.com/cskwork/scopeweaver/actions/runs/39028154916)，job `117383132313`，在 **2026-10-17 11:18:45 UTC** 的 `TestMainServeFailureRunsShutdown` 失败。预期的连接埠占用绑定失败之后出现关闭及 `[logsink] db write: sql: database is closed`。另一个独立真实 PostgreSQL 表锁检查，在未改动的 `14b5403` 上重现了 `Manager.Close` 返回时其写入器仍阻塞（Go 退出码 1）。现在完全相同的测试数据会在锁仍持有、连接池尚未关闭时通过；没有过滤任何诊断。
+
+| 原始本地 R19 检查 | 观察结果 |
+| --- | --- |
+| 未改动的独立阻塞插入回归 | 1 通过，0 失败／略过；保留基线行为 RED |
+| 真实 SQL 拒绝防护 | 1 通过，0 失败／略过；可见 SQLSTATE `23514`，被拒行不存在，后续有效行已持久化 |
+| 冻结的 `TestStopDB*` 测试数据 | 6 通过，0 失败／略过：无绑定、阻塞插入、其他连接池、已取消上下文、并发停止与 stderr 连续性 |
+| 未改动的连接埠占用关闭测试 | 1 次运行加上 20 次重复运行通过；保留预期子进程失败，父 Go 退出码 0 |
+| `go build ./...`、`go vet ./...` | 两者退出码均为 0 |
+
+反例：真实的活跃上下文 SQL 拒绝仍必须报告；取消／等待结束并不会将它变成成功插入。这仍是尽力而为的日志记录，没有为队列中的行新增刷写保证。并发测试数据检查总体完成；每个等待方共用等待结束的行为也经源代码审查验证，不宣称为单独的运行时判定检查。全部数据库运行均使用可抛弃测试数据库；独立测试数据现在使用所提供可抛弃数据库中的自有 schema，不需要 CREATE DATABASE 权限。正式权限、HTTP／schema 合约与既有规划器测试不变。这些为本地结果，不是完整原生服务器或发行声明：继承的 Windows 符号链接权限限制仍存在，下一次已提交候选版必须通过全部七项代管检查。
+
+<a id="terminal-goal-completion-2026-10-17"></a>
+
+## 目标最终完成（2026-10-17）
+
+以下为本地 R17 候选版结果；最终独立源代码审查与确切候选版的代管关卡另计。R17 共用修正让已完成的证明回合沿正常 SDK 路径走完，再于另一上游请求前在本地结束规划器。通常，`prove_goal` 将已确认的 fact／finding 关联到目标，并标记该目标已达成；只有全部目标均已证明才设置 `GoalMet`。先前 `Plan` 会等待 `captureRun` 完成后才将该标记返回引擎，因此会话等待另一次模型响应时，引擎无法完成。
+
+控制流程节录（`...` 是未变动的活动回调）：
+```go
+// Before
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+// After
+installTerminalProofGateOn(&opts, tsx)
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+```
+第一行旧代码等待整个会话；第二行才对外提供目标结果。新增的一行在捕获开始前安装下一次请求的边界。它让目前响应、实际工具结果、延迟用量及对话记录完成，再提供不含内容、上游用量为零的本地 `end_turn`，并跳过证明后不必要的 `Compactor.Pre`。它保留所选压缩器、可选 `ContextView`、正常证明前／恢复行为，以及既有供应商／工具包装器。原始 `ToolUseID` 及成功／失败响应资格判定，防止延迟处理程序将旧失败证明归属于后续成功响应。最新证明来源通过 compare-and-swap 保留；较旧或未知来源不能抹掉较新的有效证明。失败记录在产出错误前执行，即使其消费者立即停止亦然。
+
+具体实验数据行：在**独立 CLI R11 候选版**中（并非原始正式环境事件），finding 节点 `5` 于 **2026-10-17 18:36:24+09:00** 证明目标 `2`。未变动的 420 秒测试框架在 84 秒后的 **18:37:48+09:00** 暂停时，模型输出仍活跃。该次运行恰有一个 GET、一个 intent 与一个 finding。回执为 `scopeweaver-cli/dist/pi-glm-flash-fix-20261017/r11-flash-high-digest.txt`；它说明了完成等待，不能说明底层供应商延迟原因。反例：部分／被拒证明必须正常继续；失败证明响应保留其真实错误／恢复路径，不能赋予本地完成资格。
+
+原始源代码证明使用受控供应商与可抛弃 PostgreSQL，不使用付费推理：
+
+| 本地候选版检查 | 观察结果 |
+| --- | --- |
+| 完整 `agent` 包，R17 使用已修正的自有 fact 测试数据 | 567 个测试／子测试通过，0 失败、0 略过；包含流式／非流式、部分／被拒证明、父上下文取消、错误／恢复、压缩／视图及延迟来源案例 |
+| `TestWireTools`、内置运行时 S7 与实际引擎 S18 | 28 通过，0 失败、0 略过；S18 在一次真实供应商调用后持久化 done，具有真实证明／终结回执，以及精确的输入／输出／缓存读取／缓存写入用量 **11/7/3/2**，原始对话记录亦包含这些数据 |
+| S18 中真实暂停／供应商错误防护 | 如实的错误／原因回执保留已发出用量：用户暂停为 **11/0/3/0**，供应商失败为 **11/7/3/2**；观察证明后暂停与任务完成的状态优先次序，未新增策略断言 |
+| 完整 `locale`、构建与静态分析 | 19 个测试通过，0 失败、0 略过；`go build ./...` 与 `go vet ./...` 退出码 0 |
+
+已保存的原始 S18 基线失败，因为它尝试了第 2 次供应商调用，且没有终结结果／完成；其取消／供应商错误回执防护通过。独立不可变 R14 回归也曾失败：旧失败处理程序借用了后续响应的标识，导致 calls=2 而非 3；候选版保留了三次调用回归。审查者随后在原始 R16 候选版重现相反顺序：旧的失败 response-1 处理程序在有效 response-2 证明之后完成，抹掉了其来源，导致不必要的第三次请求。未改动的实际会话 overlay 在 R17 前以 calls=3 失败，现在以 calls=2/origin=2 及一份真实新证明结果通过。两种延迟处理程序顺序均通过[边界回归](../../agent/terminal_boundary_test.go)；[实际引擎回归](../../server/engine_terminal_proof_test.go)另行保留完成／回执／用量检查。首次整合 agent 运行失败，仅因新测试数据预期 `CreateExploration` 会创建一个来源 fact。R16 自行建立已确认 fact；这次测试数据修正没有改变任何断言或正式代码。较早失败回执仍予以保留。
+
+S18 现在复用 S7 在所提供可抛弃数据库内的自有 schema 辅助函数，在删除自己的 schema 前关闭存储区；拥有数据库的 NOCREATEDB 测试角色就足够，正式权限保持不变。未改动的 `TestChatBranchCopyRejectsDestinationSymlink` 仍在本地 `server/chat_history_test.go:270` 失败，因为 Windows 拒绝创建符号链接。不宣称完整原生服务器成功或已通过确切候选版全部七项代管检查；CI／前端／浏览器交付仍待完成。根协调方负责另行进行竞态／真实运行验收；本节仅报告这些原始本地检查。
+
+<a id="plannertool-contract-and-stored-stock-compatibility-2026-10-17"></a>
+
+## 规划器／工具合约与已存内置内容兼容性（2026-10-17）
+
+这是 `fix/glm-agent-contracts` 基于 `dev` 提交 `d7365ec` 的本地 Windows 结果。规划器的 `parent_ids` 指引现在与既有仅接受 fact／finding 的处理程序一致，批次 `add_intent` 元数据说明了字段与必要的 `summary`。规划器／工作器指引保留全新验证与重测，要求每个目标条件都有证据，且仅在成功派发或确认最终目标证明后结束回合。EN／KO／zh-Hans 资源均有配对。
+
+完全相同的旧版内置规划器／工作器提示词与 `add_intent` schema 会解析为修正后的运行时默认值。用户编辑、绑定、启用标记、已存行与提示词历史均不变；没有正式数据库迁移，也没有处理程序语义变更。详见[合约回归](../../agent/planner_contract_test.go)、[内置内容兼容性回归](../../agent/legacy_stock_compat_test.go)及 [HTTP／运行时 PostgreSQL 证明](../../server/tools_stock_schema_test.go)。
+
+测试先行的证明成功编译，并在基线上产生 **8 个顶层 agent 断言失败**与 **9 个 S7 内置 schema 子案例失败**。仅为编译测试而临时使用的未变动尾部提取与直通解析器，在应用修正前已移除。候选版结果：
+
+| 本地检查 | 观察结果 |
+| --- | --- |
+| 完整 `agent` 包与可抛弃 PostgreSQL | 549 个测试／子测试通过，0 失败、0 略过 |
+| 完整 `locale` 包 | 19 通过，0 失败、0 略过 |
+| 聚焦服务器语言区域／工具／来源检查 | 11 通过，0 失败、0 略过；1,985 个正式键保留原始三语言完整性检查 |
+| `TestExplorationDirectSourceReadView` | 使用可抛弃 PostgreSQL 通过 |
+| `TestStockMetadataRuntimePostgres` 加 `TestWireTools`，`-count=2` | 48 个测试／子测试通过，0 失败、0 略过；实际环回 HTTP 处理程序、运行时解析及已存行／历史回读 |
+| 已保存的公开工具情境 | S11：全部 10 个主智能体／规划器回调案例通过；S12：历史谱系、来源及无关／间接父节点拒绝通过；S3：无效 kind／空白 summary 拒绝、部分错误及省略／空值／null 来源关联通过 |
+| `go build ./...`、`go vet ./...`、差异空白检查 | 通过 |
+
+`TestStockMetadataRuntimePostgres` 与 `TestEngineTerminalProofPersistsAuthenticReceipt` 要求显式提供选择 `scopeweaver_test_*` 的可抛弃 `ARTEX_TEST_DSN`。拥有数据库的测试角色可以具有 **NOCREATEDB**，与 `make test-db` 一致。每份测试数据创建自己的 `stock_*` schema，并将所有池化连接的 `search_path` 仅设置为该 schema，保留所选数据库与其他连接选项。测试在使用 `CASCADE` 仅删除自己的 schema 前关闭存储区；清理错误会报告，但删除 schema 本身无法侦测空闲泄漏连接。`TestStockFixtureIsolationAndCleanup` 检查多个池化连接、父表不可见／保留及 schema 删除。可用 `go test ./server -run '^Test(WireTools|StockMetadataRuntimePostgres|StockFixtureIsolationAndCleanup|EngineTerminalProofPersistsAuthenticReceipt)$' -count=2` 重现隔离。正式数据库权限与 schema 不变。这项测试数据修复取代了先前对子数据库／CREATE DATABASE 的要求。
+
+首次 S3 测试框架尝试在建立 hint 时使用无效状态 `open` 而失败；在通过的重跑前，测试数据修正为既有 `active` 状态，没有产品／断言变更。最终 S7 设置在其他测试填入父数据库后也通过了两次。这些检查确立合约与兼容行为，不能说明先前真实 Flash 重复／超时的原因。此分支完整 `go test ./...`、前端／浏览器检查及确切候选版全部七项必要 CI 工作仍待完成；不宣称已合并或发行。
+
 <a id="shared-runtime-fixes-from-standalone-cli-verification-2026-10-17"></a>
 
 ## 独立 CLI 验证发现的共用运行时修正（2026-10-17）
