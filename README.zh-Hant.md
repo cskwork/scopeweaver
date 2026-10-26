@@ -48,6 +48,24 @@
 
 ---
 
+<a id="test-scope-and-asset-rules"></a>
+## 測試範圍與資產規則
+
+公司/任務範圍是宣告的測試範圍：用於提示詞指引、資產記錄和涵蓋率篩選，並非網路邊界。
+要阻止 WebFetch、Bash 等範圍外的工具呼叫，必須設定**攔截規則**。除內建的破壞性命令規則外，
+預設沒有其他規則。真正的網路邊界需要 ScopeWeaver 外部的對外連線控制，例如防火牆或強制使用的代理伺服器。
+
+資產允許/封鎖規則僅限制記錄（`insert_assets`、`add_intent` 和代理程式範圍寫入），不阻止網路呼叫。
+任務規則在**任務 → 概覽**中編輯，全域封鎖規則在**系統 → 攔截 → 資產**中編輯。
+任務規則僅在任務內生效；獨立聊天僅使用全域封鎖規則。封鎖規則優先於允許規則。
+
+**網域（部分比對）**（`fuzzy_domain`）以完整標籤比對。封鎖規則可比對任意位置的標籤：
+`.gov` 符合 `x.gov` 和 `x.gov.uk`，不符合 `a.government.com`。允許規則僅比對網域本身及其子網域：
+`juice-shop.internal` 允許 `a.juice-shop.internal`，不允許 `juice-shop.internal2` 或
+`juice-shop.internal.attacker.com`。現有規則可能會拒絕先前可通過的資產新增。
+代理程式的 `add_task_scope` 和 worker 自動新增範圍也必須通過目前的資產規則；讀取規則失敗時，
+會拒絕寫入或略過新增。UI 中的手動範圍編輯和既有範圍資料列維持不變。
+
 <a id="approval-records"></a>
 
 ## 核准記錄

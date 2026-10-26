@@ -155,6 +155,58 @@ func TestStopDBCompletesWhileInsertBlocked(t *testing.T) {
 	}
 }
 
+// Restore runs before the writer starts. StopDB must cancel that SELECT too,
+// otherwise it waits forever for a writer that cannot reach its launch.
+func TestStopDBCompletesWhileRestoreBlocked(t *testing.T) {
+	pg, err := db.Open(dbtest.DSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pg.Close()
+	tx, err := pg.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec("LOCK TABLE server_logs IN ACCESS EXCLUSIVE MODE"); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	s := newTestSink()
+	var background sync.WaitGroup
+	restored := make(chan struct{})
+	go func() {
+		defer close(restored)
+		s.SetDB(t.Context(), pg, &background)
+	}()
+	defer func() {
+		_ = tx.Rollback()
+		<-restored
+		s.StopDB(pg)
+		background.Wait()
+	}()
+	waitFor(t, "restore blocked on the held lock", func() bool {
+		var blocked bool
+		return pg.QueryRow(`SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE datname=current_database() AND wait_event_type='Lock'
+			AND query LIKE 'SELECT id, created_at, level, tag, text%')`).Scan(&blocked) == nil && blocked
+	})
+	stopped := make(chan struct{})
+	go func() {
+		s.StopDB(pg)
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		t.Fatal("StopDB did not cancel the blocked restore and join its writer")
+	}
+	<-restored
+	background.Wait()
+	if _, err := tx.Exec("SELECT 1"); err != nil {
+		t.Fatalf("test lock must remain held until StopDB completes: %v", err)
+	}
+}
+
 // A different manager's DB (a second pool to the same database) must not stop
 // the sink bound to the first: persistence continues (verified by a unique
 // owned marker, not by global row counts) until the exact owner stops.

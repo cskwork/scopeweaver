@@ -206,6 +206,9 @@ export const english: Record<keyof typeof englishSource, string> = {
 import type { en as interfaceSource } from "./interface.ts";
 
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  fuzzyDomainHelp: "ドメイン（部分一致）は、ラベル全体で照合します。ブロック：.gov は x.gov と x.gov.uk に一致しますが、a.government.com には一致しません。許可：juice-shop.internal はそれ自体と a.juice-shop.internal に一致しますが、juice-shop.internal2 や juice-shop.internal.attacker.com には一致しません。",
+  assetRulesBoundaryNote: "資産の許可／ブロックルールは、記録（insert_assets、add_intent、エージェントによるスコープの書き込み）のみを制限し、ネットワーク呼び出しは止めません。タスクルールはタスク内でのみ適用され、チャットにはグローバルのブロックルールのみが適用されます。",
+  scopeBoundaryNote: "会社／タスクのスコープは、宣言したテスト範囲です。プロンプトの指針と、資産の記録・カバレッジのフィルターに使われ、ネットワーク境界ではありません。範囲外へのツール呼び出し（WebFetch、Bash など）を止めるには、インターセプトルールが必要です。組み込みの破壊的コマンドルール以外は、既定では設定されていません。",
   chatContext: "コンテキスト",
   chatContextEstimated: "推定",
   chatContextMeasured: "測定済み",
@@ -943,7 +946,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m0629: "ヒット率",
   m0630: "LLM の使用量はまだありません（未呼び出し、または記録の書き込み中です）。",
   m0631: "テストのスコープ",
-  m0632: "（カバレッジの分母と許可の境界、合計",
+  m0632: "（カバレッジの分母、合計",
   m0633: "企業名または ID",
   m0634: "例: 10.0.0.1 または 10.0.0.0/24",
   m0635: "例: ICP 登録番号",
@@ -1499,9 +1502,8 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m1164: "資産の禁止ルール「{p0}」を削除しますか？",
   m1165: "ルールを削除しました",
   m1166: "資産のブロック",
-  m1167: "全体の資産禁止リスト: 一致するドメイン、IP、URL、サブネットに対するすべての操作を禁止します",
-  m1168:
-    "ドメイン、IP、URL の完全一致・部分一致、および CIDR サブネットに対応しています。既定の部分一致ルールは、政府（.gov / .gov.cn）と教育（.edu / .edu.cn）のサイトをブロックします。",
+  m1167: "グローバル資産ブロックリスト：一致するドメイン、IP、URL、サブネットの資産記録をフィルターします",
+  m1168: "ドメイン、IP、URL の完全一致／部分一致と CIDR サブネットに対応しています。組み込みの資産ブロックルールは、政府（.gov / .gov.cn）と教育（.edu / .edu.cn）のドメインを対象とします。",
   m1169: "新しいルール",
   m1170: "資産の禁止ルールはまだありません",
   m1171: "最初のルールを作成",
@@ -1510,7 +1512,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m1174: "有効",
   m1175: "資産の禁止ルールを編集",
   m1176: "新しい資産の禁止ルール",
-  m1177: "一致する対象資産を全体でブロックします",
+  m1177: "このルールに一致する資産は、すべてのタスクとチャットで記録されません。ネットワーク呼び出しは止めません",
   m1178: "照合の種類",
   m1179: "CIDR サブネット。例: 192.168.0.0/16",
   m1180: "部分一致: 対象がこの値を含む",

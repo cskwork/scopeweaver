@@ -135,8 +135,11 @@ func TestManagerCloseBoundsStalledSchedulerWithoutClosingDatabase(t *testing.T) 
 		t.Fatal("successful Close left its database pool open")
 	}
 	var states int
-	if err := watch.QueryRow("SELECT count(*) FROM scheduler_state").Scan(&states); err != nil || states != 5 {
-		t.Fatalf("scheduler did not finish its watermark writes before close: states=%d err=%v", states, err)
+	if err := watch.QueryRow("SELECT count(*) FROM scheduler_state").Scan(&states); err != nil || states != 1 {
+		t.Fatalf("canceled scheduler must finish only its in-flight watermark: states=%d err=%v", states, err)
 	}
-	t.Log("concurrent Close timed out without closing the DB; held SQL released, all five watermarks persisted, and concurrent retries joined before pool closure")
+	if value, err := watch.GetSchedState(schedKeyLastFinding); err != nil || value != "0" {
+		t.Fatalf("in-flight finding watermark was not completed: value=%q err=%v", value, err)
+	}
+	t.Log("concurrent Close timed out without closing the DB; held SQL released, only the in-flight watermark persisted, and concurrent retries joined before pool closure")
 }

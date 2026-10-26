@@ -228,6 +228,9 @@ export const english: Record<keyof typeof englishSource, string> = {
 };
 import type { en as interfaceSource } from './interface.ts';
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  fuzzyDomainHelp: "Dominio (parcial) compara etiquetas completas. Bloqueo: .gov coincide con x.gov y x.gov.uk, pero no con a.government.com. Permiso: juice-shop.internal coincide consigo mismo y con a.juice-shop.internal, pero no con juice-shop.internal2 ni juice-shop.internal.attacker.com.",
+  assetRulesBoundaryNote: "Las reglas de permiso y bloqueo de activos solo limitan el registro (insert_assets, add_intent y escrituras del alcance por el agente), no las llamadas de red. Las reglas de tarea solo se aplican dentro de una tarea; el chat solo usa las reglas globales de bloqueo.",
+  scopeBoundaryNote: "El alcance de la empresa o tarea declara el alcance de las pruebas: orienta los prompts y filtra el registro de activos y la cobertura; no es un límite de red. Para bloquear llamadas a herramientas fuera del alcance (WebFetch, Bash…), se necesitan reglas de interceptación. No hay ninguna configurada de forma predeterminada, salvo las reglas integradas para comandos destructivos.",
   "chatContext": "Contexto",
   "chatContextEstimated": "estimado",
   "chatContextMeasured": "medido",
@@ -940,7 +943,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m0629": "Tasa de aciertos",
   "m0630": "Aún no hay uso LLM (no se han realizado llamadas o los registros aún se están escribiendo).",
   "m0631": "Alcance de prueba",
-  "m0632": "(denominador de cobertura y límite de autorización, total",
+  "m0632": "(denominador de cobertura, total",
   "m0633": "Nombre o ID de empresa",
   "m0634": "Por ejemplo, 10.0.0.1 o 10.0.0.0/24",
   "m0635": "Por ejemplo, un número de registro ICP",
@@ -1475,8 +1478,8 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m1164": "¿Eliminar regla de bloqueo de activos «{p0}»?",
   "m1165": "Regla eliminada",
   "m1166": "Bloqueo de activos",
-  "m1167": "Lista global de bloqueo de activos: los dominios, IP, URL y subredes coincidentes se bloquean para todas las operaciones",
-  "m1168": "Admite coincidencias exactas/parciales de dominio, IP y URL, y subredes CIDR. Las reglas parciales predeterminadas bloquean sitios gubernamentales (.gov / .gov.cn) y educativos (.edu / .edu.cn).",
+  "m1167": "Lista global de bloqueo de activos: filtra el registro de activos de dominios, IP, URL y subredes coincidentes",
+  "m1168": "Admite coincidencias exactas o parciales de dominios, IP y URL, y subredes CIDR. Las reglas integradas de bloqueo de activos abarcan los dominios gubernamentales (.gov / .gov.cn) y educativos (.edu / .edu.cn).",
   "m1169": "Nueva regla",
   "m1170": "Aún no hay reglas de bloqueo de activos",
   "m1171": "Crear primera regla",
@@ -1485,7 +1488,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m1174": "Activado",
   "m1175": "Editar regla de bloqueo de activos",
   "m1176": "Nueva regla de bloqueo de activos",
-  "m1177": "Los activos de destino coincidentes se bloquean globalmente",
+  "m1177": "Los activos que coincidan con esta regla no se registran en ninguna tarea ni chat; las llamadas de red no se bloquean",
   "m1178": "Tipo de coincidencia",
   "m1179": "Subred CIDR, p. ej., 192.168.0.0/16",
   "m1180": "Coincidencia parcial: el objetivo contiene este valor",

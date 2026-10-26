@@ -62,8 +62,8 @@ func StartLogCapture() { log.SetOutput(logSink) }
 // SetDB wires a postgres DB into the sink once (idempotent). It:
 //  1. Restores the last 100 log rows from DB into the ring so the /logs page
 //     shows history immediately after restart.
-//  2. Starts an async goroutine that persists every subsequent log line to DB.
-func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
+//  2. Starts an async writer tracked by the server's background drain.
+func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB, background ...*sync.WaitGroup) {
 	if pg == nil {
 		return
 	}
@@ -71,20 +71,25 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 		ch := make(chan dbWriteReq, 2000)
 		stop := make(chan struct{})
 		done := make(chan struct{})
-		// writeCtx bounds every DB operation the sink performs (restore and
-		// inserts): StopDB cancels it, so a stuck query cannot make the shutdown
-		// join unbounded.
-		writeCtx, writeCancel := context.WithCancel(ctx)
+		// Server cancellation stops dequeuing but lets an in-flight insert finish
+		// under the background drain. StopDB explicitly cancels both restore and
+		// insert SQL so direct manager close can join without waiting for a lock.
+		writeCtx, writeCancel := context.WithCancel(context.WithoutCancel(ctx))
+		restoreCtx, restoreCancel := context.WithCancel(ctx)
+		defer restoreCancel()
 		s.mu.Lock()
 		s.dbCh = ch
-		s.dbWriteCancel = writeCancel
+		s.dbWriteCancel = func() {
+			restoreCancel()
+			writeCancel()
+		}
 		s.dbStop = stop
 		s.dbDone = done
 		s.dbPG = pg
 		s.mu.Unlock()
 
 		// Restore last 100 rows from DB → prepend to ring as history context.
-		if logs, err := pg.RecentLogsContext(writeCtx, 100); err == nil && len(logs) > 0 {
+		if logs, err := pg.RecentLogsContext(restoreCtx, 100); err == nil && len(logs) > 0 {
 			s.mu.Lock()
 			restored := make([]LogLine, 0, len(logs))
 			for _, l := range logs {
@@ -109,14 +114,16 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 		// Async writer: drains the queue into server_logs. Errors go to stderr
 		// directly (no recursive logging). It exits on stop, on ctx.Done, or if
 		// the channel is ever closed, and always closes done so StopDB joins
-		// deterministically. Inserts run under writeCtx so a stuck query is
-		// canceled at shutdown instead of blocking the join forever.
-		go func() {
+		// deterministically. StopDB cancels writeCtx to bound stuck inserts.
+		writer := func() {
 			defer close(done)
+			defer writeCancel()
 			for {
 				select {
 				case req, ok := <-ch:
-					if !ok {
+					// Shutdown may leave queued or later lines out of the DB;
+					// Write still passes every line through to stderr.
+					if !ok || ctx.Err() != nil || writeCtx.Err() != nil {
 						return
 					}
 					id, err := pg.InsertLogContext(writeCtx, req.ll.Level, req.ll.Tag, req.ll.Text)
@@ -139,7 +146,12 @@ func (s *logSinkT) SetDB(ctx context.Context, pg *db.DB) {
 					return
 				}
 			}
-		}()
+		}
+		if len(background) > 0 && background[0] != nil {
+			background[0].Go(writer)
+		} else {
+			go writer()
+		}
 	})
 }
 
