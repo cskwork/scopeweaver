@@ -48,6 +48,24 @@
 
 ---
 
+<a id="test-scope-and-asset-rules"></a>
+## 测试范围与资产规则
+
+公司/任务范围是声明的测试范围：用于提示词指导、资产记录和覆盖度筛选，并非网络边界。
+要阻止 WebFetch、Bash 等范围外的工具调用，必须配置**拦截规则**。除内置的破坏性命令规则外，
+默认没有其他规则。真正的网络边界需要 ScopeWeaver 外部的出站控制，例如防火墙或强制使用的代理。
+
+资产允许/阻止规则仅限制记录（`insert_assets`、`add_intent` 和代理范围写入），不阻止网络调用。
+任务规则在**任务 → 概览**中编辑，全局阻止规则在**系统 → 拦截 → 资产**中编辑。
+任务规则仅在任务内生效；独立聊天仅使用全局阻止规则。阻止规则优先于允许规则。
+
+**域名（部分匹配）**（`fuzzy_domain`）按完整标签匹配。阻止规则可匹配任意位置的标签：
+`.gov` 匹配 `x.gov` 和 `x.gov.uk`，不匹配 `a.government.com`。允许规则仅匹配域名本身及其子域名：
+`juice-shop.internal` 允许 `a.juice-shop.internal`，不允许 `juice-shop.internal2` 或
+`juice-shop.internal.attacker.com`。现有规则可能会拒绝此前可通过的资产插入。
+代理的 `add_task_scope` 和 worker 自动添加范围也必须通过当前资产规则；读取规则失败时，
+会拒绝写入或跳过添加。UI 中的手动范围编辑和已有范围行保持不变。
+
 <a id="approval-records"></a>
 
 ## 审批记录

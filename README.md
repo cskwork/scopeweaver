@@ -68,6 +68,27 @@ Original Chinese screenshots remain in [the screenshots directory](screenshots),
 
 ---
 
+## Test scope and asset rules
+
+Company/task scope is the declared test scope: prompt-level guidance plus an asset-recording
+and coverage filter, not a network boundary. To block out-of-scope tool calls such as WebFetch
+or Bash, configure **Interception rules**. No such rules are configured by default beyond the
+built-in destructive-command rules. A real network boundary requires egress control outside
+ScopeWeaver, such as a firewall or an enforced proxy.
+
+Asset allow/block rules gate recording (`insert_assets`, `add_intent` and agent scope writes),
+not network calls. Edit task rules in **Task → Overview** and global block rules in
+**System → Intercept → Assets**. Task rules apply only inside a task; standalone chat uses
+global block rules only. Blocks take precedence over allows.
+
+**Domain (partial)** (`fuzzy_domain`) matches whole labels. Block rules match labels anywhere:
+`.gov` matches `x.gov` and `x.gov.uk`, not `a.government.com`. Allow rules match only the domain
+or its subdomains: `juice-shop.internal` allows `a.juice-shop.internal`, not
+`juice-shop.internal2` or `juice-shop.internal.attacker.com`. Existing rules may reject asset
+inserts that previously passed. Agent `add_task_scope` and worker automatic scope additions
+must pass the current asset gate; rule-read errors reject the write or skip the addition.
+Manual UI scope edits and pre-existing scope rows remain unchanged.
+
 ## Approval records
 
 The global "Approval records" view, the in-task "Interception approval" panel, and the approval

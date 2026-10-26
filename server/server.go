@@ -72,6 +72,8 @@ type Server struct {
 	chatBusy      map[string]bool
 	chatClosing   bool
 	chatWG        sync.WaitGroup
+	httpWG        sync.WaitGroup
+	chatDrainOnce sync.Once
 	chatDrainDone chan struct{}
 	chatDrainErr  error
 	// chatCancel holds the cancel func for each in-flight conversation run (keyed by
@@ -125,7 +127,9 @@ type Server struct {
 	// channel coalesces enqueue bursts; the database remains the source of truth.
 	archiveWake chan struct{}
 	archiveWG   sync.WaitGroup
-	side        *sideQuestionState
+	// Startup and periodic DB users must finish before the manager closes stores.
+	backgroundWG sync.WaitGroup
+	side         *sideQuestionState
 }
 
 // provEntry is a cached provider + its config for one LLM profile id.
@@ -165,8 +169,10 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 		chatCancel: map[string]context.CancelCauseFunc{}, triggerQ: map[string][]triggeredRun{},
 		triggerActive: map[string]int{}, triggerCfg: map[string]triggerBehavior{},
 		profChatAgents: map[int64]*agent.ChatAgent{},
-		provByProfile:  map[int64]*provEntry{}, llmHealth: newLLMHealthRegistry(m.pg),
-		taskAgents: map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+		provByProfile:  map[int64]*provEntry{},
+		taskAgents:     map[string]*taskAgentBundle{}, archiveWake: make(chan struct{}, 1)}
+	s.ctx = agent.WithCallbackOwner(s.ctx, s.reserveBackgroundWork)
+	s.llmHealth = newLLMHealthRegistry(m.pg, s.startBackgroundWork)
 	// Recovery must finish before any internal producer or task runtime starts.
 	if err := s.recoverChatControls(); err != nil {
 		return nil, fmt.Errorf("chat startup recovery: %w", err)
@@ -245,15 +251,15 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 		if err := s.seedFindingRetester(); err != nil {
 			log.Printf("[retester] seed: %v", err)
 		}
-		go s.evidenceStore().RunGC(s.ctx)
+		s.backgroundWG.Go(func() { s.evidenceStore().RunGC(s.ctx) })
 		s.seedPythonInterpreter() // Detect and store the Python interpreter for custom scripts at startup, only when empty.
 		// Finding notification delivery runs independently beside Scheduler: its three-second responsiveness
 		// differs from trigger scheduling, and a stuck delivery must not block agent triggers.
-		go newNotifier(s).Run(s.ctx)
+		s.backgroundWG.Go(func() { newNotifier(s).Run(s.ctx) })
 		// Fill the tool cache for any enabled MCP that has none yet (notably the
 		// seeded browser MCP on first run). Async so it never blocks startup.
-		go s.discoverEmptyMCPsOnStartup()
-		logSink.SetDB(ctx, m.pg) // restore last 100 log rows and enable async persistence
+		s.backgroundWG.Go(s.discoverEmptyMCPsOnStartup)
+		logSink.SetDB(ctx, m.pg, &s.backgroundWG) // restore last 100 log rows and enable async persistence
 	}
 	// precedence: persisted DB config > env.
 	if cfg, ok := s.loadLLMConfig(); ok {
@@ -275,7 +281,7 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 	if err := s.resumeChatControls(); err != nil {
 		log.Printf("[chat] %v", err)
 	}
-	go s.reconcileConcurrency()
+	s.backgroundWG.Go(s.reconcileConcurrency)
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback approval judges commands that match no interception rule.
 	if m.pg != nil {
@@ -993,7 +999,7 @@ func (s *Server) Handler() http.Handler {
 	root := http.NewServeMux()
 	root.Handle("/api/", api)
 	root.Handle("/", s.webuiHandler())
-	return root
+	return s.trackHTTP(root)
 }
 
 // --- handlers ---
@@ -1646,6 +1652,12 @@ func (s *Server) validateTaskProfileIDs(ids []int64) error {
 	return nil
 }
 
+// HTTP Close can leave handlers running; serialize their background admission
+// with DrainChats so none can register after its Wait begins.
+func (s *Server) startBackgroundReconcile() {
+	s.startBackgroundWork(s.reconcileConcurrency)
+}
+
 func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.m.Task(r.PathValue("id"))
 	if !ok {
@@ -1681,7 +1693,7 @@ func (s *Server) updateTaskLLMProfiles(w http.ResponseWriter, r *http.Request) {
 	// live slot and postpones an unavailable task's pause/queue transition until
 	// the call returns; a nudge lets an idle running task resume promptly.
 	t.Notify()
-	go s.reconcileConcurrency()
+	s.startBackgroundReconcile()
 	llmState := t.llmStateSnapshot()
 	result := map[string]any{
 		"id": t.ID, "llm_profile_ids": llmState.ProfileIDs,
@@ -3595,7 +3607,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Reconcile immediately: disabling admits all queued tasks; raising the limit fills slots without waiting for a tick.
-		go s.reconcileConcurrency()
+		s.startBackgroundReconcile()
 	}
 	if req.PythonInterp != nil {
 		if err := s.m.pg.SetSetting(settingPythonInterp, strings.TrimSpace(*req.PythonInterp)); err != nil {

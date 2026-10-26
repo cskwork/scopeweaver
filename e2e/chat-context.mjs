@@ -1,6 +1,9 @@
 import {request} from "playwright";
+import {randomUUID} from "node:crypto";
+import {assertCurrentSummaryFocus} from "./chat-summary-requests.mjs";
 import {waitChatState} from "./chat-controls.mjs";
 import { LOCALES, namespaceMessages } from "./locale-resources.mjs";
+import {withLocaleQuery} from "../web/src/i18n/config.ts";
 const labels = namespaceMessages("interface");
 async function closeContext(page, label) {
  const button=page.getByRole("button",{name:label,exact:true});
@@ -13,7 +16,9 @@ const actionURL=(base,action)=>{const [p,q]=base.split("?");return `${p}/${actio
 export async function runChatContextChecks({base,token,fixture,step,check,openPage}){
  const api=await request.newContext({baseURL:base,extraHTTPHeaders:{Authorization:`Bearer ${token}`}});
  for(const locale of LOCALES)for(const width of [1440,390])for(const surface of ["standalone","task"]){
-  if(process.env.CHAT_CONTEXT_CASE&&`${locale}/${width}/${surface}`!==process.env.CHAT_CONTEXT_CASE)continue;
+  const caseName=`${locale}/${width}/${surface}`;
+  if(process.env.CHAT_CONTEXT_CASE&&!process.env.CHAT_CONTEXT_CASE.split(",").map(value=>value.trim()).includes(caseName))continue;
+  const caseMarker=`context-case-${randomUUID()}`;
   const t=labels[locale];let path,url;
   await fixture.setBudget(64);
   if(surface==="standalone"){const r=await api.post("/api/conversations",{data:{agent_key:"auto",title:"Context fixture"}});check(r.ok(),await r.text());const c=await r.json();path=`/api/conversations/${c.id}/controls`;url=`${base}/chat?c=${c.id}`}
@@ -22,15 +27,32 @@ export async function runChatContextChecks({base,token,fixture,step,check,openPa
   try{await step(`[${locale}/${width}/${surface}] context visibility, capacity switch and manual compaction`,async()=>{
    await p.goto(url);const input=p.locator("textarea[data-chat-draft]").first();await input.waitFor();await p.locator("[data-chat-context-trigger]").waitFor();
    const calls=await fixture.calls();await input.fill("/context");await p.getByRole("button",{name:t.m0073,exact:true}).click();await p.locator("[data-chat-context-panel]").waitFor();await p.getByText(t.chatContextUnknown,{exact:true}).last().waitFor();check(await p.locator("[data-chat-compact]").isDisabled(),"unobserved context allows compact");check(await fixture.calls()===calls,"/context called the provider");await closeContext(p,t.chatContextClose);
-   for(let i=0;i<5;i++){await input.fill(`context turn ${i}: `+"preserve detail ".repeat(120));if(i===0)await fixture.holdNext();await p.getByRole("button",{name:t.m0073,exact:true}).click();
+   for(let i=0;i<5;i++){await input.fill(`context turn ${i}: `+(i===0?`${caseMarker} `:"")+"preserve detail ".repeat(120));if(i===0)await fixture.holdNext();await p.getByRole("button",{name:t.m0073,exact:true}).click();
     if(i===0){await waitChatState(api,path,state=>!!state.active);await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();if(process.env.CHAT_CONTEXT_MUTATION)await p.locator("[data-chat-compact]").evaluate(button=>button.disabled=false);check(await p.locator("[data-chat-compact]").isDisabled(),"busy Compact now is enabled");await closeContext(p,t.chatContextClose);await fixture.release()}
     await waitChatState(api,path,state=>!state.active&&state.latest_run_status==="completed");await p.getByRole("button",{name:t.chatEdit,exact:true}).nth(i).waitFor();
    }
    await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();await p.getByText("fixture-64",{exact:true}).waitFor();await p.waitForFunction(()=>{const panel=document.querySelector("[data-chat-context-panel]");if(!panel)return false;const box=panel.getBoundingClientRect();return box.y>=0&&box.x>=0&&box.right<=innerWidth+1});const box=await p.locator("[data-chat-context-panel]").boundingBox();check(box&&box.y>=0&&box.x>=0&&box.x+box.width<=width+1,`context panel extends outside the viewport: ${JSON.stringify(box)}`);check(await p.getByLabel(t.chatContextKeep,{exact:true}).inputValue()==="2","default retention changed");
    const before=await (await api.get(actionURL(path,"context"))).json();check(before.window===64000&&before.measured_input===80,"provider input anchor missing");const count=await fixture.calls();await fixture.setBudget(32);
    const switched=await (await api.get(actionURL(path,"context"))).json();check(switched.window===32000&&switched.measured_input===0&&switched.estimated,"stale anchor survived model switch");check(await fixture.calls()===count,"capacity inspection called provider");await p.getByText("fixture-32",{exact:true}).waitFor();
-   const state=await (await api.get(path)).json();await p.getByLabel(t.chatContextFocus,{exact:true}).fill("Preserve URLs");await p.locator("[data-chat-compact]").click();await p.getByText(t.chatContextSuccess,{exact:true}).waitFor();
-   const compacted=await (await api.get(actionURL(path,"context"))).json();check(Number(compacted.history_revision)===Number(state.history_revision)+1,"compact did not publish revision");check(compacted.summary&&compacted.used<switched.used,"compact did not reduce working context");check(compacted.categories.every(category=>category.estimated),"local categories presented as measured");check(compacted.categories.some(category=>category.name==="system")&&compacted.categories.some(category=>category.name==="conversation"),"manual compaction lost category attribution");check(compacted.before_tokens===switched.categories.reduce((sum,category)=>sum+category.tokens,0),"before/after mixes measured usage with estimates");check((await fixture.requests()).at(-1).includes("Preserve URLs"),"focus missing from summary request");
+   const state=await (await api.get(path)).json();const expectedFocus="Preserve URLs";await p.getByLabel(t.chatContextFocus,{exact:true}).fill(expectedFocus);
+   const stripFocus=process.env.CHAT_CONTEXT_STRIP_FOCUS_CASE===caseName;
+   const compactURL=withLocaleQuery(`${base}${actionURL(path,"compact")}`,locale);let focusMutation;
+   const stripCurrentFocus=async route=>{
+    const request=route.request();if(request.method()!=="POST")return route.continue();
+    check(!focusMutation,"current compact POST mutated more than once");
+    const original=request.postDataJSON();check(original.focus===expectedFocus,"focus mutation requires original expected focus");
+    const {focus,...mutated}=original;focusMutation={case:caseName,marker:caseMarker,url:request.url(),original,mutated};
+    console.log("context-focus-mutation",JSON.stringify(focusMutation));
+    await route.continue({postData:JSON.stringify(mutated)});
+   };
+   if(stripFocus)await p.route(compactURL,stripCurrentFocus);
+   const requestCursor=(await fixture.requests()).length;
+   await p.locator("[data-chat-compact]").click();await p.getByText(t.chatContextSuccess,{exact:true}).waitFor();
+   if(stripFocus){await p.unroute(compactURL,stripCurrentFocus);check(!!focusMutation,"designated compact POST was not focus-mutated")}
+   const compacted=await (await api.get(actionURL(path,"context"))).json();check(Number(compacted.history_revision)===Number(state.history_revision)+1,"compact did not publish revision");check(compacted.summary&&compacted.used<switched.used,"compact did not reduce working context");check(compacted.categories.every(category=>category.estimated),"local categories presented as measured");check(compacted.categories.some(category=>category.name==="system")&&compacted.categories.some(category=>category.name==="conversation"),"manual compaction lost category attribution");check(compacted.before_tokens===switched.categories.reduce((sum,category)=>sum+category.tokens,0),"before/after mixes measured usage with estimates");const captured=await fixture.requests();
+   console.log("context-summary-capture",JSON.stringify({case:caseName,marker:caseMarker,cursor:requestCursor,requestCount:captured.length,focusMutated:!!focusMutation,requests:captured.slice(requestCursor)}));
+   const attempts=assertCurrentSummaryFocus(captured,{cursor:requestCursor,marker:caseMarker,focus:expectedFocus});
+   console.log("context-summary-attempts",JSON.stringify({case:caseName,marker:caseMarker,cursor:requestCursor,indices:attempts.map(attempt=>attempt.index)}));
    if(locale==="en"&&surface==="standalone"&&process.env.SCOPEWEAVER_E2E_ARTIFACTS){await p.locator("[data-chat-context-panel]").evaluate(panel=>panel.scrollTop=0);await p.screenshot({path:`${process.env.SCOPEWEAVER_E2E_ARTIFACTS}/context-${width}.png`})}
    if(process.env.CHAT_CONTEXT_DEBUG)await p.evaluate(()=>{window.__contextDebug=[];document.addEventListener("focusin",e=>window.__contextDebug.push(["focus",e.target.tagName,e.target.getAttribute("aria-label")]),true);new MutationObserver(()=>{const t=document.querySelector("[data-chat-context-trigger]");window.__contextDebug.push(["state",t?.getAttribute("data-state"),!!document.querySelector("[data-chat-context-panel]")])}).observe(document.body,{subtree:true,attributes:true,attributeFilter:["data-state"],childList:true})});
    await closeContext(p,t.chatContextClose);const posted=[];p.on("request",r=>{if(r.method()==="POST"&&new URL(r.url()).pathname.includes("/controls/inputs"))posted.push(r.url())});await input.fill("/usage");await p.getByRole("button",{name:t.m0073,exact:true}).click();await p.locator("[data-chat-context-panel]").waitFor();check(posted.length===0,"/usage became a model prompt");await closeContext(p,t.chatContextClose);await input.fill("/compress Preserve tool details 1");await p.getByRole("button",{name:t.m0073,exact:true}).click();await p.getByText(t.chatContextSuccess,{exact:true}).waitFor();const compressedAgain=await (await api.get(actionURL(path,"context"))).json();check(Number(compressedAgain.history_revision)===Number(compacted.history_revision)+1,"/compress did not use the context endpoint");check(posted.length===0,"/compress became an admitted model prompt");

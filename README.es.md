@@ -68,6 +68,29 @@ Las capturas originales en chino permanecen en [el directorio de capturas](scree
 
 ---
 
+## Alcance de las pruebas y reglas de activos
+
+El alcance de empresa/tarea declara el alcance de las pruebas: sirve de guía en los prompts y de filtro
+para el registro de activos y la cobertura, y no constituye una barrera de red. Para bloquear llamadas
+a herramientas fuera del alcance, como WebFetch o Bash, configura **reglas de intercepción**. De forma
+predeterminada solo están configuradas las reglas integradas para comandos destructivos. Una barrera
+de red real requiere controles de salida externos a ScopeWeaver, como un cortafuegos o un proxy de uso obligatorio.
+
+Las reglas de permiso/bloqueo de activos limitan el registro (`insert_assets`, `add_intent` y las escrituras
+de alcance del agente), no las llamadas de red. Edita las reglas de tarea en **Tarea → Resumen** y las
+reglas globales de bloqueo en **Sistema → Intercepción → Activos**. Las reglas de tarea solo se aplican
+dentro de una tarea; el chat independiente solo usa las reglas globales de bloqueo. El bloqueo tiene
+prioridad sobre el permiso.
+
+**Dominio (parcial)** (`fuzzy_domain`) compara etiquetas completas. Las reglas de bloqueo coinciden con
+etiquetas en cualquier posición: `.gov` coincide con `x.gov` y `x.gov.uk`, pero no con `a.government.com`.
+Las reglas de permiso solo coinciden con el dominio o sus subdominios: `juice-shop.internal` permite
+`a.juice-shop.internal`, pero no `juice-shop.internal2` ni `juice-shop.internal.attacker.com`. Las reglas
+existentes pueden rechazar inserciones de activos que antes se aceptaban. El `add_task_scope` del agente
+y las adiciones automáticas de alcance del worker también deben superar las reglas de activos vigentes;
+si falla la lectura de las reglas, se rechaza la escritura o se omite la adición. La edición manual del
+alcance en la interfaz y las filas de alcance preexistentes no cambian.
+
 ## Registros de aprobación
 
 La vista global «Registros de aprobación», el panel de tarea «Aprobación de intercepción» y las tarjetas de aprobación

@@ -206,6 +206,9 @@ export const english: Record<keyof typeof englishSource, string> = {
 import type { en as interfaceSource } from "./interface.ts";
 
 const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
+  fuzzyDomainHelp: "網域（部分比對）按完整標籤比對。封鎖：.gov 比對 x.gov 和 x.gov.uk，不比對 a.government.com。允許：juice-shop.internal 比對自身和 a.juice-shop.internal，不比對 juice-shop.internal2 或 juice-shop.internal.attacker.com。",
+  assetRulesBoundaryNote: "資產允許／封鎖規則僅限制記錄（insert_assets、add_intent 和代理範圍寫入），不阻止網路呼叫。任務規則僅在任務內生效；聊天僅使用全域封鎖規則。",
+  scopeBoundaryNote: "公司／任務範圍是宣告的測試範圍：用於提示詞指引、資產記錄和覆蓋度篩選，並非網路邊界。阻止範圍外的工具呼叫（WebFetch、Bash 等）需要設定攔截規則；除內建的破壞性命令規則外，預設沒有其他規則。",
   chatContext: "上下文",
   chatContextEstimated: "估算",
   chatContextMeasured: "實測",
@@ -927,7 +930,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m0629: "命中率",
   m0630: "暫無 LLM 用量（任務尚未產生呼叫，或記錄仍在寫入）。",
   m0631: "測試範圍",
-  m0632: "（覆蓋度分母 + 授權邊界，共",
+  m0632: "（覆蓋度分母，共",
   m0633: "公司名或 id",
   m0634: "如 10.0.0.1 或 10.0.0.0/24",
   m0635: "如 京ICP備12345678號-1",
@@ -1470,9 +1473,8 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m1164: "確定刪除資產攔截規則「{p0}」？",
   m1165: "規則已刪除",
   m1166: "資產攔截",
-  m1167: "全域資產黑名單：命中的域名 / IP / URL / 網段將被攔截，不對其執行任何操作",
-  m1168:
-    "支援全等與模糊匹配的域名 / IP / URL，以及 CIDR 網段；預設內建模糊攔截政府（.gov / .gov.cn）與教育（.edu / .edu.cn）網站",
+  m1167: "全域資產封鎖清單：篩選符合網域、IP、URL 和子網路的資產記錄",
+  m1168: "支援網域、IP、URL 的精確／部分比對及 CIDR 子網路。內建資產封鎖規則涵蓋政府（.gov / .gov.cn）及教育（.edu / .edu.cn）網域。",
   m1169: "新建規則",
   m1170: "暫無資產攔截規則",
   m1171: "新建第一條規則",
@@ -1481,7 +1483,7 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m1174: "啟用",
   m1175: "編輯資產攔截規則",
   m1176: "新建資產攔截規則",
-  m1177: "命中此規則的目標資產會被全域攔截",
+  m1177: "符合此規則的資產在所有任務和聊天中都不會被記錄；不阻止網路呼叫",
   m1178: "匹配型別",
   m1179: "CIDR 網段，形如 192.168.0.0/16",
   m1180: "模糊匹配：目標包含此內容即命中",

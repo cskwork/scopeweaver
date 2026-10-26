@@ -851,6 +851,7 @@ func (m *Manager) Close() error {
 		// The caller gets an explicit failure and may retry after it unwinds.
 		return err
 	}
+	m.enrich.Close()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.traffic != nil {
