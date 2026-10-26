@@ -1,0 +1,45 @@
+{
+  "format": 1,
+  "captured_utc": "2026-10-26T02:29:09.275740+00:00",
+  "repository": "https://github.com/cskwork/scopeweaver.git",
+  "status": "incomplete recovery checkpoints; not merge/release-ready",
+  "base_dev": "c9d9a9fc28c8168ba53988c749e85633ddc69f11",
+  "checkpoints": {
+    "pr40": {
+      "branch": "checkpoint/pr40-resume-20261026",
+      "sha": "3509fb14e24ddffbd58537c0f51ccc8b75c26570",
+      "preserved_file_sha256": {
+        "agent/legacy_stock_compat_test.go": "99eab31921ee0082d5b45a3305deef7d2209c925dd1572923260eb37ae432963",
+        "agent/testdata/legacy_add_intent_schemas.json": "6986c66f587410bb225069e73c4aec42af0ec84273e6f25f9432e71d4854e96e",
+        "agent/testdata/legacy_stock_prompts.json": "5b2ff787252b5609a93e58a23c47ab42d297d3b2fe68dddfcdcfe82ed5b26106",
+        "agent/tool_stock_schema.go": "e3f524bcd214b0b6ab208f3c9fcb4f3d1001af92f6e52476ae8641f4358d82f6",
+        "docs/VERIFICATION.md": "f86c813ec6b53e0040d405238a3bf9befc72361369086bbd3d9ab6212ace2d07",
+        "docs/ko/VERIFICATION.md": "54d5d7864b6054f4992eb41e55ee6d4814c45f800cc6415c5d7ce731e7aece9f",
+        "locale/zh-Hant.json": "1fc17af8a7d8a4f6f1860e2d5042ebce3ce582e3a357fde7f3c8760cb18ca1f6"
+      }
+    },
+    "pr46": {
+      "branch": "checkpoint/pr46-resume-20261026",
+      "sha": "42183237572c1def559bff9ccd834498c9fb2369"
+    }
+  },
+  "evidence_branch": "checkpoint/handoff-evidence-20261026",
+  "existing_remote_gh49": {
+    "branch": "feat/gh-49-opencode-sdk",
+    "sha": "b9781b2c4b92d9cef4a048f1c897616ce9ed8ff9"
+  },
+  "original_pr40_dirty_files_now_committed": 7,
+  "local_bundle_or_patch_required": false,
+  "remaining_gates": [
+    "six rejected operational prompt translations and remaining catalog integration",
+    "current dev reconciliation and whole-PR review/QA",
+    "GH49 SDK advisory disposition and historical CI attribution hold",
+    "required CI and maintainer final human check before each merge",
+    "combined exact-dev E2E before main/minor release"
+  ],
+  "do_not_replay": [
+    "rejected planner/worker translation generation via another provider",
+    "GH49 hosted diagnostic attempt (used1of1)",
+    "completed local SDK/frontend/E2E processes merely because an old checkpoint says running"
+  ]
+}

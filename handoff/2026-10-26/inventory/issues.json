@@ -1,0 +1,32 @@
+[
+  {
+    "number": 51,
+    "state": "CLOSED",
+    "title": "Scope enforcement is prompt-level only: planner self-expands task_scope, chat asset inserts are ungated, task allowlist is opt-in and substring-escapable",
+    "url": "https://github.com/cskwork/scopeweaver/issues/51"
+  },
+  {
+    "number": 50,
+    "state": "OPEN",
+    "title": "Company/task scope reads as an authorization boundary but is not technically enforced for tool execution",
+    "url": "https://github.com/cskwork/scopeweaver/issues/50"
+  },
+  {
+    "number": 49,
+    "state": "OPEN",
+    "title": "[Feature] Add support for OpenCode",
+    "url": "https://github.com/cskwork/scopeweaver/issues/49"
+  },
+  {
+    "number": 24,
+    "state": "CLOSED",
+    "title": "High Token Consumption – Recommended LLM Settings and Optimization Strategies",
+    "url": "https://github.com/cskwork/scopeweaver/issues/24"
+  },
+  {
+    "number": 15,
+    "state": "OPEN",
+    "title": "Proposal: extensible i18n and additional locales (Chinese, Japanese, Spanish)",
+    "url": "https://github.com/cskwork/scopeweaver/issues/15"
+  }
+]
