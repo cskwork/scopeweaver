@@ -26,6 +26,11 @@ var legacyStockSchemaHashes = map[string][]string{
 		"5c70e9aee8f4c0e48037dfcaf37d118eeafb1f90ef678070b9134ad70c32ecc8",
 		// Prior zh-Hans stock, same structural omission.
 		"4f1e846d98a2d864aaba60343c43646724370f4a4373ec126cce39315bbb00c0",
+		// Prior zh-Hant, Japanese and Spanish stock from dev 7af06f1,
+		// captured from the factory with the same structural omission.
+		"862675cbf388df6d6dbd00afa3ebb1d7ccd446da18b605094c5d9b2bc9323c8a",
+		"6375a464712bdb225d5b9c114047dcbb62ddfe5b34792b29fa113d27a1cad6ab",
+		"77e347d710add637c0e3a5401ff3f5a1f0c987d5baee46918c13d67ab44273b9",
 	},
 }
 
