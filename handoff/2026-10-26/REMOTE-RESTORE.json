@@ -1,0 +1,19 @@
+{
+  "verified_utc": "2026-10-26T02:39:12.705371+00:00",
+  "source": "fresh HTTPS clone from GitHub; no local repository or git alternates",
+  "repository": "https://github.com/cskwork/scopeweaver.git",
+  "source_heads": {
+    "pr40": "3509fb14e24ddffbd58537c0f51ccc8b75c26570",
+    "pr46": "42183237572c1def559bff9ccd834498c9fb2369"
+  },
+  "evidence_head": "4b8538820f1b2d1aa8b6272c7dc686a1660d1148",
+  "original_seven_files_hash_match": true,
+  "checkpoint_worktrees_clean": true,
+  "evidence_verifier_exit": 0,
+  "evidence_verifier_output": "PASS: 4250 evidence files; archive and every published file checksum verified\nSource hashes identify local originals; redacted/normalized copies are not byte-identical original evidence.",
+  "local_bundle_or_patch_used": false,
+  "tests_apps_databases_or_providers_run": false,
+  "limitations": "snapshot recovery proof only, not program correctness, whole-PR acceptance or release approval",
+  "existing_gh49_remote_head_verified": "b9781b2c4b92d9cef4a048f1c897616ce9ed8ff9",
+  "evidence_payload_sha256": "5d46e936a714254c357bbe41649bfb09fbbeb1757854e88101077aa404abc57b"
+}
