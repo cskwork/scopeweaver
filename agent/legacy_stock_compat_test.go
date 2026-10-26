@@ -33,6 +33,11 @@ func loadLegacyStockPrompts(t *testing.T) map[string]map[string]string {
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
 	}
+	for _, lang := range locale.Languages() {
+		if fixture.Planner[string(lang)] == "" || fixture.Worker[string(lang)] == "" {
+			t.Fatalf("missing prior planner/worker stock fixture for %s", lang)
+		}
+	}
 	return map[string]map[string]string{"planner": fixture.Planner, "worker": fixture.Worker}
 }
 
@@ -42,7 +47,7 @@ func stockDigest(text string) string {
 }
 
 // TestPriorStockPromptsStillRecognized: every prior stock planner/worker body in
-// EN/KO/zh-Hans canonicalizes to the current builtin (so renderSystem upgrades and
+// every shipped language canonicalizes to the current builtin (so renderSystem upgrades and
 // translates it), while any byte-edited variant remains user content.
 func TestPriorStockPromptsStillRecognized(t *testing.T) {
 	current := map[string]string{"planner": plannerDefaultTmpl, "worker": workerDefaultTmpl}
@@ -91,6 +96,50 @@ func TestPriorStockPromptRendersCurrentGuidance(t *testing.T) {
 	}
 }
 
+// Compare actual runtime rendering with a fresh current template in every
+// requested language. Historical source prose is fixture data, not a translation
+// oracle; a byte edit must retain that exact user's prose in every output language.
+func TestPriorStockPromptRendersEveryShippedLanguage(t *testing.T) {
+	old := PromptOverride
+	defer func() { PromptOverride = old }()
+	bodies := loadLegacyStockPrompts(t)
+	for key, def := range map[string]string{"planner": plannerDefaultTmpl, "worker": workerDefaultTmpl} {
+		var vars any = PlannerVars{Goal: "target", Scope: "fixture scope", AssetSummary: "fixture asset", DataDir: "proof-data", Now: "fixed fixture time"}
+		if key == "worker" {
+			vars = WorkerVars{ProxyAddr: "http://127.0.0.1:1", WorkerName: "fixture-worker", DataDir: "proof-data", Now: "fixed fixture time"}
+		}
+		for _, sourceLang := range locale.Languages() {
+			body := bodies[key][string(sourceLang)]
+			if _, err := renderTmpl(body, vars); err != nil {
+				t.Fatalf("%s/%s prior fixture cannot render with its role variables: %v", key, sourceLang, err)
+			}
+			for _, outputLang := range locale.Languages() {
+				t.Run(key+"/"+string(sourceLang)+"/"+string(outputLang), func(t *testing.T) {
+					PromptOverride = nil
+					want := renderSystem(key, def, vars, outputLang)
+					fresh, err := renderTmpl(BuiltinPromptText(def, outputLang), vars)
+					if err != nil || want != fresh {
+						t.Fatalf("fresh %s/%s runtime prompt did not render its current template: %v", key, outputLang, err)
+					}
+					PromptOverride = func(agentKey string) (string, bool) { return body, agentKey == key }
+					if got := renderSystem(key, def, vars, outputLang); got != want {
+						t.Errorf("prior %s stock did not render the fresh current %s template", sourceLang, outputLang)
+					}
+					edited := body + " user edit"
+					PromptOverride = func(agentKey string) (string, bool) { return edited, agentKey == key }
+					customWant, err := renderTmpl(edited, vars)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if got := renderSystem(key, def, vars, outputLang); got != customWant {
+						t.Fatal("byte-edited prior stock prompt was rewritten or translated")
+					}
+				})
+			}
+		}
+	}
+}
+
 // Upgrades of factory tool schemas face a different persistence seam: wireTools
 // seeds rows first-insert-only and ToolResolve overlays the stored schema, so a
 // factory fix alone never reaches existing installs. Runtime resolution must
@@ -115,6 +164,11 @@ func loadLegacyAddIntentSchemas(t *testing.T) map[string]struct {
 	}
 	if err := json.Unmarshal(raw, &fixture); err != nil {
 		t.Fatal(err)
+	}
+	for _, lang := range locale.Languages() {
+		if fixture.AddIntent[string(lang)].InputSchema == nil {
+			t.Fatalf("missing prior add_intent stock fixture for %s", lang)
+		}
 	}
 	out := map[string]struct {
 		hash   string
@@ -155,7 +209,7 @@ func TestLegacyStockAddIntentSchemaUpgradesAtRuntime(t *testing.T) {
 			t.Fatalf("%s fixture hash mismatch: %s", langName, d)
 		}
 		persisted := cloneToolSchema(snap.schema)
-		for _, resolveLang := range []locale.Lang{locale.En, locale.Ko, locale.ZhHans} {
+		for _, resolveLang := range locale.Languages() {
 			current := currentAddIntent(t, resolveLang)
 			resolved := ResolveLegacyStockSchema("add_intent", persisted, current.InputSchema())
 			want, _ := json.Marshal(current.InputSchema())
@@ -192,36 +246,42 @@ func assertSchemaPreserved(t *testing.T, label string, persisted map[string]any,
 // survive runtime resolution untouched, each verified independently rather than via
 // one combined marker.
 func TestCustomizedAddIntentSchemaIsPreserved(t *testing.T) {
-	snap := loadLegacyAddIntentSchemas(t)["en"]
-	current := currentAddIntent(t, locale.Ko)
+	for sourceLang, snap := range loadLegacyAddIntentSchemas(t) {
+		for _, outputLang := range locale.Languages() {
+			t.Run(sourceLang+"/"+string(outputLang), func(t *testing.T) {
+				current := currentAddIntent(t, outputLang)
 
-	t.Run("custom description only", func(t *testing.T) {
-		edited := cloneToolSchema(snap.schema)
-		edited["properties"].(map[string]any)["summary"].(map[string]any)["description"] = "user-customized summary wording"
-		assertSchemaPreserved(t, "custom description", edited, func() map[string]any {
-			return ResolveLegacyStockSchema("add_intent", edited, current.InputSchema())
-		})
-	})
-	t.Run("custom property and default only", func(t *testing.T) {
-		edited := cloneToolSchema(snap.schema)
-		edited["x-custom"] = "keep me"
-		edited["properties"].(map[string]any)["priority"].(map[string]any)["default"] = 7
-		assertSchemaPreserved(t, "custom property/default", edited, func() map[string]any {
-			return ResolveLegacyStockSchema("add_intent", edited, current.InputSchema())
-		})
-	})
-	t.Run("unregistered tool", func(t *testing.T) {
-		other := cloneToolSchema(snap.schema)
-		assertSchemaPreserved(t, "unregistered tool", other, func() map[string]any {
-			return ResolveLegacyStockSchema("node_detail", other, current.InputSchema())
-		})
-	})
-	t.Run("current stock schema", func(t *testing.T) {
-		fresh := cloneToolSchema(currentAddIntent(t, locale.En).InputSchema())
-		assertSchemaPreserved(t, "current stock", fresh, func() map[string]any {
-			return ResolveLegacyStockSchema("add_intent", fresh, currentAddIntent(t, locale.En).InputSchema())
-		})
-	})
+				t.Run("custom description only", func(t *testing.T) {
+					edited := cloneToolSchema(snap.schema)
+					edited["properties"].(map[string]any)["summary"].(map[string]any)["description"] = "user-customized summary wording"
+					assertSchemaPreserved(t, "custom description", edited, func() map[string]any {
+						return ResolveLegacyStockSchema("add_intent", edited, current.InputSchema())
+					})
+				})
+				t.Run("custom property and default only", func(t *testing.T) {
+					edited := cloneToolSchema(snap.schema)
+					edited["x-custom"] = "keep me"
+					edited["properties"].(map[string]any)["priority"].(map[string]any)["default"] = 7
+					assertSchemaPreserved(t, "custom property/default", edited, func() map[string]any {
+						return ResolveLegacyStockSchema("add_intent", edited, current.InputSchema())
+					})
+				})
+				t.Run("unregistered tool", func(t *testing.T) {
+					other := cloneToolSchema(snap.schema)
+					assertSchemaPreserved(t, "unregistered tool", other, func() map[string]any {
+						return ResolveLegacyStockSchema("node_detail", other, current.InputSchema())
+					})
+				})
+				t.Run("current stock schema", func(t *testing.T) {
+					fresh := cloneToolSchema(currentAddIntent(t, locale.En).InputSchema())
+					assertSchemaPreserved(t, "current stock", fresh, func() map[string]any {
+						return ResolveLegacyStockSchema("add_intent", fresh, currentAddIntent(t, locale.En).InputSchema())
+					})
+				})
+
+			})
+		}
+	}
 }
 
 // TestDecoratedLegacyStockAddIntentLocalizes: the full runtime composition used by
@@ -229,19 +289,25 @@ func TestCustomizedAddIntentSchemaIsPreserved(t *testing.T) {
 // localization) must behave exactly like a fresh install for stock rows and keep
 // user edits for customized rows.
 func TestDecoratedLegacyStockAddIntentLocalizes(t *testing.T) {
-	snap := loadLegacyAddIntentSchemas(t)["en"]
-	persisted := cloneToolSchema(snap.schema)
-	current := currentAddIntent(t, locale.En)
-	resolved := ResolveLegacyStockSchema("add_intent", persisted, current.InputSchema())
-	prepared := DecorateTool(current, current.Description(), resolved)
-	localized := localizeBuiltinTools([]actool.CoreTool{prepared}, locale.Ko)[0]
-	want := currentAddIntent(t, locale.Ko)
-	wantSchema, _ := json.Marshal(want.InputSchema())
-	gotSchema, _ := json.Marshal(localized.InputSchema())
-	if string(gotSchema) != string(wantSchema) {
-		t.Fatal("stock row did not localize like a fresh install after schema resolution")
-	}
-	if localized.Description() != want.Description() {
-		t.Fatal("stock row description did not localize like a fresh install")
+	for sourceLang, snap := range loadLegacyAddIntentSchemas(t) {
+		for _, outputLang := range locale.Languages() {
+			t.Run(sourceLang+"/"+string(outputLang), func(t *testing.T) {
+				persisted := cloneToolSchema(snap.schema)
+				current := currentAddIntent(t, locale.En)
+				resolved := ResolveLegacyStockSchema("add_intent", persisted, current.InputSchema())
+				prepared := DecorateTool(current, current.Description(), resolved)
+				localized := localizeBuiltinTools([]actool.CoreTool{prepared}, outputLang)[0]
+				want := currentAddIntent(t, outputLang)
+				wantSchema, _ := json.Marshal(want.InputSchema())
+				gotSchema, _ := json.Marshal(localized.InputSchema())
+				if string(gotSchema) != string(wantSchema) {
+					t.Fatal("stock row did not localize like a fresh install after schema resolution")
+				}
+				if localized.Description() != want.Description() {
+					t.Fatal("stock row description did not localize like a fresh install")
+				}
+
+			})
+		}
 	}
 }
