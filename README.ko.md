@@ -118,6 +118,15 @@ PostgreSQL 데이터베이스 하나에는 ScopeWeaver 서버 프로세스를 �
 [제공자 설정과 지원 범위](docs/ko/llm-providers.md)를 확인하세요.
 클라우드 토큰 사용량은 [토큰 사용량 줄이기](docs/ko/llm-providers.md#토큰-사용량-줄이기)를 참고하세요.
 
+선택형 **OpenCode SDK 브리지** 프로필은 고정된 `native` CLI·클라이언트 **2.1.4**(기본값)와
+`legacy` SDK·CLI **1.19.4**, 별도 브리지 토큰, `providerID/modelID`를 지원합니다.
+호스트 도구와 승인은 ScopeWeaver의 Norma 런타임이 관리합니다. 레거시는 안전한 JSON 구조를 보존하며
+무해한 공백·이스케이프는 정규화될 수 있습니다. 원본 바이트는 보장하지 않으며 안전하지 않은 정수는 거부합니다.
+두 런타임 모두 Windows는 지원하지 않습니다. 이전 실제 런타임 테스트 범위는 macOS arm64이며
+Linux의 호스팅된 CI 결과는 아직 없습니다. 하위 제공자가 클라우드일 수 있어 로컬 전용 LLM 모드에서는 거부됩니다.
+[SDK 설정·제약·다운그레이드 준비](docs/ko/llm-providers.md#opencode-sdk-브리지)를 참고하세요.
+SDK 프로필이 남아 있으면 이전 바이너리는 시작할 수 없습니다.
+
 선택 사항인 **기본 Ollama** 프로필은 API 키 없이 동작합니다. 같은 컴퓨터의 Ollama, Docker에서
 접근하는 호스트 Ollama, 선택형 `docker compose --profile local-llm` 서비스용 템플릿 세 개를
 제공합니다. 선택하면 서버에 설치된 모델을 조회하고 도구 호출 지원을 선언한 모델을 우선 채웁니다.
