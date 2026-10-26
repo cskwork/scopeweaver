@@ -1,0 +1,15 @@
+{
+  "included": 4250,
+  "excluded": 1179,
+  "redacted_or_normalized": 273,
+  "archive_bytes": 12343226,
+  "archive_sha256": "5d46e936a714254c357bbe41649bfb09fbbeb1757854e88101077aa404abc57b",
+  "exclusions": {
+    "binary or unrecognized text encoding": 12,
+    "visual/binary artifact; not included without content-specific privacy review": 138,
+    "database/cache/dependency/runtime directory": 995,
+    "container/bundle; extracted textual evidence copied separately where available": 31,
+    "compiled/database/binary file": 2,
+    "credential/session/config file": 1
+  }
+}

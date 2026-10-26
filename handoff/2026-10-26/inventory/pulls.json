@@ -1,0 +1,461 @@
+[
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/handoff-20261026",
+    "isDraft": false,
+    "number": 58,
+    "state": "MERGED",
+    "title": "docs: record all-issue and PR continuation handoff",
+    "url": "https://github.com/cskwork/scopeweaver/pull/58"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "feat/gh-49-opencode-sdk",
+    "isDraft": false,
+    "number": 57,
+    "state": "OPEN",
+    "title": "feat(llm): add guarded OpenCode SDK and free-model support",
+    "url": "https://github.com/cskwork/scopeweaver/pull/57"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/gh-53-retry-dialog",
+    "isDraft": false,
+    "number": 56,
+    "state": "MERGED",
+    "title": "test(chat): settle cancelled edit dialog before retry",
+    "url": "https://github.com/cskwork/scopeweaver/pull/56"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/gh-53-verification-gates",
+    "isDraft": false,
+    "number": 55,
+    "state": "MERGED",
+    "title": "test(chat): verify focus on the current compaction request",
+    "url": "https://github.com/cskwork/scopeweaver/pull/55"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/gh-50-scope-enforcement",
+    "isDraft": false,
+    "number": 54,
+    "state": "MERGED",
+    "title": "fix(scope): honest scope wording, label-boundary domain rules, gated agent scope writes, and race-free shutdown (#50)",
+    "url": "https://github.com/cskwork/scopeweaver/pull/54"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": true,
+    "number": 53,
+    "state": "OPEN",
+    "title": "Promote dev to main: complete six-language localization",
+    "url": "https://github.com/cskwork/scopeweaver/pull/53"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "feat/gh-15-complete-locales",
+    "isDraft": false,
+    "number": 52,
+    "state": "MERGED",
+    "title": "feat(i18n): complete six-language application and documentation",
+    "url": "https://github.com/cskwork/scopeweaver/pull/52"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 48,
+    "state": "MERGED",
+    "title": "release: promote dev to main for v0.7.0",
+    "url": "https://github.com/cskwork/scopeweaver/pull/48"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "feat/opencode-go-llm",
+    "isDraft": false,
+    "number": 47,
+    "state": "MERGED",
+    "title": "feat(llm): accept opencode-go provider config and gateway template",
+    "url": "https://github.com/cskwork/scopeweaver/pull/47"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/ci-churn",
+    "isDraft": false,
+    "number": 46,
+    "state": "OPEN",
+    "title": "ci: run push checks on main only and cancel superseded runs",
+    "url": "https://github.com/cskwork/scopeweaver/pull/46"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "chore/ci-churn",
+    "isDraft": false,
+    "number": 45,
+    "state": "CLOSED",
+    "title": "ci: run push checks on main only and cancel superseded runs",
+    "url": "https://github.com/cskwork/scopeweaver/pull/45"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 44,
+    "state": "MERGED",
+    "title": "Merge dev into main: company scope host kind and subdomain matching",
+    "url": "https://github.com/cskwork/scopeweaver/pull/44"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/company-scope-host",
+    "isDraft": false,
+    "number": 42,
+    "state": "MERGED",
+    "title": "Company scope: `domain` rules cover subdomains; add a `host` kind",
+    "url": "https://github.com/cskwork/scopeweaver/pull/42"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "company-scope-host",
+    "isDraft": false,
+    "number": 41,
+    "state": "CLOSED",
+    "title": "Company scope: `domain` rules cover subdomains; add a `host` kind",
+    "url": "https://github.com/cskwork/scopeweaver/pull/41"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/glm-agent-contracts",
+    "isDraft": false,
+    "number": 40,
+    "state": "OPEN",
+    "title": "fix: preserve planner evidence and lifecycle contracts",
+    "url": "https://github.com/cskwork/scopeweaver/pull/40"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 39,
+    "state": "MERGED",
+    "title": "Merge dev into main: shutdown persistence and runtime fixes",
+    "url": "https://github.com/cskwork/scopeweaver/pull/39"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/cli-discovered-runtime-bugs",
+    "isDraft": false,
+    "number": 38,
+    "state": "MERGED",
+    "title": "fix: preserve chat shutdown writes and repair shared runtime bugs",
+    "url": "https://github.com/cskwork/scopeweaver/pull/38"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 37,
+    "state": "MERGED",
+    "title": "fix: promote v0.6.1 queued-edit patch",
+    "url": "https://github.com/cskwork/scopeweaver/pull/37"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/release-runtime-patch",
+    "isDraft": false,
+    "number": 36,
+    "state": "MERGED",
+    "title": "fix(chat): keep text-only queued edits readable",
+    "url": "https://github.com/cskwork/scopeweaver/pull/36"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 35,
+    "state": "MERGED",
+    "title": "docs(release): promote v0.6.0 release notes",
+    "url": "https://github.com/cskwork/scopeweaver/pull/35"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/release-v0.6.0",
+    "isDraft": false,
+    "number": 34,
+    "state": "MERGED",
+    "title": "docs(release): prepare v0.6.0 notes",
+    "url": "https://github.com/cskwork/scopeweaver/pull/34"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "dev",
+    "isDraft": false,
+    "number": 33,
+    "state": "MERGED",
+    "title": "chore: promote verified chat controls and findings",
+    "url": "https://github.com/cskwork/scopeweaver/pull/33"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/chat-pr-review",
+    "isDraft": false,
+    "number": 32,
+    "state": "MERGED",
+    "title": "fix(chat): preserve compatibility and consolidate chat state",
+    "url": "https://github.com/cskwork/scopeweaver/pull/32"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "docs/japanese-readme",
+    "isDraft": false,
+    "number": 31,
+    "state": "CLOSED",
+    "title": "docs: add Japanese README translation",
+    "url": "https://github.com/cskwork/scopeweaver/pull/31"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "fix/chat-findings-and-agent-prompts",
+    "isDraft": false,
+    "number": 30,
+    "state": "MERGED",
+    "title": "fix(chat): persist standalone findings and preserve prompt roles",
+    "url": "https://github.com/cskwork/scopeweaver/pull/30"
+  },
+  {
+    "baseRefName": "dev",
+    "headRefName": "feat/chat-controls-clean",
+    "isDraft": false,
+    "number": 29,
+    "state": "MERGED",
+    "title": "feat(chat): add chat controls and document paste",
+    "url": "https://github.com/cskwork/scopeweaver/pull/29"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/chat-controls-and-context",
+    "isDraft": false,
+    "number": 28,
+    "state": "CLOSED",
+    "title": "feat(chat): add chat controls and document paste",
+    "url": "https://github.com/cskwork/scopeweaver/pull/28"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/gh-24-token-consumption",
+    "isDraft": false,
+    "number": 27,
+    "state": "MERGED",
+    "title": "fix(llm): cut cloud token use and fix provider usage accounting (#24)",
+    "url": "https://github.com/cskwork/scopeweaver/pull/27"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "test/db-test-isolation",
+    "isDraft": false,
+    "number": 26,
+    "state": "MERGED",
+    "title": "test(db): require ARTEX_TEST_DSN and refuse to run against the live database",
+    "url": "https://github.com/cskwork/scopeweaver/pull/26"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/ollama-zero-egress-hardening",
+    "isDraft": false,
+    "number": 25,
+    "state": "MERGED",
+    "title": "Harden native Ollama scheduling, judge policy and strict local inference",
+    "url": "https://github.com/cskwork/scopeweaver/pull/25"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/provider-env-auth",
+    "isDraft": false,
+    "number": 23,
+    "state": "MERGED",
+    "title": "fix(llm): preserve authenticated gateway credentials",
+    "url": "https://github.com/cskwork/scopeweaver/pull/23"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/ollama-native-flexible-providers",
+    "isDraft": false,
+    "number": 22,
+    "state": "MERGED",
+    "title": "feat(llm): support native Ollama alongside flexible cloud providers",
+    "url": "https://github.com/cskwork/scopeweaver/pull/22"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/japanese-localization",
+    "isDraft": false,
+    "number": 21,
+    "state": "CLOSED",
+    "title": "feat(i18n): add Japanese localization (UI, backend, agent output)",
+    "url": "https://github.com/cskwork/scopeweaver/pull/21"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "release/v0.3.1",
+    "isDraft": false,
+    "number": 20,
+    "state": "MERGED",
+    "title": "fix(release): include shared locales and prepare v0.3.1",
+    "url": "https://github.com/cskwork/scopeweaver/pull/20"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/gh-15-extensible-i18n",
+    "isDraft": false,
+    "number": 19,
+    "state": "MERGED",
+    "title": "feat(i18n): add extensible locales and Simplified Chinese",
+    "url": "https://github.com/cskwork/scopeweaver/pull/19"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "release/v0.3.0",
+    "isDraft": false,
+    "number": 18,
+    "state": "MERGED",
+    "title": "docs(release): prepare v0.3.0",
+    "url": "https://github.com/cskwork/scopeweaver/pull/18"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/asset-export",
+    "isDraft": false,
+    "number": 17,
+    "state": "MERGED",
+    "title": "feat(assets): CSV/JSON export endpoint with UI buttons",
+    "url": "https://github.com/cskwork/scopeweaver/pull/17"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/dashboard-daily-token-chart",
+    "isDraft": false,
+    "number": 16,
+    "state": "MERGED",
+    "title": "fix(dashboard): daily token chart double-counts cache reads",
+    "url": "https://github.com/cskwork/scopeweaver/pull/16"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/llm-max-concurrent",
+    "isDraft": false,
+    "number": 14,
+    "state": "MERGED",
+    "title": "feat(llm): add per-provider concurrency cap (llm_max_concurrent)",
+    "url": "https://github.com/cskwork/scopeweaver/pull/14"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/openrouter-provider-routing",
+    "isDraft": false,
+    "number": 13,
+    "state": "CLOSED",
+    "title": "feat: add OpenRouter provider format with routing pin and fallback control",
+    "url": "https://github.com/cskwork/scopeweaver/pull/13"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/notice-manifest-read",
+    "isDraft": false,
+    "number": 12,
+    "state": "MERGED",
+    "title": "fix: read raw image manifests for notice verification",
+    "url": "https://github.com/cskwork/scopeweaver/pull/12"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/release-license-notices",
+    "isDraft": false,
+    "number": 11,
+    "state": "MERGED",
+    "title": "fix: preserve notices in release packages",
+    "url": "https://github.com/cskwork/scopeweaver/pull/11"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/release-0.2.1-quality",
+    "isDraft": false,
+    "number": 10,
+    "state": "MERGED",
+    "title": "fix: harden Windows and prepare v0.2.1",
+    "url": "https://github.com/cskwork/scopeweaver/pull/10"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/install-mkdir-webui-dist",
+    "isDraft": false,
+    "number": 9,
+    "state": "MERGED",
+    "title": "fix(install): create server/webui before copying web/out into it",
+    "url": "https://github.com/cskwork/scopeweaver/pull/9"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "xKeNcHii/upgrade-next-react",
+    "isDraft": false,
+    "number": 8,
+    "state": "MERGED",
+    "title": "fix(deps): upgrade Next.js and React",
+    "url": "https://github.com/cskwork/scopeweaver/pull/8"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "xKeNcHii/upgrade-web-tooling",
+    "isDraft": false,
+    "number": 7,
+    "state": "MERGED",
+    "title": "fix(deps): update frontend tooling dependencies",
+    "url": "https://github.com/cskwork/scopeweaver/pull/7"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "fix/release-notes-links",
+    "isDraft": false,
+    "number": 6,
+    "state": "MERGED",
+    "title": "ci(release): fix 404 links in release notes",
+    "url": "https://github.com/cskwork/scopeweaver/pull/6"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "chore/contrib-docs-usage-ci",
+    "isDraft": false,
+    "number": 5,
+    "state": "MERGED",
+    "title": "chore: contribution guide, E2E smoke test, and v0.2.0 prep",
+    "url": "https://github.com/cskwork/scopeweaver/pull/5"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "xKeNcHii/backport-artex-updates",
+    "isDraft": false,
+    "number": 4,
+    "state": "MERGED",
+    "title": "feat: backport ARTEX SSE, auth, and approval usage updates",
+    "url": "https://github.com/cskwork/scopeweaver/pull/4"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/landing-page",
+    "isDraft": false,
+    "number": 2,
+    "state": "MERGED",
+    "title": "Publish bilingual ScopeWeaver landing page",
+    "url": "https://github.com/cskwork/scopeweaver/pull/2"
+  },
+  {
+    "baseRefName": "main",
+    "headRefName": "feat/agent-control-adapter",
+    "isDraft": false,
+    "number": 1,
+    "state": "MERGED",
+    "title": "Add ScopeWeaver control adapter for Claude Code, Codex and Pi",
+    "url": "https://github.com/cskwork/scopeweaver/pull/1"
+  }
+]
