@@ -4,13 +4,13 @@
 
 ## 1. 먼저 알아야 할 상태
 
-- 문서 작성 전 원격 `dev`: `71a487fa7d2ff5164ddf002307cc1c5e402ca660`.
+- 이번 원격 복구 보완 전 `dev`: `c9d9a9fc28c8168ba53988c749e85633ddc69f11` (#58 인계 문서 병합).
 - 원격 `main`: `a8145ad0440ad5864e1bcb6b5cc94195465a7c81`.
 - 최신 공개 릴리스: `v0.7.0`. 다음 minor 후보는 `v0.8.0`이며 아직 생성하지 않았다. 실제 릴리스 전에 최신 태그를 다시 확인한다.
-- 이 인계 문서의 배포 PR을 제외하고 **열린 PR 4개, 열린 이슈 3개**다. 전체 50개 PR 및 5개 이슈를 GitHub API로 조회했다. 아래 표는 배포 전 스냅샷이며, 인계 문서 반영으로 `dev`와 PR #53의 head는 바뀐다.
-- #52, #54, #55, #56은 `dev`에 병합됐다. #40, #46, #57은 미병합이다. #53은 `dev → main` 승격용 draft이며 보류 상태다.
+- 이 인계 문서의 배포 PR을 제외하고 **열린 PR 4개, 열린 이슈 3개**다. 전체 51개 PR 및 5개 이슈를 GitHub API로 조회했다. 아래 표는 배포 전 스냅샷이며, 인계 문서 반영으로 `dev`와 PR #53의 head는 바뀐다.
+- #52, #54, #55, #56, #58은 `dev`에 병합됐다. #40, #46, #57은 미병합이다. #53은 `dev → main` 승격용 draft이며 보류 상태다.
 - #57의 최신 CI가 통과했어도 SDK 의존성 감사 실패와 과거 CI 실패 원인 미확정은 해소되지 않았다.
-- #40의 로컬 수정·검증·문서 작업 일부는 원격 PR에 없다. **새 환경에서 원격 저장소만 clone하면 이 작업을 잃는다.** §3의 전송 묶음을 함께 가져와야 한다.
+- #40의 수리본은 기존 원격 PR #40과 다르지만, 이제 미커밋 7개 파일까지 별도 원격 checkpoint에 커밋됐다. #46 수리본과 재개 자료도 원격에 있다. **§3의 Git-only 복구 절차를 사용하면 기존 호스트의 로컬 bundle/patch 없이 이어갈 수 있다.**
 
 ## 2. 권한·중단 조건
 
@@ -27,36 +27,39 @@
 - 다른 작업 트리의 reset/clean/stash, 브랜치 삭제, 캐시 정리, 실행 중인 프로세스 종료를 하지 않는다. 이전 세션/프로세스 번호는 기록이지 재실행 지시가 아니다.
 - 새 실제 provider 호출이나 #57 진단 실행은 아래의 별도 사용 횟수·승인 제한을 따른다. 이 인계 요청으로 실행 예산이 초기화되지 않는다.
 
-## 3. 다른 환경으로 옮길 자료
+## 3. 원격만으로 복구 — 로컬 전송 묶음 불필요
 
-### 반드시 함께 전달할 로컬 묶음
+사용자의 추가 요청에 따라 원래 미커밋/로컬 전용 상태를 다음 원격 checkpoint에 보존했다. 미완성 구현은 dev에 병합하지 않았다. 기존 PR #40/#46 브랜치도 덮어쓰지 않았다.
 
-원래 호스트에 다음 파일을 만들고 검증했다. **이 묶음은 dev에 업로드하지 않았다.** 문서와 별도로 새 환경에 전달한다.
+| 복구 대상 | 원격 브랜치 | 고정 커밋 |
+| --- | --- | --- |
+| #40 수리본 + 원래 미커밋 7개 파일 | `checkpoint/pr40-resume-20261026` | `3509fb14e24ddffbd58537c0f51ccc8b75c26570` |
+| #46 CI 수리본 | `checkpoint/pr46-resume-20261026` | `42183237572c1def559bff9ccd834498c9fb2369` |
+| 계획·승인·검증·진단·재현 자료 | `checkpoint/handoff-evidence-20261026` | `fbc03000c8836a29f1c17fff03a9cbcb65adda50` |
+| #49 / #57 현재 코드 | `feat/gh-49-opencode-sdk` | `b9781b2c4b92d9cef4a048f1c897616ce9ed8ff9` |
 
-```text
-/Users/danny/Documents/Git/scopeweaver-worktrees/scopeweaver-handoff-transfer-20261026.tar.gz
-bytes: 888975
-SHA256: 940a02ed0e17644685f06e106e57d2483092ca5ed7658242510dba26f37ebdd9
-```
-
-포함: 미공개 PR40/46 refs의 Git bundle, PR40 미커밋 7개 파일의 binary patch, 이슈·PR 스냅샷, 선택된 검증/인계/승인 기록, `SHA256SUMS`. 계정 자격 증명과 raw provider/browser 로그는 넣지 않았다. bundle의 선행 커밋 `7af06f1`, `f354c920`은 공유 dev 이력에 있다. 로컬 `git bundle verify`를 통과했다.
-
-새 환경의 예시 복구 절차다. 이름이 이미 사용 중이면 새 이름을 고르고, 기존 브랜치를 강제로 덮어쓰지 않는다.
+새 환경에서 실행할 Git/파일 복구 절차다. 같은 이름의 브랜치/디렉터리가 이미 있으면 새 이름을 고른다. 기존 작업을 reset하지 않는다.
 
 ```bash
-# 먼저 압축 묶음의 SHA256과 내부 SHA256SUMS를 확인한다.
-git fetch origin dev
-git bundle verify /absolute/path/scopeweaver-local-work.bundle
-git fetch /absolute/path/scopeweaver-local-work.bundle \
-  refs/heads/fix/pr40-review-repair:refs/remotes/handoff/pr40 \
-  refs/heads/fix/pr46-ci-cancellation:refs/remotes/handoff/pr46
-git worktree add -b fix/pr40-resume ../scopeweaver-pr40-resume refs/remotes/handoff/pr40
-git -C ../scopeweaver-pr40-resume apply --check /absolute/path/pr40-uncommitted.patch
-git -C ../scopeweaver-pr40-resume apply /absolute/path/pr40-uncommitted.patch
-git -C ../scopeweaver-pr40-resume status --short
+git clone https://github.com/cskwork/scopeweaver.git
+cd scopeweaver
+git fetch origin
+git switch dev
+git worktree add -b fix/pr40-resume ../scopeweaver-pr40-resume \
+  origin/checkpoint/pr40-resume-20261026
+git worktree add -b fix/pr46-resume ../scopeweaver-pr46-resume \
+  origin/checkpoint/pr46-resume-20261026
+git worktree add --detach ../scopeweaver-handoff-evidence \
+  origin/checkpoint/handoff-evidence-20261026
+python3 ../scopeweaver-handoff-evidence/handoff/2026-10-26/verify.py \
+  --extract ../scopeweaver-resume-evidence
 ```
 
-복구 후 PR40 HEAD는 `3fb3bca67cadc528ad9855a1e2f51adb95162704`, 변경 파일은 아래 7개여야 한다. 이는 완료본이 아니라 이어서 검증할 상태다. PR46 ref는 `42183237572c1def559bff9ccd834498c9fb2369`이다. 두 ref를 최신 dev에 무검토 병합하지 않는다.
+shallow/single-branch clone을 사용했다면 checkpoint refs도 별도로 fetch한다. #49를 재개할 때는 기존 원격 feature 브랜치에서 별도 작업 트리를 만든다. 이 절차는 DB·앱·브라우저·provider나 과거 진단을 실행하지 않는다.
+
+### 무엇이 저장됐는가
+
+- #40의 다음 7개 파일은 이제 `3509fb1`에 커밋되어 있다. **과거 `pr40-uncommitted.patch`를 다시 적용하면 안 된다.** 원래 바이트와 checkpoint/새 clone 파일 해시를 대조한다.
 
 ```text
 agent/legacy_stock_compat_test.go
@@ -68,7 +71,15 @@ docs/ko/VERIFICATION.md
 locale/zh-Hant.json
 ```
 
-Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clone으로 복구되지 않는다. 전송 묶음에는 선택된 요약/receipts만 들어 있다. 더 깊은 원인 분석이 필요하면 원래 호스트의 아래 evidence 디렉터리도 별도 보존한다. 이미 사라진 `/private/tmp` 기록은 새 검증 증거로 대체했다고 주장하지 않는다.
+- 증거 브랜치의 `handoff/2026-10-26/`에는 `RECOVERY.json`, `MANIFEST.json`, `PACKAGE-RESULT.json`, `EVIDENCE.tar.gz`, `verify.py`, `README.md`, `REMOTE-RESTORE.json`이 있다. 계획·리뷰·승인 제한·재현 스크립트·로그·attribution ledger 등 **4,250개 파일**의 체크섬을 검증한다.
+- 압축 파일: **12,343,226 bytes**, SHA256 `5d46e936a714254c357bbe41649bfb09fbbeb1757854e88101077aa404abc57b`.
+- 새 HTTPS clone에서 #40/#46 checkpoint와 #49 원격 head를 확인했고, 원래 미커밋 7개 파일 및 증거 4,250개 파일의 해시 검증·추출이 통과했다. 증거 payload 전체는 `4b85388`에서 검증했으며, 최종 `fbc0300`은 `REMOTE-RESTORE.json`만 추가한 커밋임을 별도 fetch/diff로 확인했다. 압축 파일 해시는 동일하다. 로컬 bundle/patch나 원래 저장소 object를 사용하지 않았다. 이는 복구 증명이며 프로그램 동작의 정확성/최종 QA PASS는 아니다.
+- 증거 경로는 `pr40/`, `pr46/`, `gh49-plan/`, `gh49-evidence/`, `gh15/`, `gh50/`, `gh53-verification/`, `gh53-retry/`, `release/`로 구분된다. 원래 호스트 경로와의 대응은 manifest `roots`에 있다. 과거 절대 경로는 새 환경에 맞게 조정한다.
+- **273개 파일**은 인증값 제거 또는 인코딩 정규화가 적용됐다. `source_sha256`은 로컬 원본, `published_sha256`은 공개용 사본의 해시다. 바이트가 다른 사본을 원본과 동일한 실행 증거라고 주장하지 않는다. 원본 로컬 자료는 변경하지 않았다.
+- 제외된 **1,179개 항목**도 파일별 이유가 manifest에 있다: DB/WAL·캐시·의존성 995, 미검토 시각 자료 138, 컨테이너 31, binary/미확인 인코딩 12, 명시적 compiled/database binary 2, 인증 설정 1. 원격 소스 브랜치의 실제 앱 코드·추적 assets는 원래대로 보존된다. 이 제외 목록은 앱 소스 누락 목록이 아니다.
+- 실행에 필요한 dependency/build 산출물은 프로젝트의 설치·빌드 절차로 재생성한다. 과거 실행 스크립트의 제거된 임시 인증값은 새 disposable 값으로 설정한다. 비밀값·실제 DB 데이터·현재 로그인 세션을 복원하려 하지 않는다.
+
+기존 로컬 `scopeweaver-handoff-transfer-20261026.tar.gz`는 이전 시점의 보조 백업이다. 새 원격 복구에는 필요하지 않다. 이미 사라진 임시 파일을 이 패키지로 복구했다고 주장하지 않는다. 추가 원본 이미지/바이너리가 검증에 꼭 필요하면 원래 GitHub artifact ID·해시·로컬 원본의 존재 여부를 확인하고 증거 공백을 명시한다.
 
 ## 4. 담당 세션·작업 트리
 
@@ -76,7 +87,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 
 | 담당 | 작업 | 로컬 경로 / 브랜치 | 인계 시 HEAD |
 | --- | --- | --- | --- |
-| `c2f2c817-4789-4194-aaa8-ebaefa08138f` | #40 | `pr40-review-repair`, `fix/pr40-review-repair` | `3fb3bca67cadc528ad9855a1e2f51adb95162704` + 위 7개 미커밋 변경 |
+| `c2f2c817-4789-4194-aaa8-ebaefa08138f` | #40 | `pr40-review-repair`, `fix/pr40-review-repair` | `3509fb14e24ddffbd58537c0f51ccc8b75c26570`, clean, 원격 checkpoint로 보존 |
 | 동일 | #46 | `pr46-ci-cancellation`, `fix/pr46-ci-cancellation` | `42183237572c1def559bff9ccd834498c9fb2369`, clean |
 | `37a3a0f9-7c4c-42f8-ab7a-84998b2e45ae` | #49 / #57 | `gh49-opencode-sdk`, `feat/gh-49-opencode-sdk` | `b9781b2c4b92d9cef4a048f1c897616ce9ed8ff9`, clean, 원격과 같음 |
 | `9441381b-e0ce-42c3-ad25-ea152c781ace` | #15 / #53 / 최종 통합·릴리스 | `gh53-verification-gates`, `fix/gh-53-retry-dialog` | `80b135df7e39b19111c799cc0b9c1cfd2eb7f867`, clean, #56으로 병합됨 |
@@ -94,8 +105,8 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 - 실제 SDK tool-result receipt와 originating context/response를 보존하는 terminal gate 수정, 기존 **30 ms / 120 ms** 회귀 사례 유지.
 - 로컬 `third_party/norma`는 upstream `52f17dd52d95b087265e5d5b306fe85c1ea05599` 기준이다. SDK의 기존 실패 7개까지 수정했고, 저장된 전체 nested SDK test/build/vet receipt는 각각 exit 0이다. 원본 RED와 focused race 근거도 보존했다. 원본 211개 파일 중 201개 그대로, 10개 수정, 4개 추가라는 출처 기록과 Apache 고지를 유지한다.
 - 호스트가 설정된 context window를 Noa에 전달한다. 실제 session 검사에는 40K/128K/200K/250K/400K/1M, fallback, disabled Noa, 손상 상태 복구, output limit 독립성과 Ollama 예외가 포함된다. 200K는 미설정 시 fallback이지 모든 모델의 한도가 아니다.
-- 과거 번체/일본어/스페인어 기본 스키마 해시 3개를 정확히 등록하는 5줄 변경은 미커밋 상태다. 실패 재현 후 기존 schema/customization/decorated 검사 **219 test/subtest pass events, 실패 0, skip 0** 및 이 변경만의 독립 리뷰 PASS. 번역 품질이나 실제 PostgreSQL 저장 보존의 최종 증명은 아니다.
-- 비운영 문서 12개(4개 언어의 CONTRIBUTING/PROVENANCE/VERIFICATION)는 로컬 커밋 `3fb3bca`에 완료했다. Sol high/fast 작성·독립 의미 리뷰 PASS, 로컬 링크/앵커 **159개** 통과. 요약 크기/개수 오역과 문맥 크기 적용 범위 표현을 수정했다. 원어민 승인이나 최종 후보 준비 완료를 뜻하지 않는다.
+- 과거 번체/일본어/스페인어 기본 스키마 해시 3개를 정확히 등록하는 5줄 변경은 복구 checkpoint `3509fb1`에 포함됐다. 실패 재현 후 기존 schema/customization/decorated 검사 **219 test/subtest pass events, 실패 0, skip 0** 및 이 변경만의 독립 리뷰 PASS. 번역 품질이나 실제 PostgreSQL 저장 보존의 최종 증명은 아니다.
+- 비운영 문서 12개(4개 언어의 CONTRIBUTING/PROVENANCE/VERIFICATION)는 커밋 `3fb3bca`에 완료했고, 현재 원격 checkpoint `3509fb1`의 이력에 포함돼 있다. Sol high/fast 작성·독립 의미 리뷰 PASS, 로컬 링크/앵커 **159개** 통과. 요약 크기/개수 오역과 문맥 크기 적용 범위 표현을 수정했다. 원어민 승인이나 최종 후보 준비 완료를 뜻하지 않는다.
 - 이전 frontend 준비 결과 web **75**, adapter **18**, static **31 pages**, audit **0**은 해당 과거 소스의 결과다. 최신 dev/SDK 통합 후 최종 검증으로 재사용하지 않는다.
 
 ### 남은 번역 입력 — 생성 거부 상태 유지
@@ -103,8 +114,8 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 `agent/prompt_zh-Hant.json`, `agent/prompt_ja.json`, `agent/prompt_es.json` 각각의 `plannerDefaultTmpl`, `workerDefaultTmpl`: 총 **6개 값**의 검토된 번역 입력이 없다. 이전 Claude 자동 검토가 `[cyber]`로 거부했다고 대화에 기록돼 있다. 알려진 원본 결과/stderr 디렉터리 `/private/tmp/scopeweaver-six-locales-20261025/`는 없어졌으며, 이유와 문장별 거부 사유는 알 수 없다.
 
 - 재시도·다른 모델/provider로 우회하지 않는다. 외부 검토된 UTF-8 key-level 값/patch, 기준 원문 revision과 검토 범위를 받아 기존 검증으로 확인한다. 입력 제공 자체가 검사 면제나 안전 검토 우회 승인은 아니다.
-- 기준 영어 원문은 로컬 `aad0d924`의 `agent/planner.go:305`, `agent/worker.go:238`. 전송 묶음의 `pr40-evidence/refs/translation-input-manifest.json`에 원문 파일 해시·기존 값 해시·정확한 키가 있다.
-- `locale/ja.json`, `locale/es.json`에는 각각 5개 키의 값이 미완료다: `add_intent` item의 summary/asset_ids/parent_ids 설명 3개, 기록된 evidence header, 확장된 Assess-goals round guidance. 정확한 키·개행은 manifest에 있다. 번체는 5개 추가/1개 obsolete 제거가 이미 dirty tree에 있으나 의미 검토가 남았다.
+- 기준 영어 원문은 로컬 `aad0d924`의 `agent/planner.go:305`, `agent/worker.go:238`. 원격 증거를 추출한 `pr40/refs/translation-input-manifest.json`에 원문 파일 해시·기존 값 해시·정확한 키가 있다.
+- `locale/ja.json`, `locale/es.json`에는 각각 5개 키의 값이 미완료다: `add_intent` item의 summary/asset_ids/parent_ids 설명 3개, 기록된 evidence header, 확장된 Assess-goals round guidance. 정확한 키·개행은 manifest에 있다. 번체의 5개 추가/1개 obsolete 제거는 checkpoint `3509fb1`에 커밋됐으나 의미 검토가 남았다.
 - obsolete Assess-goals 키만 교체한다. zh-Hans JSON에 없다고 다른 **52개 정상 등록 키**를 삭제하지 않는다. 현 기준 strict count는 **1,987 = 1,983 + 4**이며, 새로운 실제 dev 변경이 있으면 근거를 다시 산출한다. 검사를 맞추기 위해 기대값을 임의로 올리지 않는다.
 - #54가 바꾼 `goalsScopeTail`을 오래된 전체 JSON 파일로 덮어쓰지 않는다. 12개 문서는 완료됐으므로 새로 번역하지 않는다. 최종 소스 통합 시 EN/KO를 포함한 현재 사실만 별도로 정합화한다.
 - 번역 확정 후 실제 historical prompt recognition RED → exact hash 등록 → 여섯 source/output 언어의 render/customization GREEN을 실행한다. 이전 번역이 현재 stock과 같을 때의 통과를 upgrade 증거로 쓰지 않는다. 실제 DB 저장 row/history 보존도 확인한다.
@@ -131,7 +142,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 
 원격 [#46](https://github.com/cskwork/scopeweaver/pull/46)의 head는 `fbbe340fd15282d6cf24a6b03dcf687e28937866`, 브랜치는 `fix/ci-churn`이다. 제목의 “push checks on main only”와 달리, 검토한 로컬 재구성본은 **dev/main 검증을 둘 다 유지**한다.
 
-로컬 `42183237`의 변경은 `.github/workflows/ci.yml` 4줄뿐이다: `edited` 이벤트 이유 주석 및 workflow/ref별 concurrency cancellation. 기존 리뷰/로컬 검증 기록이 있으며 dev `935915b` 위 inspection-only 적용은 충돌 없고 `actionlint` exit 0이었다. 실제 rebase나 원격 갱신은 하지 않았다.
+`42183237`의 변경은 `.github/workflows/ci.yml` 4줄뿐이다: `edited` 이벤트 이유 주석 및 workflow/ref별 concurrency cancellation. 기존 리뷰/로컬 검증 기록이 있으며 dev `935915b` 위 inspection-only 적용은 충돌 없고 `actionlint` exit 0이었다. 보관용 원격 checkpoint는 푸시했지만, 기존 PR #46 브랜치의 실제 rebase·갱신은 하지 않았다.
 
 **#40 다음 #46** 순서를 유지한다. 최종 dev 기준 rebase, 정확한 4줄 delta/최신 workflow 보존 리뷰, 필수 CI 7개, dev merge와 병합 후 검증이 남았다. 옛 원격 변경으로 dev push 검증을 없애지 않는다.
 
@@ -167,7 +178,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 
 원래 생성된 SDK lock의 정확한 bytes는 복구하지 못했고, 현재 재생성된 lock은 다르다. 직접 runtime pin과 native CLI binary 해시의 일치는 확인했지만, 과거 전체 transitive graph의 동일성이나 감사 실패가 lock drift 때문에 생겼다는 인과는 증명하지 않았다.
 
-원래 호스트 evidence: `gh49-recovery-evidence/ci-context-diagnosis/hosted-execution/{REPORT.md,result.json,SHA256SUMS}`, `gh49-opencode-sdk/.sdlc/work/gh-49-opencode-support/refs/recovered-dependency-audit.md`. 전송 묶음 `gh49/`에 핵심 보고서를 복사했다. 기존 임시 raw 디렉터리가 사라진 과거 기록과 새로 실행한 결과를 구분한다.
+원래 호스트 evidence: `gh49-recovery-evidence/ci-context-diagnosis/hosted-execution/{REPORT.md,result.json,SHA256SUMS}`, `gh49-opencode-sdk/.sdlc/work/gh-49-opencode-support/refs/recovered-dependency-audit.md`. 원격 증거의 `gh49-plan/`, `gh49-evidence/`에 핵심 보고서와 텍스트 자료를 보존했다. 기존 임시 raw 디렉터리가 사라진 과거 기록과 새로 실행한 결과를 구분한다.
 
 ## 8. 이슈 #15 / #50, 병합 완료 PR, 승격 #53
 
@@ -180,7 +191,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 ## 9. 재개 순서와 완료 기준
 
 1. 최신 GitHub 이슈·PR·dev/main/tag 상태와 실행 중인 프로세스를 읽기 전용 확인한다. 이 문서의 고정 SHA가 현재값이라고 가정하지 않는다.
-2. §3 묶음으로 로컬 전용 #40/#46 상태를 별도 작업 트리에 복구한다. 이미 있는 작업을 다시 만들거나 완료된 worker를 재시작하지 않는다.
+2. §3의 원격 refs와 증거 브랜치로 #40/#46 상태를 별도 작업 트리에 복구한다. 이미 있는 작업을 다시 만들거나 완료된 worker를 재시작하지 않는다.
 3. #40의 차단된 번역 입력, 카탈로그 의미·형식·저장 호환성 검사를 해결한다. 독립적으로 가능한 reconciliation은 기존 승인 범위에서 진행하되 미완료 상태로 병합하지 않는다.
 4. #57의 진단 중단 조건·SDK 감사 위험에 대한 다음 결정을 먼저 명확히 한다. 기존 1회 실행 승인을 재사용하지 않는다. #40와 겹치는 capture/worker/context/문서·의존성 변경은 최신 dev 기준으로 통합 리뷰한다.
 5. #40 → #46의 종속 순서를 지키고, #57도 담당자와 합의된 최신 dev 위에서 완료한다. 각 정확한 후보의 필수 7개 검사와 병합 후 결과를 확인한다.
@@ -194,7 +205,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 - GitHub 상태·heads·checks·release는 이 인계 작성 중 API로 직접 조회했다. 아래 전체 목록이 그 스냅샷이다.
 - `.sdlc`와 recovery evidence의 과거 PASS/FAIL은 실제 저장된 기록을 읽었으며, 새로 재실행한 결과라고 쓰지 않았다.
 - PR40 세부 기록: 원래 worktree의 `.sdlc/work/261025-pr40-review-repair/refs/resume-checkpoint.md`, `refs/release-coordination-handoff-20261025.md`, `refs/translation-input-manifest.json`, `docs-only-sol/documentation-evidence.json` 및 `review.out.md`.
-- 릴리스 승인·한도 기록: `gh53-verification-gates/.sdlc/work/integrated-release-v0-8/refs/owner-authorization.md`, `pr57-hosted-execution-authorization.md`. 전송 묶음 `release/`에도 있다.
+- 릴리스 승인·한도 기록: `gh53-verification-gates/.sdlc/work/integrated-release-v0-8/refs/owner-authorization.md`, `pr57-hosted-execution-authorization.md`. 원격 증거의 `release/`에도 있다.
 - 역사적 보고서의 “pending CI” 등은 해당 문서 시점의 표현이다. 최신 #57 head/7개 검사 상태는 §7이 우선하지만, 별도 audit/원인 규명 제한을 덮어쓰지 않는다.
 - 이 문서의 배포는 인계 작업만 완료한다. 진행 중인 기능·리뷰·릴리스의 남은 승인과 검사를 면제하지 않는다.
 
@@ -204,7 +215,7 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 
 <!-- GitHub inventory appended from the captured API response. -->
 
-목록 생성 시각: `2026-10-26T08:34:55+09:00`. PR 50개, 이슈 5개.
+목록 생성 시각: `2026-10-26T11:35:35+09:00`. PR 51개, 이슈 5개.
 
 ### 이슈 전체
 
@@ -270,3 +281,4 @@ Git에 포함되지 않은 `.sdlc` 증거와 로컬 raw artifacts는 일반 clon
 | [#55](https://github.com/cskwork/scopeweaver/pull/55) | MERGED | `fix/gh-53-verification-gates` → `dev` | test(chat): verify focus on the current compaction request |
 | [#56](https://github.com/cskwork/scopeweaver/pull/56) | MERGED | `fix/gh-53-retry-dialog` → `dev` | test(chat): settle cancelled edit dialog before retry |
 | [#57](https://github.com/cskwork/scopeweaver/pull/57) | OPEN | `feat/gh-49-opencode-sdk` → `dev` | feat(llm): add guarded OpenCode SDK and free-model support |
+| [#58](https://github.com/cskwork/scopeweaver/pull/58) | MERGED | `fix/handoff-20261026` → `dev` | docs: record all-issue and PR continuation handoff |
