@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { BridgeError, fail, safeJSON } from "./protocol.mjs";
+import { assertNoUnmanagedConfig } from "./native-cli.mjs";
 
 const require = createRequire(import.meta.url);
 const gateMarker = "SCOPEWEAVER_LEGACY_SECOND_REQUEST";
@@ -135,6 +136,7 @@ function providers(config) {
 }
 
 async function start({ root, providerConfig, request, map, rawHistory = {}, signal }) {
+  await assertNoUnmanagedConfig();
   if (signal?.aborted) throw canceled();
   const runtime = `${root}/legacy`;
   for (const dir of ["home", "config", "data", "state", "cache", "work"]) await mkdir(`${runtime}/${dir}`, { recursive: true });
