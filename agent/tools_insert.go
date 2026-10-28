@@ -228,15 +228,20 @@ func (t *ToolSet) insertAssets() actool.CoreTool {
 			var results []result
 			var errs []errEntry
 
-			// Load asset-gate rules once; a read failure skips evaluation rather than blocking insertion.
+			// Load all asset-gate rules before writing; unreadable rules must fail closed.
 			// Blocks combine global and task rules; allows are task-local.
-			blockRules, _ := t.as.ListAssetInterceptRules()
+			blockRules, err := t.as.ListAssetInterceptRules()
+			if err != nil {
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
+			}
 			var allowRules []db.AssetInterceptRule
 			if t.taskID > 0 {
-				if tb, ta, err := t.as.TaskInterceptRulesSplit(t.taskID); err == nil {
-					blockRules = append(blockRules, tb...)
-					allowRules = ta
+				tb, ta, err := t.as.TaskInterceptRulesSplit(t.taskID)
+				if err != nil {
+					return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 				}
+				blockRules = append(blockRules, tb...)
+				allowRules = ta
 			}
 
 			for i, item := range a.Assets {
