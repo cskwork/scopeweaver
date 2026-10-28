@@ -252,6 +252,7 @@ jobs:
           - { runner: ubuntu-24.04, os: Linux, arch: x86_64 }
           - { runner: ubuntu-24.04-arm, os: Linux, arch: aarch64 }
           - { runner: macos-15-intel, os: Darwin, arch: x86_64 }
+          - { runner: macos-15, os: Darwin, arch: arm64 }
     steps:
       - name: Read source-build runner capacity without acquiring source
         env:
