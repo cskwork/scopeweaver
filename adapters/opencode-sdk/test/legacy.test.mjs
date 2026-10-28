@@ -1,6 +1,8 @@
-import { test, expect, beforeAll, afterAll } from "bun:test";
+import { test, expect, beforeAll, afterAll, spyOn } from "bun:test";
 import http from "node:http";
-import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
+import * as fs from "node:fs/promises";
+import { mkdtemp, rm, readFile, mkdir, writeFile, symlink } from "node:fs/promises";
+import * as childProcess from "node:child_process";
 import { createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
@@ -10,6 +12,7 @@ import { completeLegacy, discoverLegacyModels } from "../src/legacy.mjs";
 import legacyPlugin from "../src/legacy-plugin.mjs";
 import { createBridge } from "../src/bridge.mjs";
 import { parseRequest } from "../src/protocol.mjs";
+import { unmanagedConfigPaths } from "../src/native-cli.mjs";
 let dependencySnapshot;
 async function dependencyDigest() {
   const root = fileURLToPath(new URL("../", import.meta.url)), paths = [];
@@ -28,6 +31,33 @@ function cliPIDs() {
 function noNewCLI(before) { expect([...cliPIDs()].filter(pid => !before.has(pid))).toEqual([]); }
 const tool = { name: "host.read", description: "Capture only", input_schema: { type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false } };
 const request = (extra = {}) => ({ request_id: crypto.randomUUID(), session_id: "host-session", model: "fixture/test", system: ["HOST SYSTEM EXACT"], messages: [{ role: "user", content: [{ type: "text", text: "HOST USER EXACT" }] }], tools: [tool], max_tokens: 37, temperature: 0.2, stop: ["END"], thinking: "disabled", ...extra });
+
+test("legacy refuses unmanaged configuration entries before launching the CLI", async () => {
+  const root = await mkdtemp(`${tmpdir()}/legacy-config-policy-`), lstat = fs.lstat;
+  const paths = unmanagedConfigPaths(), entries = [`${root}/managed.json`, `${root}/managed-dir`];
+  await writeFile(entries[0], "{}"); await mkdir(entries[1]);
+  if (process.platform !== "win32") {
+    entries.push(`${root}/broken`); await symlink(`${root}/absent`, entries.at(-1));
+  }
+  // Redirect only system-path probes to disposable entries, never alter host config.
+  let present, entry;
+  const probe = spyOn(fs, "lstat").mockImplementation(path => {
+    if (paths.includes(path)) return path === present ? lstat(entry) : Promise.reject(Object.assign(new Error(), { code: "ENOENT" }));
+    return lstat(path);
+  });
+  const spawn = spyOn(childProcess, "spawn").mockImplementation(() => { throw new Error("Unexpected CLI launch"); });
+  try {
+    const context = { root, providerConfig: { providers: {} } };
+    for (present of paths) for (entry of entries) {
+      await expect(discoverLegacyModels(context)).rejects.toMatchObject({ code: "configuration_error", status: 400 });
+      await expect(completeLegacy(request(), context)).rejects.toMatchObject({ code: "configuration_error", status: 400 });
+    }
+    expect(spawn).not.toHaveBeenCalled();
+    expect(existsSync(`${root}/legacy`)).toBe(false);
+  } finally {
+    spawn.mockRestore(); probe.mockRestore(); await rm(root, { recursive: true, force: true });
+  }
+});
 
 async function fixture(mode, callback) {
   const root = await mkdtemp(`${tmpdir()}/scopeweaver-test-legacy-`), requests = [], events = [];
