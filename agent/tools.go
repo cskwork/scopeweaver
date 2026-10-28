@@ -1235,8 +1235,9 @@ func (t *ToolSet) proveGoal() actool.CoreTool {
 			if err != nil || evidenceNode == nil || (evidenceNode.Kind != db.KindFact && evidenceNode.Kind != db.KindFinding) {
 				return actool.Errorf(locale.Text(locale.FromContext(ctx), "evidence_id must be a fact/finding in this task or a directly associated task")), nil
 			}
-			_ = t.ts.Link(ev, db.RelProves, goal)
-			_ = t.ts.SetNodeState(goal, "met")
+			if err := t.ts.ProveGoal(goal, ev); err != nil {
+				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
+			}
 			// After each prove_goal, check whether all goals are met and set GoalMet
 			// automatically, without requiring an explicit goal_met call from the model.
 			if goals, err := t.ts.ListByKind(db.KindGoal, 1000); err == nil && len(goals) > 0 {
