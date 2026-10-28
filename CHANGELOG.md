@@ -13,8 +13,8 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 
 #### Changed
 
-- Clarified scope wording in prompts, UI and documentation: company/task scope is prompt guidance plus an asset-recording and coverage filter, not a network boundary. Asset rules gate recording, not network calls; task rules apply only inside a task, while chat uses global block rules only. Blocking tool calls requires Interception rules (none configured by default except built-in destructive-command rules); a real network boundary needs egress control outside ScopeWeaver.
-- Clarification of the preserved upstream `task_scope` entry below: its claim that scope defines authorization describes no enforced tool-call or network boundary. Scope supplies prompt guidance and asset-query filtering; coverage uses it as a metric denominator.
+- Clarified scope wording in prompts, UI and documentation: company/task scope is prompt guidance plus an asset-recording and coverage filter, not a network boundary. Asset rules gate recording, not network calls; task rules apply only inside a task, while chat uses global block rules only. Blocking out-of-scope tool calls requires matching Interception deny rules (none configured by default except built-in destructive-command rules); a real network boundary needs egress control outside ScopeWeaver.
+- Clarified the scope wording in the upstream `task_scope` entry below: scope declares the intended engagement targets and guides agent behavior and asset-query filtering, without enforcing a tool-call or network boundary. Coverage uses it as a metric denominator.
 
 ### Interception
 
@@ -299,7 +299,7 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 - Relaxed global-overview wording to encourage exploratory breadth and prompt cross-intent clues instead of premature convergence.
 - Simplified Worker boundaries: an initial obstacle does not establish exhaustion; complete reasonable methods within the intent before concluding.
 - Removed per-asset `related` from `insert_assets`. It only controlled task-scope inclusion and was never stored, so re-registration erased its effect and the UI could not show exclusions. It required an extra model judgment that could not be retained.
-- `task_scope` no longer depends on the asset-coverage toggle. `insert_assets` always adds automatic scope (`source='auto'`), and `add_task_scope` remains available to planner, task MainAgent and objective decomposition. Scope defines authorization and asset-query filtering; coverage only decides whether to use it as a metric denominator. Previously disabling coverage stopped both auto/agent writes, leaving only manual UI rows. `list_untested_assets` still hides with coverage because it is purely a coverage view.
+- `task_scope` no longer depends on the asset-coverage toggle. `insert_assets` always adds automatic scope (`source='auto'`), and `add_task_scope` remains available to planner, task MainAgent and objective decomposition. Scope declares the intended engagement targets and guides agent behavior and asset-query filtering; coverage only decides whether to use it as a metric denominator. Scope does not technically restrict tool network access. Blocking out-of-scope tool calls requires matching Interception deny rules; network isolation requires external egress controls. Previously disabling coverage stopped both auto/agent writes, leaving only manual UI rows. `list_untested_assets` still hides with coverage because it is purely a coverage view.
 
 #### Fixed
 

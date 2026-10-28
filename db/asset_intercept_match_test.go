@@ -1,6 +1,10 @@
 package db
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/Autumn-27/artex/locale"
+)
 
 func rule(kind, pattern string, enabled bool) AssetInterceptRule {
 	return AssetInterceptRule{Kind: kind, Pattern: pattern, Enabled: enabled}
@@ -125,5 +129,49 @@ func TestAssetInterceptCandidates(t *testing.T) {
 	_, ips, _ := b.interceptCandidates()
 	if r, _, ok := MatchAssetInterceptRules([]AssetInterceptRule{rule("cidr", "10.0.0.0/8", true)}, nil, ips, nil); !ok {
 		t.Fatalf("IP in URL must match CIDR, ips=%v rule=%+v", ips, r)
+	}
+}
+
+func TestPersistedAssetExactDomainAllowlist(t *testing.T) {
+	allow := []AssetInterceptRule{rule("exact_domain", "example.com", true)}
+	for _, tc := range []struct {
+		name  string
+		asset Asset
+		want  bool
+	}{
+		{"root host", Asset{Domain: "example.com", RootDomain: "example.com"}, true},
+		{"child host", Asset{Domain: "child.example.com", RootDomain: "example.com"}, false},
+		{"URL child host", Asset{URL: "https://child.example.com/path", RootDomain: "example.com"}, false},
+		{"URL root host", Asset{URL: "https://example.com/path", RootDomain: "example.com"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := tc.asset.evaluateAssetGateForLanguage(locale.ServerDefault(), nil, allow)
+			if decision.Allowed != tc.want {
+				t.Fatalf("Allowed = %v, want %v for %+v", decision.Allowed, tc.want, tc.asset)
+			}
+			if !decision.Allowed && decision.Reason == "" {
+				t.Fatal("An allowlist miss must include a reason")
+			}
+		})
+	}
+
+	child := Asset{Domain: "child.example.com", RootDomain: "example.com"}
+	if decision := child.evaluateAssetGateForLanguage(locale.ServerDefault(), nil,
+		[]AssetInterceptRule{rule("exact_domain", "child.example.com", true)}); !decision.Allowed {
+		t.Fatalf("An explicitly allowed child host must be allowed: %+v", decision)
+	}
+	rootOnly := Asset{RootDomain: "example.com"}
+	if decision := rootOnly.evaluateAssetGateForLanguage(locale.ServerDefault(), nil,
+		[]AssetInterceptRule{rule("fuzzy_domain", "example.com", true)}); !decision.Allowed {
+		t.Fatalf("Fuzzy-domain rules must retain root-only matching: %+v", decision)
+	}
+	if decision := rootOnly.evaluateAssetGateForLanguage(locale.ServerDefault(), nil, allow); decision.Allowed {
+		t.Fatalf("Root-domain metadata must not satisfy an exact allow rule: %+v", decision)
+	}
+	block := []AssetInterceptRule{rule("exact_domain", "example.com", true)}
+	decision := child.evaluateAssetGateForLanguage(locale.ServerDefault(), block,
+		[]AssetInterceptRule{rule("exact_domain", "child.example.com", true)})
+	if decision.Allowed || decision.Reason != block[0].Reason() {
+		t.Fatalf("Root-domain blocking must retain precedence: %+v", decision)
 	}
 }
