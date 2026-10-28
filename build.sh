@@ -283,6 +283,9 @@ package_binary() {
   mkdir -p "$package_root/adapters/agent"
   cp adapters/agent/package.json adapters/agent/package-lock.json adapters/agent/README.md adapters/agent/pi-extension.js "$package_root/adapters/agent/"
   cp -R adapters/agent/src adapters/agent/test "$package_root/adapters/agent/"
+  mkdir -p "$package_root/adapters/opencode-sdk"
+  cp adapters/opencode-sdk/package.json adapters/opencode-sdk/bun.lock adapters/opencode-sdk/README*.md "$package_root/adapters/opencode-sdk/"
+  cp -R adapters/opencode-sdk/src adapters/opencode-sdk/test "$package_root/adapters/opencode-sdk/"
   mkdir -p "$package_root/log"
   cp log/changelog-*.md "$package_root/log/"
   (cd "$ARTEX_PACKAGE_DIR" && zip -q -r -9 "$(basename "$archive")" "$(basename "$package_root")")
