@@ -94,8 +94,8 @@ function checkCatalog(source, translated, locale) {
 }
 
 test("every shipped catalog is complete and preserves placeholders and rich tags", () => {
-  // 3266 shipped keys + 2 OpenCode Go provider template keys + 3 scope/asset-rule guidance keys.
-  assert.equal(Object.keys(catalogs.en).length, 3271);
+  // 3271 existing six-language keys + 12 OpenCode SDK bridge labels and guidance.
+  assert.equal(Object.keys(catalogs.en).length, 3283);
   assert.deepEqual(catalogLocales.sort(), [...LOCALES].sort());
   assert.deepEqual(Object.keys(catalogs).sort(), [...LOCALES].sort());
   for (const locale of LOCALES) checkCatalog(catalogs.en, catalogs[locale], locale);
@@ -123,6 +123,17 @@ test("every shipped scope label and planning example preserves the exact /24 CID
   for (const key of ["interface.m0237", "interface.m2538"]) {
     const fixture = { ...catalogs.en, [key]: catalogs.en[key].replace("/24", "C-class") };
     assert.throws(() => checkScopeCIDR(fixture, "fixture"), /exact CIDR boundary/);
+  }
+});
+
+test("SDK bridge guidance preserves runtime, credential and model boundaries in every shipped language", () => {
+  for (const locale of LOCALES) {
+    const catalog = catalogs[locale];
+    for (const version of ["2.1.4", "1.19.4", "Windows"]) {
+      assert.ok(catalog["providers.sdkHelp"].includes(version), `${locale}: runtime boundary ${version}`);
+    }
+    assert.ok(catalog["providers.sdkTokenHelp"].includes("SCOPEWEAVER_OPENCODE_TOKEN"), `${locale}: separate bridge credential`);
+    assert.ok(catalog["providers.sdkModelHelp"].includes("providerID/modelID"), `${locale}: explicit native model ID`);
   }
 });
 

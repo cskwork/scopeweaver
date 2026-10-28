@@ -49,6 +49,12 @@ jobs:
         working-directory: adapters/agent
       - run: npm test && npm run check
         working-directory: adapters/agent
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.14"
+      - name: Verify OpenCode SDK adapter
+        working-directory: adapters/opencode-sdk
+        run: bun install --frozen-lockfile --ignore-scripts && bun run check && bun test --timeout 30000
       - name: Test adapter against real backend
         env:
           SCOPEWEAVER_ADAPTER_E2E: "1"

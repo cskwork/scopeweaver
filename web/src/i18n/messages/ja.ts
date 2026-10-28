@@ -3375,8 +3375,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   chooseTemplate: "テンプレートを選択…",
   general: "Z.ai GLM-5.3 · General API（推奨）",
   coding: "Z.ai GLM-5.3 · Coding Plan（参考）",
-  introduction:
-    "任意で接続欄に初期値を設定できます。プロファイル名、プロキシ、セッションヘッダー、その他の設定は保持されます。クラウドのテンプレートでは入力済みの API キーも保持します。Ollama のテンプレートでは、クラウドの認証情報がローカルのエンドポイントに送信されないよう、未保存のキーを消去します。Ollama の選択時はインストール済みモデルを読み取ります。クラウドのテンプレートはリクエストを送信しません。選択してもプロファイルは保存・有効化されません。設定ができたら保存し、別途有効化してください。すべての欄は引き続き編集できます。",
+  introduction: "テンプレートは新規プロファイルの欄を入力するだけで、保存や有効化は行いません。クラウドのテンプレートは入力済みのキーを保持し、Ollama と SDK のテンプレートは消去します。Ollama はインストール済みモデルを自動取得しますが、SDK は「モデルを読み込む」を押したときに取得します。SDK はプロキシとセッションヘッダーの設定も消去します。他の設定は引き続き編集できます。",
   generalHelp:
     "General API のエンドポイントと API 課金を使用します。Coding Plan のサブスクリプション枠とは別です。Z.ai アカウントのモデル利用権限と課金を確認してください。",
   codingHelp:
@@ -3404,6 +3403,18 @@ export const providers: Record<keyof typeof providersSource, string> = {
     "OpenRouter 経由の DeepSeek V4.1 Flash です。推論強度 low、max_tokens として送信する出力上限 16,384 トークン、コンテキストウィンドウ 0（既定 200K）を使用します。OpenRouter は繰り返されるプレフィックスを自動でキャッシュします。削減効果は未測定です。",
   opencodeGoHelp:
     "OpenCode Go のサブスクリプションゲートウェイ（https://opencode.ai/zen/go/v1、OpenAI 互換）です。推論強度 max、max_tokens として送信する出力上限 16,384 トークン、コンテキストウィンドウ 0（既定 200K）を使用します。ゲートウェイは x-opencode-session ヘッダーのないリクエストを拒否するため、このテンプレートが「セッションヘッダー」欄を設定します。OpenCode のサブスクリプションキー（opencode の OPENCODE_API_KEY）を使用します。このキーは opencode 独自のサブスクリプション規約に従うため、保存前に ScopeWeaver からの利用が認められることを確認してください。",
+  opencodeSdk: "OpenCode SDK · ブリッジ",
+  sdkGroup: "SDK ブリッジ",
+  sdkHelp: "ブリッジの実行環境は native CLI／クライアント 2.1.4（既定、ツール引数の原文を保持）または legacy SDK 1.19.4（安全な構造の JSON。元のバイト列は保持しません）です。どちらも Windows には対応していません。ホスト側のツール実行と承認は引き続き ScopeWeaver が管理します。",
+  sdkSecurity: "ループバックのブリッジもクラウドプロバイダーを呼び出せるため、ローカル専用 LLM モードでは使用できません。無料モデルの ID は現在の利用可能性を示すもので、サブスクリプションの利用権や無制限の利用枠を保証しません。",
+  sdkToken: "ブリッジトークン",
+  sdkTokenPlaceholder: "ブリッジトークンは必須です",
+  sdkTokenHelp: "クラウド API キーではなく、ブリッジに設定した専用の SCOPEWEAVER_OPENCODE_TOKEN を入力してください。空欄では同じ SDK エンドポイントの保存済みトークンだけを保持します。URL の編集で入力済みトークンを消去し、エンドポイントや形式の変更では保存済みトークンも保持しません。保存済みのプロバイダー認証情報は取り込みません。",
+  sdkModelHelp: "providerID/modelID 形式を使用してください。「モデルを読み込む」を押すと、推論を行わずにブリッジの一覧を取得します。テンプレートの選択だけではモデルの取得、プロファイルの保存や有効化は行いません。",
+  sdkOptionsHelp: "出力はネイティブモデルが宣言する上限までに制限します。選択したモデルが対応する推論オプションを使用してください。未対応の設定はプロバイダー側で失敗する場合があります。この出力フィールドの選択は適用されません。",
+  sdkSessionHelp: "このブリッジはカスタムセッションヘッダーに対応していません。ScopeWeaver がリクエストごとに会話履歴を渡します。",
+  sdkEndpoint: "ブリッジ URL",
+  sdkProxyHelp: "ブリッジ用のプロキシには対応していません。ループバック URL を使い、接続先プロバイダーへの接続はブリッジ側で設定してください。",
   officialModel: "GLM-5.3 モデルガイド",
   officialPolicy: "Coding Plan 利用ポリシー",
   groupCloud: "クラウドプロバイダー",
