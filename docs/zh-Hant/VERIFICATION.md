@@ -6,6 +6,189 @@
 
 各語言版本請見本頁上方導覽。
 
+<a id="current-dev-pr-40-reconstruction--2026-10-25"></a>
+
+## 基於目前 dev 重建 PR #40 — 2026-10-25
+
+最初僅將 `aebea3e..9b04754` 中預期的四個提交重建到 `f354c920` 上；未重放分叉的分支歷史。隨後，候選版變基到 `7af06f1`，保留其六語言整合。目前的整合要求恰好 **1,987** 個正式鍵具有英文、韓文、簡體中文、繁體中文、日文和西班牙文的原始譯文。既有 OpenCode 環境鍵隔離、工作階段標頭優先順序及 User-Agent 預設值均予以保留。
+
+更廣的取消／競態測試覆蓋揭露了既有規劃器結果未同步的問題：流式工作階段可能在暫停時傳回，而真實的 `prove_goal` 處理程式仍在設定 `GoalMet` 及其原因。終結工具的寫入方與規劃器的結果快照現在共用一個私有互斥鎖。這保留了匯出欄位、真實工具／終結回執，以及目前暫停與完成之間的優先次序；不增加供應商請求，也不改變正式資料庫 schema。
+
+終結證明關卡還要求**真實且成功的 SDK 工具結果回執**，且須與標記的工具使用 ID 及發起它的模型回應相符。私有捕獲觀察器在下一次壓縮或推理邊界之前執行；僅處理程式完成或 `PostToolUse` hook 本身不能滿足資格。對抗回歸使用真實的 `goal_met`、**30 ms** 執行預算與 **120 ms** 工具後 hook：舊關卡在收到中斷回執後吞掉了結算，使**供應商呼叫為 1 次而非 2 次**，而原生原因仍為 `timeout`，錯誤仍為 nil。修正後的路徑保留該中斷回執，允許真實結算呼叫及其壓縮，並拒絕延遲 hook 賦予資格。第二個同步回歸將 hook 保持等待，直到捕獲觀察到中斷，以證明真實處理程式在超時回執之前執行；正常成功證明、父上下文取消、反應式溢出與延遲來源防護仍在覆蓋範圍內。詳見[終結證明回歸](../../agent/terminal_proof_test.go)。
+
+最初的重建仍有繼承的關閉缺口：在未改動的 `f354c920` 上，`TestMainServeFailureRunsShutdown` 在 **10 次獨立執行中失敗 3 次**，包括資料庫關閉後排程器仍寫入。後續修復在啓動前登記排程器歸屬。`Manager.Close` 在管理器鎖之外取消並等待排程器結束，最多 **5 秒**，之後才停止日誌寫入器並關閉資料庫。如果排程器 SQL 仍然阻塞，Close 傳回 `context.DeadlineExceeded` 並**保持資料庫開啟**；工作結束後，可以重試關閉。CLI 原本就會報告關閉失敗並以 1 退出。這不表示既有不帶上下文的 SQL 呼叫變得可取消。已預先取消的排程器不再初始化水位或啓動下一輪 tick。[阻塞 SQL 回歸](../../server/scheduler_shutdown_test.go)檢查並行關閉超時、工作仍活躍時資料庫保持開啟，以及解除阻塞後並行重試成功。首次並行全套件執行還出現日誌接收器測試的全域行數斷言失敗，當時其他套件的子處理程式使用同一個資料庫；跨包干擾仍屬假設，因此最終驗證遵循 CI，為每個套件使用獨立的可拋棄資料庫。這些歷史回執不代表最終確切提交的代管 CI、原生 Windows 或真實供應商驗證。
+
+整合候選版在網頁端使用 Next.js **16.4.3** 與 Zod **4.6.7**，配接器使用 Zod **4.6.7**，並在鎖定檔案中以相容方式修復 body-parser **2.4.0**、fast-uri **3.1.9**、ip-address **10.7.4** 和 qs **6.16.1**。配接器 SDK 仍固定為 **1.32.0**。六語言變基後，兩個套件的全新 `npm ci` 均通過；網頁測試通過 **75/75**，冷啟動靜態建置匯出 **31 頁**，配接器測試通過 **18/18**，語法檢查也通過。先前 72/7 測試回執仍作為歷史證據保留。目前兩項 `npm audit --audit-level=low` 檢查均報告 **0 個漏洞**。這些結果取代了最初 Next.js 16.4.0 公告／建置失敗的限制；原始回執仍為歷史證據。瀏覽器原生貼上／撤銷按鍵現在使用 `ControlOrMeta+V` 與 `ControlOrMeta+Z`，保留斷言和超時。最終標準瀏覽器執行及確切提交的代管 CI 是獨立關卡，本節不宣稱已通過。
+
+六語言整合後的相容性檢查必須覆蓋每一種已發佈來源語言及每一種請求輸出語言的舊版內建規劃器／工作器提示詞與 `add_intent` schema。新增 zh-Hant／ja／es 測試資料來自不可變的 PR40 之前 dev `7af06f1`。精確識別必須保留已編輯提示詞、自定義 schema 欄位／預設值、已存行與原始歷史。這擴展了下方原先的三語言驗證。
+
+<a id="patched-sdk-and-model-specific-context-windows"></a>
+
+### 已修補 SDK 與各模型的上下文視窗
+
+後端 CI 工作必須執行巢狀的 Norma 測試套件。請在根套件之外單獨執行 `(cd third_party/norma && go test ./... -count=1)`；詳見[來源與修改聲明](PROVENANCE.md#norma-execution-and-compaction-fixes--2026-10-25)。
+
+回歸集覆蓋原始的 30 ms / 120 ms 工具中斷競態、小視窗節奏與長工作階段邊界、有實質收益的摘要合併、真實溢出重試視圖、單調學習上限，以及不得觸發上下文恢復的輸出錯誤。既有數值邊界與原始歷史保持不變。舊斷言認為 40K 無法進入第二層，這在未改動的上游就已不成立；替代測試使用同一測試資料，要求真正執行合併、回收 token 並限制摘要大小。
+
+`TestNoaRetainsConfiguredModelContextWindow` 實際執行 40K、128K、200K、250K、400K 與 1M 的 Noa 工作階段。主應用修正前，所有非 200K 情況都會變成 200K。`enableNoa` 現在先傳入已解析配置中的正數視窗，再清除被替換的壓縮器。其他測試分別覆蓋視窗缺失時的回退、停用 Noa、損壞狀態恢復，以及既有本地 Ollama 策略。`MaxTokens` 仍獨立限制輸出。200K 回退適用於未設定視窗的情況；不是通用模型上限。SDK 在 200K 及以上的預設值保持不變，而有實質收益的摘要按數量決定是否合併的條件則有意作了調整，該調整適用於所有上下文視窗，與視窗大小無關。
+
+<a id="trigger-evidence-in-the-first-planner-request-2026-10-18"></a>
+
+## 首次規劃器請求中的觸發證據（2026-10-18）
+
+這是原始提交 `ffe260435fed6576394d613991aaf6e8010d3f48` 上的本地候選版，已回移共用 CLI 修正。通常，finding 或工作器完成事件會攜帶觸發摘要及精簡的 `graph_overview` 喚醒規劃器；`prove_goal` 仍要求每個目標條件均有已記錄證據。精簡條目缺少完整的 finding／fact 欄位，因此證明前讀取 `node_detail` 是合理的。
+
+[Planner.Plan](../../agent/planner.go) 的實際變更節錄如下，省略了中間未變動的任務上下文設定：
+
+```go
+// Before
+situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+// After
+overview := tsx.graphOverviewData()
+situational := renderTriggers(ts, triggers) + renderGraphOverview(overview)
+// After ensureRunDir and WithReviewContext:
+situational += renderPlannerEvidence(ctx, overview, triggers, tools, ts.ID(), taskDir)
+```
+
+第一行新程式碼只捕獲一次既有的有界概覽；第二行呈現同一快照。最後一行在任務／審查上下文建立後，為具體 `finding`／`done` 觸發 intent 所產生、屬於目前 exploration 的 fact／finding 候選節點附上完整詳情。它不遍歷 `related_tasks`，也不擴展全域譜系。[附加實現](../../agent/planner_evidence.go)最多進行 **4 次讀取嘗試**，且僅當**整個附件不超過 32,768 個 UTF-8 位元組**時才納入完整節點，包含本地化標頭、JSON 外層與 `omitted_count`；過大的節點會被省略，不會截斷。重複候選會去重。
+
+只有最終解析出的 `node_detail` 能力可以讀取：其 schema 必須接受輸入，`IsReadOnly` 必須成立，權限必須明確允許未改動的輸入。包裝器、預設值、計量、受限結果與錯誤均仍有效；不安全或不完整的結果會被省略，不會回退到原始輔助函數。標頭在 EN／KO／zh-Hans 中均完整，並將記錄內容標記為不可信觀察。既有顯式讀取（包括關聯的直接來源節點）保留原本的訪問規則。
+
+具體資料行來自 **CLI 所屬的合成環回 R22 實驗**，並非原始正式環境事件：intent `3` 完成一次自有 GET 並持久化 fact `4` 與 finding `5` 後，目標 `2` 仍未達成。目標要求 finding 名稱精確為 `SYNTHETIC LAB ONLY public debug marker`、嚴重程度 `low`、標記與觀察內容。在 **2026-10-17 22:42:31+09:00**，規劃器為取得這些缺少的完整欄位，合理地讀取了 `node_detail` `5` 與 `4`。測試框架清理在證明前的 **22:42:54+09:00** 將其暫停；這不是人工暫停。R22 在未變動的 **420 秒任務預算**下，於**總計 470.50 秒**後失敗。底層模型／供應商延遲的原因**未知**。修正後，同一快照候選中符合資格的完整詳情會進入觸發回合的首次請求；詳情本身並不構成證明。
+
+| 本地候選版檢查 | 觀察結果 |
+| --- | --- |
+| 原始完整 `agent` 包，無 overlay 的確切正式原始碼 | 598 個測試／子測試通過，0 失敗／略過；等效 CLI 為 607 通過，0 失敗／略過 |
+| 三個 `planner_evidence*test.go` 檔案中的新增回歸 | 31 個測試／子測試通過；實際 `Planner.Plan` 流式／非流式首次請求相等、九種權限情況、數量／位元組邊界、去重／隔離、缺少／已刪／延遲／隱藏證據、顯式恢復、不自動證明與多個目標 |
+| 原始聚焦伺服器證明／語言區域檢查及完整 `locale` 包 | 分別通過 5 與 19 項，0 失敗／略過；保留 **1,986 個鍵 × 3 種語言**的嚴格完整性，因新標頭將預期數量由 1,985 更新 |
+| 原始 `go build ./...`、`go vet ./...` | 兩者原生退出碼均為 0 |
+| Linux `-race`，目前等效的 CLI 原始碼 | 聚焦檢查 49 項與完整 `agent` 包 607 項通過，0 失敗／略過；兩者實際 Go 退出碼均為 0，無 `DATA RACE`。已驗證全部 1,175 個快照原始碼檔案；這不是原始模組執行 |
+| 真實封裝 CLI 環回驗收，全部五種情況 | core 19.14s、GLM LOW 82.63s、Flash LOW 114.84s、OAuth LOW 108.12s 與 Flash HIGH 317.83s 原生退出碼均為 0，各自使用未變動的 420 秒任務預算。這些單次實驗執行不是效能比較 |
+
+未改動的原始基線在流式及非流式缺少上下文斷言上失敗（兩個葉節點及其父項失敗），並非設定失敗。回歸測試資料中的受控供應商用量為合成資料，不是付費 token 證據。仍須使用真實的 `prove_goal`、真實用量／回執與既有終結證明關卡；階段、工作器、努力級別、截止時間與重試行為均不變。反例：停用、受限、缺少、過大、未觸發或繼承的節點不會自動獲得完整詳情。可用時，顯式讀取可以恢復被省略／新產生的證據；單憑讀取資料不能完成目標，證明多個目標中的一個也不能完成任務。
+
+以上為本地工作樹結果，並非確切新提交的 CI。未改動的 Windows `TestChatBranchCopyRejectsDestinationSymlink` 權限失敗也在 CLI 基線 `650dc82910e5e36668161a5276455506f64713fe` 重現；未放寬任何檢查，也不宣稱完整原生伺服器成功。新候選版全部七項必要代管檢查仍待完成。PR #40 仍未合併，最終人工審查待完成；本節不宣稱已公開或發行。不引入公共 API、schema 或遷移變更。較早日期的章節保留其歷史結果。
+
+<a id="chat-context-readiness-2026-10-17"></a>
+
+## 對話上下文就緒狀態（2026-10-17）
+
+這是基於 PR #40 提交 c9fb642 的本地界面候選版。檢查器可以在首次 controls 請求完成之前打開。先前它會將尚未解析的工作階段視為草稿，再將首次解析出的工作階段當作切換而關閉面板。在[檢查執行 39031048389](https://github.com/cskwork/scopeweaver/actions/runs/39031048389) 中，中文桌面任務案例因關閉按鈕先不穩定、後脫離文檔而失敗。該代管提交仍是失敗證據；本次新結果為本地結果。
+
+重設邏輯節錄（binding 是請求的 controls 鍵；session 是解析出的工作階段識別）：
+~~~ts
+// Before: every change from draft to resolved identity ran the reset.
+epoch.current++;
+setOpen(false);
+// After: qualify the change before the existing reset.
+const previous = hydrated.current;
+hydrated.current = { binding, session };
+if (previous.binding === binding && !previous.session) return;
+epoch.current++;
+setOpen(false);
+~~~
+第一行新增程式碼讀取先前的 binding 與 session；第二行記住目前這組值。第三行僅在同一 binding 尚未解析出首個工作階段時保留已打開的面板。不同請求 binding 或後續已解析工作階段變化，仍會增加 epoch 並完整重設視圖／表單，包括焦點與保留數量。hook 暴露既有請求鍵；沒有伺服器 API 或翻譯標籤變更。
+
+具體受控資料行：任務 1、exploration 1、segment 0 通過真實任務 API 暫停。其首次 controls 回應被保持等待，直到 /context 打開。先前釋放該真實回應會使觸發按鈕關閉，導致正常點擊在 15 秒後超時（Go 退出碼 1）；現在逐位元組相同的瀏覽器判定檢查會保留打開的觸發按鈕並正常關閉（退出碼 0），供應商呼叫為零。任務暫停有別於對話關卡的 paused 欄位。
+
+| 凍結修正原始碼上的本地檢查 | 觀察結果 |
+| --- | --- |
+| 既有前端測試 | 65 通過，0 失敗／略過 |
+| 全新靜態前端建置 | TypeScript 與 31 頁完成；已驗證原生退出碼 0 |
+| 未改動的獨立首次回應延遲判定檢查 | 1 個 Go 測試通過，0 失敗／略過；供應商呼叫為零 |
+| 標準上下文瀏覽器測試資料 | 全部 12 個 EN/KO/zh-Hans × 1440/390 × 獨立／任務案例，加上 hydration 與請求 binding 防護均通過（14 個瀏覽器步驟；1 個 Go 測試，0 失敗／略過） |
+
+新增防護先使用真實的首次後端回應，再使用合成路由狀態來檢查後續已解析工作階段變化，以及被保持等待的舊上下文回應。每個替代回應均保持等待，直到舊內容斷言完成，避免新結果掩蓋洩漏。非預設焦點與保留數量 7 會重設為空焦點與預設值 2。反例：真實請求 binding 或後續已解析工作階段變化仍須重設；延遲結果不得恢復舊上下文。第二次真實任務查詢切換（完整執行中從任務 7 到 8）在新 controls 回應保持等待時觀察到了新 URL，保留同一個仍連接的檢查器觸發按鈕與文檔，重設焦點／保留數量，並在替代資料可能掩蓋問題前拒絕延遲舊上下文。這證明瞭已掛載狀態下請求 binding 的變化，而非重新掛載。延遲錯誤／壓縮成功分支仍僅經原始碼審查，未單獨執行。合成識別防護證明的是用戶端處理，不是伺服器 exploration 替換。其他上下文案例使用受控環回供應商；未呼叫任何付費／外部供應商。
+
+最初的 shell 包裝嘗試因環境／捕獲設定而停止；最終建置／測試退出碼另行記錄，保留警告，且未以原始碼／斷言變通來通過。先前規劃器／關閉變更予以保留。配對檔案記錄這些本地結果；下一次已提交候選版仍須獨立最終審查及全部七項代管檢查。PR 就緒不等於維護者批准、合併或公開發行。
+
+<a id="log-writer-shutdown-ownership-2026-10-17"></a>
+
+## 日誌寫入器的關閉歸屬（2026-10-17）
+
+伺服器將日誌保存在記憶體中，並通過異步資料庫寫入器持久化。先前取消伺服器上下文時不會等待該寫入器結束：使用後台上下文的插入可能在 `Manager.Close` 關閉連接池時仍然活躍。PR #40 提交 `14b5403` 的最近後端執行，在未改動的連接埠佔用關閉測試中揭露了此問題。
+
+寫入器與管理器之間的流程節錄：
+```go
+// Before: writer, then manager shutdown
+pg.InsertLog(level, tag, text) // background context
+return m.pg.Close()           // no writer join
+// After: writer, then manager shutdown
+pg.InsertLogContext(writeCtx, level, tag, text)
+logSink.StopDB(m.pg)
+return m.pg.Close()
+```
+第一行新程式碼使實際插入可取消；首次歷史恢復也使用同一個上下文。第二行只解除這個確切連接池的綁定，取消未完成 SQL，並在接收器鎖之外等待寫入器結束。每次同一擁有者的停止操作都共用該完成信號；另一個管理器的連接池不能停止它。只有之後第三行才關閉連接池。既有不帶上下文的 DB 方法委派給同一 SQL；環形緩衝區、stderr 與 SSE 傳遞仍可用，入隊通道從不關閉。
+
+一條觀察資料：後端執行 [39028154916](https://github.com/cskwork/scopeweaver/actions/runs/39028154916)，job `117383132313`，在 **2026-10-17 11:18:45 UTC** 的 `TestMainServeFailureRunsShutdown` 失敗。預期的連接埠佔用綁定失敗之後出現關閉及 `[logsink] db write: sql: database is closed`。另一個獨立真實 PostgreSQL 表鎖檢查，在未改動的 `14b5403` 上重現了 `Manager.Close` 傳回時其寫入器仍阻塞（Go 退出碼 1）。現在完全相同的測試資料會在鎖仍持有、連接池尚未關閉時通過；沒有過濾任何診斷。
+
+| 原始本地 R19 檢查 | 觀察結果 |
+| --- | --- |
+| 未改動的獨立阻塞插入回歸 | 1 通過，0 失敗／略過；保留基線行為 RED |
+| 真實 SQL 拒絕防護 | 1 通過，0 失敗／略過；可見 SQLSTATE `23514`，被拒行不存在，後續有效行已持久化 |
+| 凍結的 `TestStopDB*` 測試資料 | 6 通過，0 失敗／略過：無綁定、阻塞插入、其他連接池、已取消上下文、並行停止與 stderr 連續性 |
+| 未改動的連接埠佔用關閉測試 | 1 次執行加上 20 次重複執行通過；保留預期子處理程式失敗，父 Go 退出碼 0 |
+| `go build ./...`、`go vet ./...` | 兩者退出碼均為 0 |
+
+反例：真實的活躍上下文 SQL 拒絕仍必須報告；取消／等待結束並不會將它變成成功插入。這仍是盡力而為的日誌記錄，沒有為佇列中的行新增刷寫保證。並行測試資料檢查總體完成；每個等待方共用等待結束的行為也經原始碼審查驗證，不宣稱為單獨的執行時判定檢查。全部資料庫執行均使用可拋棄測試資料庫；獨立測試資料現在使用所提供可拋棄資料庫中的自有 schema，不需要 CREATE DATABASE 權限。正式權限、HTTP／schema 合約與既有規劃器測試不變。這些為本地結果，不是完整原生伺服器或發行聲明：繼承的 Windows 符號連結權限限制仍存在，下一次已提交候選版必須通過全部七項代管檢查。
+
+<a id="terminal-goal-completion-2026-10-17"></a>
+
+## 目標最終完成（2026-10-17）
+
+以下為本地 R17 候選版結果；最終獨立原始碼審查與確切候選版的代管關卡另計。R17 共用修正讓已完成的證明回合沿正常 SDK 路徑走完，再於另一上游請求前在本地結束規劃器。通常，`prove_goal` 將已確認的 fact／finding 關聯到目標，並標記該目標已達成；只有全部目標均已證明才設定 `GoalMet`。先前 `Plan` 會等待 `captureRun` 完成後才將該標記傳回引擎，因此工作階段等待另一次模型回應時，引擎無法完成。
+
+控制流程節錄（`...` 是未變動的活動回調）：
+```go
+// Before
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+// After
+installTerminalProofGateOn(&opts, tsx)
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+```
+第一行舊程式碼等待整個工作階段；第二行才對外提供目標結果。新增的一行在捕獲開始前安裝下一次請求的邊界。它讓目前回應、實際工具結果、延遲用量及對話記錄完成，再提供不含內容、上游用量為零的本地 `end_turn`，並跳過證明後不必要的 `Compactor.Pre`。它保留所選壓縮器、可選 `ContextView`、正常證明前／恢復行為，以及既有供應商／工具包裝器。原始 `ToolUseID` 及成功／失敗回應資格判定，防止延遲處理程式將舊失敗證明歸屬於後續成功回應。最新證明來源通過 compare-and-swap 保留；較舊或未知來源不能抹掉較新的有效證明。失敗記錄在產出錯誤前執行，即使其消費者立即停止亦然。
+
+具體實驗資料行：在**獨立 CLI R11 候選版**中（並非原始正式環境事件），finding 節點 `5` 於 **2026-10-17 18:36:24+09:00** 證明目標 `2`。未變動的 420 秒測試框架在 84 秒後的 **18:37:48+09:00** 暫停時，模型輸出仍活躍。該次執行恰有一個 GET、一個 intent 與一個 finding。回執為 `scopeweaver-cli/dist/pi-glm-flash-fix-20261017/r11-flash-high-digest.txt`；它說明瞭完成等待，不能說明底層供應商延遲原因。反例：部分／被拒證明必須正常繼續；失敗證明回應保留其真實錯誤／恢復路徑，不能賦予本地完成資格。
+
+原始原始碼證明使用受控供應商與可拋棄 PostgreSQL，不使用付費推理：
+
+| 本地候選版檢查 | 觀察結果 |
+| --- | --- |
+| 完整 `agent` 包，R17 使用已修正的自有 fact 測試資料 | 567 個測試／子測試通過，0 失敗、0 略過；包含流式／非流式、部分／被拒證明、父上下文取消、錯誤／恢復、壓縮／視圖及延遲來源案例 |
+| `TestWireTools`、內建執行時 S7 與實際引擎 S18 | 28 通過，0 失敗、0 略過；S18 在一次真實供應商呼叫後持久化 done，具有真實證明／終結回執，以及精確的輸入／輸出／快取讀取／快取寫入用量 **11/7/3/2**，原始對話記錄亦包含這些資料 |
+| S18 中真實暫停／供應商錯誤防護 | 如實的錯誤／原因回執保留已發出用量：使用者暫停為 **11/0/3/0**，供應商失敗為 **11/7/3/2**；觀察證明後暫停與任務完成的狀態優先次序，未新增策略斷言 |
+| 完整 `locale`、建置與靜態分析 | 19 個測試通過，0 失敗、0 略過；`go build ./...` 與 `go vet ./...` 退出碼 0 |
+
+已保存的原始 S18 基線失敗，因為它嘗試了第 2 次供應商呼叫，且沒有終結結果／完成；其取消／供應商錯誤回執防護通過。獨立不可變 R14 回歸也曾失敗：舊失敗處理程式借用了後續回應的識別，導致 calls=2 而非 3；候選版保留了三次呼叫回歸。審查者隨後在原始 R16 候選版重現相反順序：舊的失敗 response-1 處理程式在有效 response-2 證明之後完成，抹掉了其來源，導致不必要的第三次請求。未改動的實際工作階段 overlay 在 R17 前以 calls=3 失敗，現在以 calls=2/origin=2 及一份真實新證明結果通過。兩種延遲處理程式順序均通過[邊界回歸](../../agent/terminal_boundary_test.go)；[實際引擎回歸](../../server/engine_terminal_proof_test.go)另行保留完成／回執／用量檢查。首次整合 agent 執行失敗，僅因新測試資料預期 `CreateExploration` 會創建一個來源 fact。R16 自行建立已確認 fact；這次測試資料修正沒有改變任何斷言或正式程式碼。較早失敗回執仍予以保留。
+
+S18 現在復用 S7 在所提供可拋棄資料庫內的自有 schema 輔助函數，在刪除自己的 schema 前關閉存儲區；擁有資料庫的 NOCREATEDB 測試角色就足夠，正式權限保持不變。未改動的 `TestChatBranchCopyRejectsDestinationSymlink` 仍在本地 `server/chat_history_test.go:270` 失敗，因為 Windows 拒絕創建符號連結。不宣稱完整原生伺服器成功或已通過確切候選版全部七項代管檢查；CI／前端／瀏覽器交付仍待完成。根協調方負責另行進行競態／真實執行驗收；本節僅報告這些原始本地檢查。
+
+<a id="plannertool-contract-and-stored-stock-compatibility-2026-10-17"></a>
+
+## 規劃器／工具合約與已存內建內容相容性（2026-10-17）
+
+這是 `fix/glm-agent-contracts` 基於 `dev` 提交 `d7365ec` 的本地 Windows 結果。規劃器的 `parent_ids` 指引現在與既有僅接受 fact／finding 的處理程式一致，批次 `add_intent` 中繼資料說明瞭欄位與必要的 `summary`。規劃器／工作器指引保留全新驗證與重測，要求每個目標條件都有證據，且僅在成功派發或確認最終目標證明後結束回合。EN／KO／zh-Hans 資源均有配對。
+
+完全相同的舊版內建規劃器／工作器提示詞與 `add_intent` schema 會解析為修正後的執行時預設值。使用者編輯、綁定、啓用標記、已存行與提示詞歷史均不變；沒有正式資料庫遷移，也沒有處理程式語義變更。詳見[合約回歸](../../agent/planner_contract_test.go)、[內建內容相容性回歸](../../agent/legacy_stock_compat_test.go)及 [HTTP／執行時 PostgreSQL 證明](../../server/tools_stock_schema_test.go)。
+
+測試先行的證明成功編譯，並在基線上產生 **8 個頂層 agent 斷言失敗**與 **9 個 S7 內建 schema 子案例失敗**。僅為編譯測試而臨時使用的未變動尾部提取與直通解析器，在應用修正前已移除。候選版結果：
+
+| 本地檢查 | 觀察結果 |
+| --- | --- |
+| 完整 `agent` 套件與可拋棄 PostgreSQL | 549 個測試／子測試通過，0 失敗、0 略過 |
+| 完整 `locale` 包 | 19 通過，0 失敗、0 略過 |
+| 聚焦伺服器語言區域／工具／來源檢查 | 11 通過，0 失敗、0 略過；1,985 個正式鍵保留原始三語言完整性檢查 |
+| `TestExplorationDirectSourceReadView` | 使用可拋棄 PostgreSQL 通過 |
+| `TestStockMetadataRuntimePostgres` 加 `TestWireTools`，`-count=2` | 48 個測試／子測試通過，0 失敗、0 略過；實際環回 HTTP 處理程式、執行時解析及已存行／歷史回讀 |
+| 已保存的公開工具情境 | S11：全部 10 個主智能體／規劃器回調案例通過；S12：歷史譜系、來源及無關／間接父節點拒絕通過；S3：無效 kind／空白 summary 拒絕、部分錯誤及省略／空值／null 來源關聯通過 |
+| `go build ./...`、`go vet ./...`、差異空白檢查 | 通過 |
+
+`TestStockMetadataRuntimePostgres` 與 `TestEngineTerminalProofPersistsAuthenticReceipt` 要求顯式提供選擇 `scopeweaver_test_*` 的可拋棄 `ARTEX_TEST_DSN`。擁有資料庫的測試角色可以具有 **NOCREATEDB**，與 `make test-db` 一致。每份測試資料創建自己的 `stock_*` schema，並將所有池化連接的 `search_path` 僅設定為該 schema，保留所選資料庫與其他連接選項。測試在使用 `CASCADE` 僅刪除自己的 schema 前關閉存儲區；清理錯誤會報告，但刪除 schema 本身無法偵測空閒洩漏連接。`TestStockFixtureIsolationAndCleanup` 檢查多個池化連接、父表不可見／保留及 schema 刪除。可用 `go test ./server -run '^Test(WireTools|StockMetadataRuntimePostgres|StockFixtureIsolationAndCleanup|EngineTerminalProofPersistsAuthenticReceipt)$' -count=2` 重現隔離。正式資料庫權限與 schema 不變。這項測試資料修復取代了先前對子資料庫／CREATE DATABASE 的要求。
+
+首次 S3 測試框架嘗試在建立 hint 時使用無效狀態 `open` 而失敗；在通過的重跑前，測試資料修正為既有 `active` 狀態，沒有產品／斷言變更。最終 S7 設定在其他測試填入父資料庫後也通過了兩次。這些檢查確立合約與相容行為，不能說明先前真實 Flash 重複／超時的原因。此分支完整 `go test ./...`、前端／瀏覽器檢查及確切候選版全部七項必要 CI 工作仍待完成；不宣稱已合併或發行。
+
 <a id="shared-runtime-fixes-from-standalone-cli-verification-2026-10-17"></a>
 
 ## 獨立 CLI 驗證發現的共用執行時修正（2026-10-17）

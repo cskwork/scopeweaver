@@ -42,6 +42,9 @@
 [.github/workflows/ci.yml](.github/workflows/ci.yml)의 CI 작업과 같습니다.
 
 ```bash
+# 수정한 Norma SDK (별도 Go 모듈)
+(cd third_party/norma && go test ./... -count=1)
+
 # 백엔드: 모든 Go 패키지 (ARTEX_PG_DSN을 일회용 scopeweaver_test_* 데이터베이스로 지정)
 go test ./... -count=1
 

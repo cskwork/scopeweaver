@@ -43,6 +43,10 @@ dudas; no afirmes aprobación de un hablante nativo sin pruebas. Mantén complet
 Coinciden con los trabajos CI de [.github/workflows/ci.yml](.github/workflows/ci.yml):
 
 ```bash
+# patched Norma SDK (a separate Go module)
+(cd third_party/norma && go test ./... -count=1)
+
+
 # backend database-backed suites (db, server, agent): against a throwaway database
 # that is created and dropped for you. They require ARTEX_TEST_DSN and skip (never
 # fall back to the live DSN) without it — see docs/VERIFICATION.md.

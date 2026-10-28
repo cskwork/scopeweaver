@@ -57,6 +57,116 @@ export async function runChatContextChecks({base,token,fixture,step,check,openPa
    if(process.env.CHAT_CONTEXT_DEBUG)await p.evaluate(()=>{window.__contextDebug=[];document.addEventListener("focusin",e=>window.__contextDebug.push(["focus",e.target.tagName,e.target.getAttribute("aria-label")]),true);new MutationObserver(()=>{const t=document.querySelector("[data-chat-context-trigger]");window.__contextDebug.push(["state",t?.getAttribute("data-state"),!!document.querySelector("[data-chat-context-panel]")])}).observe(document.body,{subtree:true,attributes:true,attributeFilter:["data-state"],childList:true})});
    await closeContext(p,t.chatContextClose);const posted=[];p.on("request",r=>{if(r.method()==="POST"&&new URL(r.url()).pathname.includes("/controls/inputs"))posted.push(r.url())});await input.fill("/usage");await p.getByRole("button",{name:t.m0073,exact:true}).click();await p.locator("[data-chat-context-panel]").waitFor();check(posted.length===0,"/usage became a model prompt");await closeContext(p,t.chatContextClose);await input.fill("/compress Preserve tool details 1");await p.getByRole("button",{name:t.m0073,exact:true}).click();await p.getByText(t.chatContextSuccess,{exact:true}).waitFor();const compressedAgain=await (await api.get(actionURL(path,"context"))).json();check(Number(compressedAgain.history_revision)===Number(compacted.history_revision)+1,"/compress did not use the context endpoint");check(posted.length===0,"/compress became an admitted model prompt");
   })}finally{if(process.env.CHAT_CONTEXT_DEBUG)console.log("context-debug",JSON.stringify(await p.evaluate(()=>window.__contextDebug?.slice(-45))));await fixture.release();await p.context().close()}
+  if(`${locale}/${width}/${surface}`===(process.env.CHAT_CONTEXT_READINESS_CASE??"zh-Hans/1440/task"))await step(`[${locale}/${width}/${surface}] context panel survives initial controls hydration`,async()=>{
+   // Regression: opening /context before the first controls GET resolves must keep the
+   // panel open through that response (the original reset treated first hydration as a
+   // session switch, force-closing the panel so the later native close failed). The
+   // initial GET is held by a route, so the panel is provably pre-hydration and the
+   // released response is the real backend's. The guards below use synthetic route state
+   // for client identity: a later resolved session change under the same binding must
+   // still close the panel, and its late in-flight context response must never reach the
+   // view. The next step switches requested task bindings while pinning the actual
+   // mounted inspector trigger, so a remount cannot satisfy that separate oracle.
+   const tracked=promise=>{promise.catch(()=>{});return promise};
+   const within=(promise,ms,message)=>{const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error(message)),ms));timeout.catch(()=>{});return Promise.race([promise,timeout])};
+   const created=await api.post("/api/tasks",{data:{description:"Context readiness fixture",goal:"Keep fixture idle",seed_first_intent:false}});
+   check(created.ok(),await created.text());const task=await created.json();
+   check((await api.post(`/api/tasks/${task.id}/control`,{data:{action:"pause"}})).ok(),"readiness fixture pause failed");
+   const controlsPath=`/api/tasks/${task.id}/chat/controls`;const url=`${base}/function/tasks/detail?id=${task.id}`;
+   const p=await openPage(locale,token);await p.setViewportSize({width,height:900});
+   let releaseFirst=()=>{},releaseOld=()=>{},releaseReopened=()=>{};let firstReleased=false;
+   try{
+    let first=true,armed=false,routed=0;let firstSeenResolve,sessionChangedResolve;
+    const firstSeen=new Promise(resolve=>firstSeenResolve=resolve),sessionChanged=new Promise(resolve=>sessionChangedResolve=resolve);
+    const firstGate=new Promise(resolve=>releaseFirst=resolve),oldGate=new Promise(resolve=>releaseOld=resolve),reopenGate=new Promise(resolve=>releaseReopened=resolve);
+    await p.route(candidate=>candidate.pathname===controlsPath,async route=>{
+     if(route.request().method()!=="GET"){await route.continue();return}
+     routed++;
+     if(first){first=false;firstSeenResolve();await firstGate;await route.continue();return}
+     if(armed){const response=await route.fetch();check(response.ok(),"readiness controls fetch failed");const state=await response.json();state.session={...state.session,exploration_id:String(Number(state.session.exploration_id)+1)};await route.fulfill({response,json:state});sessionChangedResolve();return}
+     await route.continue();
+    });
+    const hydration=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===controlsPath&&response.request().method()==="GET"));
+    const contextLoaded=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===`${controlsPath}/context`&&response.request().method()==="GET"));
+    await p.goto(url);await within(firstSeen,10000,"initial controls GET not observed");
+    const input=p.locator("textarea[data-chat-draft]").first();await input.waitFor();await p.locator("[data-chat-context-trigger]").waitFor();
+    const calls=await fixture.calls();
+    await input.fill("/context");await p.getByRole("button",{name:t.m0073,exact:true}).click();
+    await p.locator("[data-chat-context-panel]").waitFor();
+    check(routed===1,"another controls request bypassed the held initial response");
+    check(await p.getByRole("button",{name:t.chatContextClose,exact:true}).count()===1,"close button missing before the initial controls response");
+    releaseFirst();firstReleased=true;check((await hydration).ok(),"initial controls response failed");await contextLoaded;
+    check(await p.locator("[data-chat-context-panel]").count()===1,"initial controls hydration closed an already-open context panel");
+    check(await fixture.calls()===calls,"readiness /context called the provider");
+    await closeContext(p,t.chatContextClose);await p.locator("[data-chat-context-panel]").waitFor({state:"detached"});
+    let contexts=0;let contextStartedResolve,staleDeliveredResolve;
+    const contextStarted=new Promise(resolve=>contextStartedResolve=resolve),staleDelivered=new Promise(resolve=>staleDeliveredResolve=resolve);
+    await p.route(candidate=>candidate.pathname===`${controlsPath}/context`,async route=>{
+     contexts++;
+     if(contexts===1){contextStartedResolve();await oldGate;await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({history_revision:"1",sequence:"1",profile_id:"1",model:"readiness-stale-context",compactor:"fixture",source:"measured",summary:"",updated_at:new Date(0).toISOString(),window:2,used:1,output_reserve:0,headroom:1,compression_count:0,estimated:false,categories:[]})});staleDeliveredResolve();return}
+     await reopenGate;
+     await route.continue();
+    });
+    await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();await within(contextStarted,10000,"old-session context load not observed");
+    await p.getByLabel(t.chatContextFocus,{exact:true}).fill("readiness old-session focus");await p.getByLabel(t.chatContextKeep,{exact:true}).fill("7");
+    armed=true;await p.evaluate(()=>window.dispatchEvent(new Event("focus")));await within(sessionChanged,10000,"session-change fixture not delivered");
+    await p.locator("[data-chat-context-panel]").waitFor({state:"detached"});
+    releaseOld();await within(staleDelivered,10000,"late context response not delivered");
+    await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();
+    check(await p.getByLabel(t.chatContextFocus,{exact:true}).inputValue()==="","session change retained previous focus");check(await p.getByLabel(t.chatContextKeep,{exact:true}).inputValue()==="2","session change retained previous keep count");
+    check(await p.getByText("readiness-stale-context").count()===0,"late context response from the replaced session leaked into the panel");
+    check(await p.getByText(t.chatContextUnknown,{exact:true}).last().isVisible(),"reopened panel lost its unobserved context view");
+    releaseReopened();await closeContext(p,t.chatContextClose);await p.locator("[data-chat-context-panel]").waitFor({state:"detached"});
+    check(await fixture.calls()===calls,"readiness guards called the provider");
+   }finally{if(!firstReleased)releaseFirst();releaseOld();releaseReopened();await p.context().close()}
+  });
+  if(locale+"/"+width+"/"+surface===(process.env.CHAT_CONTEXT_BINDING_CASE??"zh-Hans/1440/task"))await step("["+locale+"/"+width+"/"+surface+"] requested binding resets mounted inspector and rejects late context",async()=>{
+   const tracked=promise=>{promise.catch(()=>{});return promise};
+   const within=(promise,ms,message)=>{const timeout=new Promise((_,reject)=>setTimeout(()=>reject(new Error(message)),ms));timeout.catch(()=>{});return Promise.race([promise,timeout])};
+   const tasks=[];
+   for(const name of ["A","B"]){
+    const created=await api.post("/api/tasks",{data:{description:"Context binding fixture "+name,goal:"Keep fixture idle",seed_first_intent:false}});check(created.ok(),await created.text());const task=await created.json();
+    const paused=await api.post("/api/tasks/"+task.id+"/control",{data:{action:"pause"}});check(paused.ok(),"binding fixture pause failed");check((await paused.json()).paused===true,"binding task pause not persisted");tasks.push(task);
+   }
+   const [a,b]=tasks;const aPath="/api/tasks/"+a.id+"/chat/controls",bPath="/api/tasks/"+b.id+"/chat/controls";
+   const p=await openPage(locale,token);await p.setViewportSize({width,height:900});
+   let releaseOld=()=>{},releaseControls=()=>{},releaseNew=()=>{};
+   try{
+    const firstState=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===aPath&&response.request().method()==="GET"));
+    const firstContext=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===aPath+"/context"&&response.request().method()==="GET"));
+    await p.goto(base+"/function/tasks/detail?id="+a.id);check((await firstState).ok(),"binding A controls failed");check((await firstContext).ok(),"binding A initial context failed");
+    const calls=await fixture.calls();let oldSeenResolve,bSeenResolve,newSeenResolve,oldDeliveredResolve;
+    const oldSeen=new Promise(resolve=>oldSeenResolve=resolve),bSeen=new Promise(resolve=>bSeenResolve=resolve),newSeen=new Promise(resolve=>newSeenResolve=resolve),oldDelivered=new Promise(resolve=>oldDeliveredResolve=resolve);
+    const oldGate=new Promise(resolve=>releaseOld=resolve),controlGate=new Promise(resolve=>releaseControls=resolve),newGate=new Promise(resolve=>releaseNew=resolve);
+    await p.route(candidate=>candidate.pathname===aPath+"/context",async route=>{
+     oldSeenResolve();await oldGate;await route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({history_revision:"1",sequence:"1",profile_id:"1",model:"requested-binding-stale-context",compactor:"fixture",source:"measured",summary:"",updated_at:new Date(0).toISOString(),window:2,used:1,output_reserve:0,headroom:1,compression_count:0,estimated:false,categories:[]})});oldDeliveredResolve();
+    });
+    await p.route(candidate=>candidate.pathname===bPath,async route=>{if(route.request().method()!=="GET"){await route.continue();return}bSeenResolve();await controlGate;await route.continue()});
+    await p.route(candidate=>candidate.pathname===bPath+"/context",async route=>{newSeenResolve();await newGate;await route.continue()});
+    await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();await within(oldSeen,10000,"binding A held context not observed");
+    await p.getByLabel(t.chatContextFocus,{exact:true}).fill("requested binding old focus");await p.getByLabel(t.chatContextKeep,{exact:true}).fill("7");
+    await p.evaluate(()=>{window.__bindingTrigger=document.querySelector("[data-chat-context-trigger]");window.__bindingDocument=document});
+    const bState=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===bPath&&response.request().method()==="GET"));
+    await p.evaluate(id=>{const url=new URL(location.href);url.searchParams.set("id",id);window.history.pushState(null,"",url)},String(b.id));
+    await within(bSeen,10000,"requested binding B controls GET not observed");
+    check(await p.evaluate(()=>window.__bindingDocument===document&&window.__bindingTrigger?.isConnected&&window.__bindingTrigger===document.querySelector("[data-chat-context-trigger]")),"requested switch remounted the inspector instead of changing its binding");
+    check(new URL(p.url()).searchParams.get("id")===String(b.id),"requested task URL did not change");
+    await p.locator("[data-chat-context-panel]").waitFor({state:"detached"});
+    await p.locator("[data-chat-context-trigger]").click();await p.locator("[data-chat-context-panel]").waitFor();
+    check(await p.getByLabel(t.chatContextFocus,{exact:true}).inputValue()==="","requested binding retained old focus");check(await p.getByLabel(t.chatContextKeep,{exact:true}).inputValue()==="2","requested binding retained old keep count");
+    const oldResponse=tracked(p.waitForResponse(response=>new URL(response.url()).pathname===aPath+"/context"&&response.request().method()==="GET"));
+    releaseOld();await within(oldDelivered,10000,"binding A stale response not delivered");await (await oldResponse).finished();
+    await p.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+    check(await p.getByText("requested-binding-stale-context").count()===0,"late context crossed requested binding");
+    check(await p.getByText(t.chatContextUnknown,{exact:true}).last().isVisible(),"requested binding did not retain unknown view while B controls were held");
+    releaseControls();check((await bState).ok(),"binding B controls failed");await within(newSeen,10000,"binding B context load not observed");
+    check(await p.locator("[data-chat-context-panel]").count()===1,"first hydration of binding B closed its opened panel");
+    check(await p.evaluate(()=>window.__bindingTrigger===document.querySelector("[data-chat-context-trigger]")&&window.__bindingTrigger.isConnected),"inspector was remounted after binding B hydration");
+    releaseNew();await closeContext(p,t.chatContextClose);await p.locator("[data-chat-context-panel]").waitFor({state:"detached"});
+    check(await fixture.calls()===calls,"requested binding guard called provider");
+    console.log("requested-binding-receipt",JSON.stringify({from_task:a.id,to_task:b.id,same_trigger:true,b_controls_held_during_reset:true,focus_reset:true,keep_reset:true,stale_context_absent:true,provider_call_delta:0}));
+   }finally{releaseOld();releaseControls();releaseNew();await p.context().close()}
+  });
  }
  await api.dispose();
 }
