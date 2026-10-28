@@ -2,6 +2,182 @@
 
 [English](../VERIFICATION.md) · [한국어](../ko/VERIFICATION.md) · [简体中文](../zh-Hans/VERIFICATION.md) · [繁體中文](../zh-Hant/VERIFICATION.md) · [日本語](../ja/VERIFICATION.md) · Español
 
+<a id="current-dev-pr-40-reconstruction--2026-10-25"></a>
+## Reconstrucción de la PR #40 sobre el dev actual — 2026-10-25
+
+Primero se reconstruyeron únicamente los cuatro commits previstos de `aebea3e..9b04754` sobre `f354c920`; no se reprodujo el historial divergente de la rama. Después se reaplicó el candidato sobre `7af06f1`, conservando su integración de seis idiomas. La integración actual exige exactamente **1,987** claves de producción con traducciones propias en inglés, coreano, chino simplificado, chino tradicional, japonés y español, sin recurrir a alternativas de idioma. Se conservan el aislamiento de claves de entorno de OpenCode, la prioridad de las cabeceras de sesión y los valores predeterminados de User-Agent.
+
+La ampliación de las pruebas de cancelación y condiciones de carrera reveló un resultado del planificador que ya carecía de sincronización: la sesión en streaming puede retornar durante una pausa mientras el manejador real de `prove_goal` sigue estableciendo `GoalMet` y su motivo. Los dos escritores de herramientas terminales y la instantánea del resultado del planificador ahora comparten un mutex privado. Se conservan los campos exportados, los comprobantes auténticos de herramientas y terminación y la prioridad actual entre pausa y finalización; no se añaden solicitudes al proveedor ni cambios en el esquema de producción.
+
+El control de prueba terminal también exige un **comprobante auténtico de resultado satisfactorio de herramienta del SDK**, coincidente con el ID de uso de herramienta marcado y la respuesta del modelo que lo originó. El observador privado de captura se ejecuta antes del siguiente límite de compresión o inferencia; ni la finalización del manejador ni un hook `PostToolUse` bastan por sí solos. La regresión adversaria usó `goal_met` real, un presupuesto de ejecución de **30 ms** y un hook posterior a la herramienta de **120 ms**: el control anterior omitía la resolución final tras un comprobante interrumpido y realizaba **1 llamada al proveedor en lugar de 2**, aunque el motivo nativo seguía siendo `timeout` y el error seguía siendo nil. La ruta corregida conserva ese comprobante interrumpido, permite la llamada real de resolución y su compresión, y rechaza que un hook tardío cumpla la condición. Una segunda regresión sincronizada retiene el hook hasta que la captura observa la interrupción, demostrando que el manejador real se ejecutó antes del comprobante de timeout; se mantiene la cobertura de prueba satisfactoria normal, cancelación del padre, desbordamiento reactivo y protecciones contra orígenes tardíos. Consulta las [regresiones de prueba terminal](../../agent/terminal_proof_test.go).
+
+La reconstrucción inicial aún tenía una carencia heredada en el apagado: sobre `f354c920` sin modificar, `TestMainServeFailureRunsShutdown` falló en **3 de 10** ejecuciones aisladas, incluidas escrituras del planificador tras cerrar la base de datos. La corrección posterior registra la propiedad del planificador antes de iniciarlo. `Manager.Close` cancela los planificadores y espera su terminación fuera del bloqueo del gestor durante un máximo de **5 segundos**, antes de detener el escritor de registros y cerrar la base de datos. Si el SQL del planificador sigue bloqueado, Close devuelve `context.DeadlineExceeded` y **mantiene abierta la base de datos**; una vez terminado el trabajo, un reintento puede cerrarla. La CLI ya informa del fallo de cierre y sale con código 1. Esto no afirma que las llamadas SQL existentes sin contexto se vuelvan cancelables. Un planificador cancelado de antemano ya no inicializa marcas de progreso ni inicia otro ciclo. La [regresión con SQL retenido](../../server/scheduler_shutdown_test.go) comprueba tiempos de espera agotados en cierres simultáneos, que la base siga abierta mientras haya trabajo activo y que los reintentos simultáneos tengan éxito tras la liberación. Una primera ejecución paralela de todos los paquetes también falló en la aserción del recuento global de filas del test del receptor de registros mientras subprocesos de otros paquetes usaban la misma base; la interferencia entre paquetes es una hipótesis, por lo que la verificación final sigue el patrón de CI de una base desechable distinta por paquete. Estos comprobantes históricos no afirman una verificación final en CI alojada del commit exacto, en Windows nativo ni con proveedores reales.
+
+El candidato integrado usa Next.js **16.4.3** y Zod **4.6.7** en web, y Zod **4.6.7** en el adaptador, con correcciones compatibles del archivo de bloqueo para body-parser **2.4.0**, fast-uri **3.1.9**, ip-address **10.7.4** y qs **6.16.1**. La versión fijada del SDK del adaptador sigue siendo **1.32.0**. Tras la reaplicación sobre la integración de seis idiomas, una instalación nueva con `npm ci` pasó en ambos paquetes; las pruebas web pasaron **75/75**, la compilación estática en frío exportó **31 páginas**, las pruebas del adaptador pasaron **18/18** y su comprobación de sintaxis pasó. Los comprobantes anteriores de 72/7 pruebas siguen siendo evidencia histórica. Ambas comprobaciones actuales de `npm audit --audit-level=low` informan de **0 vulnerabilidades**. Estos resultados sustituyen la limitación inicial por el aviso de seguridad y el fallo de compilación de Next.js 16.4.0; los comprobantes originales se conservan como evidencia histórica. Las teclas nativas de pegar/deshacer del navegador ahora usan `ControlOrMeta+V` y `ControlOrMeta+Z`, conservando aserciones y tiempos de espera. Las ejecuciones finales del navegador canónico y la CI alojada del commit exacto son condiciones independientes que no se dan por cumplidas aquí.
+
+Las comprobaciones de compatibilidad tras la integración de seis idiomas deben cubrir los prompts estándar anteriores del planificador y los trabajadores y los esquemas `add_intent` de cada idioma de origen publicado y cada idioma de salida solicitado. Los casos adicionales de zh-Hant/ja/es proceden del dev inmutable anterior a PR40, `7af06f1`. El reconocimiento exacto debe conservar prompts editados, campos y valores predeterminados personalizados de esquemas, filas almacenadas e historial sin procesar. Esto amplía la verificación original de tres idiomas descrita más abajo.
+
+<a id="patched-sdk-and-model-specific-context-windows"></a>
+### SDK corregido y ventanas de contexto específicas de cada modelo
+
+La batería de Norma anidada es obligatoria en el trabajo CI de backend. Ejecuta `(cd third_party/norma && go test ./... -count=1)` por separado de los paquetes raíz; consulta los [avisos de origen y modificación](PROVENANCE.md#norma-execution-and-compaction-fixes--2026-10-25).
+
+Las regresiones cubren la carrera original de herramienta interrumpida de 30 ms / 120 ms, el ritmo de compresión en ventanas pequeñas y los límites de sesiones largas, la consolidación útil de resúmenes, las vistas reales de reintento por desbordamiento, los límites aprendidos que no aumentan y los errores de salida que no deben activar la recuperación de contexto. Se conservan los límites numéricos existentes y el historial original. La aserción anterior de que 40K no podía alcanzar el segundo nivel ya era falsa en el código original sin modificar; su reemplazo exige consolidación real, recuperación de tokens y resúmenes acotados usando el mismo caso de prueba.
+
+`TestNoaRetainsConfiguredModelContextWindow` ejecuta sesiones reales de Noa con 40K, 128K, 200K, 250K, 400K y 1M. Antes de corregir el host, todos los casos distintos de 200K se convertían en 200K. `enableNoa` ahora pasa la ventana positiva del perfil resuelto antes de eliminar el compresor sustituido. Pruebas separadas cubren la alternativa cuando falta la ventana, Noa desactivado, recuperación de estado dañado y la política local existente de Ollama. `MaxTokens` sigue limitando la salida de forma independiente. La alternativa de 200K es para una ventana sin configurar; no es un límite universal del modelo. Los valores predeterminados del SDK a partir de 200K no cambian, mientras que la condición por cantidad de resúmenes útiles cambia de forma intencionada en las distintas ventanas.
+
+<a id="trigger-evidence-in-the-first-planner-request-2026-10-18"></a>
+## Evidencia del disparador en la primera solicitud del planificador (2026-10-18)
+
+Candidato local sobre el commit original `ffe260435fed6576394d613991aaf6e8010d3f48`, con la corrección compartida de la CLI adaptada. Normalmente, un evento de hallazgo o de trabajador finalizado despierta al planificador con resúmenes de disparadores y un `graph_overview` compacto; `prove_goal` sigue exigiendo la evidencia registrada para cada condición del objetivo. Las entradas compactas carecían de los campos completos de hallazgos/hechos, por lo que leer `node_detail` antes de probar era legítimo.
+
+Cambio real abreviado en [Planner.Plan](../../agent/planner.go), omitiendo la configuración intermedia del contexto de tarea que no cambió:
+
+```go
+// Before
+situational := renderTriggers(ts, triggers) + renderGraphOverview(tsx.graphOverviewData())
+// After
+overview := tsx.graphOverviewData()
+situational := renderTriggers(ts, triggers) + renderGraphOverview(overview)
+// After ensureRunDir and WithReviewContext:
+situational += renderPlannerEvidence(ctx, overview, triggers, tools, ts.ID(), taskDir)
+```
+
+La primera línea nueva captura una sola vez la vista general acotada existente; la segunda representa esa misma instantánea. La última añade los detalles completos de sus candidatos de hechos/hallazgos de la exploración actual, obtenidos de intents disparadores concretos `finding`/`done`, una vez disponible el contexto de tarea/revisión. No recorre `related_tasks` ni amplía la genealogía global. La [implementación del adjunto](../../agent/planner_evidence.go) realiza como máximo **4 intentos de lectura** y solo admite nodos enteros dentro de **32,768 bytes UTF-8 para todo el adjunto**, incluidos su encabezado traducido, envoltura JSON y `omitted_count`; un nodo demasiado grande se omite en lugar de truncarse. Se eliminan los candidatos duplicados.
+
+Solo puede leer la capacidad final resuelta de `node_detail`: su esquema debe aceptar la entrada, debe cumplirse `IsReadOnly` y los permisos deben permitir explícitamente una entrada sin cambios. Envoltorios, valores predeterminados, medición, resultados restringidos y errores siguen vigentes; los resultados inseguros o incompletos se omiten sin recurrir a auxiliares sin procesar. El encabezado está completo en EN/KO/zh-Hans e identifica el contenido registrado como observaciones no fiables. Las lecturas explícitas existentes, incluidos los nodos asociados de fuente directa, conservan sus reglas de acceso originales.
+
+Caso concreto del **laboratorio R22 de loopback sintético controlado por la CLI**, no de un incidente en producción original: el objetivo `2` siguió abierto después de que el intent `3` completara un GET propio y guardara el hecho `4` y el hallazgo `5`. El objetivo exigía el nombre exacto de hallazgo `SYNTHETIC LAB ONLY public debug marker`, gravedad `low`, marcador y observaciones. A las **2026-10-17 22:42:31+09:00**, el planificador leyó legítimamente `node_detail` `5` y `4` para obtener esos campos completos que faltaban. La limpieza del arnés lo pausó a las **22:42:54+09:00**, antes de la prueba; no fue una pausa humana. R22 falló tras **470.50 segundos en total**, con el **presupuesto de tarea de 420 segundos** sin cambios. La causa subyacente de la latencia del modelo/proveedor es **desconocida**. Con la corrección, los detalles completos admisibles de esos mismos candidatos de la instantánea llegan a la primera solicitud de la ronda activada; no constituyen por sí solos una prueba.
+
+| Comprobación del candidato local | Resultado observado |
+| --- | --- |
+| Paquete `agent` original completo, código exacto de producción sin superposición | 598 pruebas/subpruebas pasadas, 0 fallos/omisiones; equivalente CLI: 607 pasadas, 0 fallos/omisiones |
+| Nuevas regresiones en tres archivos `planner_evidence*test.go` | 31 pruebas/subpruebas pasadas; igualdad de la primera solicitud real de `Planner.Plan` con/sin streaming, nueve casos de permisos, límites de cantidad/bytes, deduplicación/aislamiento, evidencia ausente/eliminada/tardía/oculta, recuperación explícita, ausencia de prueba automática y varios objetivos |
+| Comprobaciones originales específicas del servidor de prueba/idiomas y paquete `locale` completo | 5 y 19 pasadas respectivamente, 0 fallos/omisiones; se conserva la integridad estricta de **1,986 claves × 3 idiomas**, actualizando el recuento esperado desde 1,985 por el nuevo encabezado |
+| `go build ./...`, `go vet ./...` originales | Ambos con código de salida nativo 0 |
+| Linux `-race`, código CLI equivalente actual | Comprobaciones específicas: 49 pasadas; paquete `agent` completo: 607 pasadas, 0 fallos/omisiones; ambas salidas reales de Go son 0, sin `DATA RACE`. Verificados los 1,175 archivos fuente de la instantánea; no es una ejecución del módulo original |
+| Aceptación real por loopback de la CLI empaquetada, los cinco casos | Salida nativa 0 en core 19.14s, GLM LOW 82.63s, Flash LOW 114.84s, OAuth LOW 108.12s y Flash HIGH 317.83s, cada uno con el presupuesto de tarea inalterado de 420 segundos. Estas ejecuciones únicas de laboratorio no son una comparación de rendimiento |
+
+La base original sin cambios falló las aserciones de contexto ausente con y sin streaming (dos fallos hoja y su padre), sin fallos de preparación. El uso de proveedores controlados en los casos de regresión es sintético, no evidencia de tokens de pago. Siguen siendo necesarios `prove_goal` real, uso/comprobantes auténticos y el control de prueba terminal existente; no cambian fase, trabajador, esfuerzo, plazo ni reintentos. Contraejemplo: un nodo desactivado, restringido, ausente, demasiado grande, no activado por un disparador o heredado no recibe detalles completos automáticamente. Cuando sea posible, una lectura explícita puede recuperar evidencia omitida/reciente; leer datos por sí solo no puede completar un objetivo, y probar uno de varios objetivos no puede completar la tarea.
+
+Son resultados del árbol de trabajo local, no CI del nuevo commit exacto. El fallo inalterado de privilegios de Windows en `TestChatBranchCopyRejectsDestinationSymlink` también se reprodujo en la base CLI `650dc82910e5e36668161a5276455506f64713fe`; no se debilitó ninguna comprobación ni se afirma éxito completo del servidor nativo. Siguen pendientes las siete comprobaciones alojadas obligatorias del nuevo candidato. La PR #40 sigue sin integrarse y pendiente de revisión humana final; esta sección no afirma publicación ni lanzamiento. No se introducen cambios de API pública, esquema ni migraciones. Las secciones de fechas anteriores conservan sus resultados históricos.
+
+<a id="chat-context-readiness-2026-10-17"></a>
+## Disponibilidad del contexto de chat (2026-10-17)
+
+Candidato local de interfaz sobre el commit c9fb642 de PR #40. El inspector puede abrirse antes de que termine su solicitud inicial de controles. Antes identificaba como borrador una sesión sin resolver, trataba después la primera sesión resuelta como un cambio y cerraba el panel. El caso chino de tarea en escritorio falló con un botón de cierre inestable y después separado del DOM en la [ejecución de comprobaciones 39031048389](https://github.com/cskwork/scopeweaver/actions/runs/39031048389). Ese commit alojado sigue siendo evidencia de fallo; estos resultados nuevos son locales.
+
+Lógica de reinicio abreviada (binding es la clave de controles solicitada; session es su identidad resuelta):
+~~~ts
+// Before: every change from draft to resolved identity ran the reset.
+epoch.current++;
+setOpen(false);
+// After: qualify the change before the existing reset.
+const previous = hydrated.current;
+hydrated.current = { binding, session };
+if (previous.binding === binding && !previous.session) return;
+epoch.current++;
+setOpen(false);
+~~~
+La primera línea añadida lee binding y session anteriores; la segunda recuerda el par actual. La tercera conserva el panel abierto solo mientras el mismo binding no hubiera resuelto aún su primera session. Otro binding solicitado o un cambio posterior de session resuelta siguen llegando al incremento de epoch y al reinicio completo de vista/formulario, incluidos el foco y el número de elementos retenidos. El hook expone su clave solicitada existente; no hay cambios de API del servidor ni de etiquetas traducidas.
+
+Caso controlado concreto: tarea 1, exploración 1, segmento 0 se pausó mediante la API real de tareas. Su primera respuesta de controles se retuvo hasta que se abrió /context. Liberar esa respuesta real antes cerraba el disparador y hacía que el clic normal agotara su espera tras 15 segundos (salida Go 1); el mismo comprobador de navegador, idéntico byte a byte, ahora mantiene abierto el disparador y cierra normalmente (salida 0), con cero llamadas al proveedor. La pausa de tarea es distinta del campo paused del control de chat.
+
+| Comprobación local del código corregido congelado | Resultado observado |
+| --- | --- |
+| Pruebas existentes del frontend | 65 pasadas, 0 fallos/omisiones |
+| Compilación estática nueva del frontend | TypeScript y 31 páginas completados; salida nativa 0 verificada |
+| Comprobador independiente sin cambios de primera respuesta retrasada | 1 prueba Go pasada, 0 fallos/omisiones; cero llamadas al proveedor |
+| Caso canónico de navegador para contexto | Pasaron los 12 casos EN/KO/zh-Hans × 1440/390 × independiente/tarea, más los controles de hidratación y binding solicitado (14 pasos de navegador; 1 prueba Go, 0 fallos/omisiones) |
+
+La protección añadida usa la primera respuesta real del backend, y luego estado sintético de ruta para un cambio posterior de session resuelta y una respuesta antigua de contexto retenida. Cada respuesta de sustitución permanece retenida hasta la aserción de contenido obsoleto, para impedir que un resultado nuevo oculte una filtración. El foco no predeterminado y la retención 7 se reinician a foco vacío y valor predeterminado 2. Contraejemplo: un cambio real de binding solicitado o de session resuelta posterior debe seguir reiniciando; los resultados tardíos no deben restaurar el contexto anterior. Un segundo cambio real de consulta de tarea (de tarea 7 a 8 en la ejecución completa) observó la nueva URL de controles con su respuesta retenida, conservó el mismo disparador del inspector conectado y el documento, reinició foco/retención y rechazó el contexto anterior tardío antes de que los datos sustitutos pudieran ocultarlo. Esto demuestra un cambio del binding solicitado con el componente montado, no un remontaje. Las ramas de error tardío/compresión satisfactoria siguen revisadas en código, sin ejecutarse por separado. Las protecciones de identidad sintética demuestran el manejo del cliente, no la sustitución de exploración del servidor. Los demás casos de contexto usan el proveedor de loopback controlado; no se llamó a proveedores de pago/externos.
+
+Los intentos iniciales del envoltorio shell se detuvieron en la preparación del entorno/captura; las salidas finales de compilación/pruebas se registran por separado, conservando avisos y sin eludir código ni aserciones. Se mantienen los cambios anteriores de planificador/apagado. La documentación emparejada registra estos resultados locales; siguen siendo necesarias la revisión final independiente y las siete comprobaciones alojadas sobre el siguiente commit exacto. Que una PR esté lista no equivale a aprobación del mantenedor, integración ni lanzamiento público.
+
+<a id="log-writer-shutdown-ownership-2026-10-17"></a>
+## Propiedad del apagado del escritor de registros (2026-10-17)
+
+El servidor mantiene registros en memoria y los persiste mediante un escritor asíncrono de base de datos. Antes, cancelar el contexto del servidor no esperaba a que terminara ese escritor: un insert con contexto de fondo podía seguir activo mientras `Manager.Close` cerraba su pool. La última ejecución de backend del commit `14b5403` de PR #40 reveló esto en la prueba inalterada de apagado con puerto ocupado.
+
+Flujo abreviado entre escritor y gestor:
+```go
+// Before: writer, then manager shutdown
+pg.InsertLog(level, tag, text) // background context
+return m.pg.Close()           // no writer join
+// After: writer, then manager shutdown
+pg.InsertLogContext(writeCtx, level, tag, text)
+logSink.StopDB(m.pg)
+return m.pg.Close()
+```
+La primera línea nueva permite cancelar el insert real; la restauración inicial del historial usa el mismo contexto. La segunda desvincula únicamente este pool exacto, cancela el SQL pendiente y espera la finalización del escritor fuera del bloqueo del receptor. Cada parada del mismo propietario comparte esa finalización; el pool de otro gestor no puede detenerlo. Solo entonces la tercera línea cierra el pool. Los métodos de BD existentes sin contexto delegan en el mismo SQL; siguen disponibles la entrega al búfer circular, stderr y SSE, y el canal de encolado nunca se cierra.
+
+Un caso observado: la ejecución de backend [39028154916](https://github.com/cskwork/scopeweaver/actions/runs/39028154916), trabajo `117383132313`, falló en `TestMainServeFailureRunsShutdown` a las **2026-10-17 11:18:45 UTC**. Al fallo esperado de enlace por puerto ocupado siguieron el apagado y `[logsink] db write: sql: database is closed`. De forma independiente, un bloqueo real de tabla PostgreSQL reprodujo que `Manager.Close` retornaba con su escritor aún bloqueado sobre `14b5403` sin cambios (salida Go 1). El mismo caso exacto ahora pasa mientras el bloqueo sigue retenido, antes de cerrar el pool; no se filtra ningún diagnóstico.
+
+| Comprobación local original R19 | Resultado observado |
+| --- | --- |
+| Regresión independiente sin cambios de insert bloqueado | 1 pasada, 0 fallos/omisiones; se conserva el RED de comportamiento de la base |
+| Protección de rechazo SQL auténtico | 1 pasada, 0 fallos/omisiones; SQLSTATE `23514` visible, fila rechazada ausente y fila válida posterior persistida |
+| Casos congelados `TestStopDB*` | 6 pasados, 0 fallos/omisiones: sin vinculación, insert bloqueado, pool ajeno, contexto cancelado, paradas simultáneas y continuidad de stderr |
+| Prueba inalterada de apagado con puerto ocupado | Pasaron 1 ejecución más 20 repeticiones; se conserva el fallo esperado del hijo, salida Go del padre 0 |
+| `go build ./...`, `go vet ./...` | Ambos con salida 0 |
+
+Contraejemplo: un rechazo SQL real con contexto activo debe seguir notificándose; cancelar/esperar no lo convierte en un insert satisfactorio. El registro sigue siendo de mejor esfuerzo, sin nueva garantía de vaciado para líneas en cola. El caso concurrente comprueba la finalización conjunta; la espera compartida por cada solicitante también se verifica mediante revisión de código, sin afirmarla como un comprobador de ejecución separado. Todas las ejecuciones con BD usan bases de prueba desechables; los casos independientes ahora usan esquemas propios en la base desechable indicada y no necesitan privilegios CREATE DATABASE. No cambian los privilegios de producción, contratos HTTP/esquema ni pruebas existentes del planificador. Son resultados locales, no una afirmación de éxito completo del servidor nativo ni de lanzamiento: sigue la limitación heredada de privilegios de enlaces simbólicos en Windows y deben pasar las siete comprobaciones alojadas del siguiente candidato confirmado.
+
+<a id="terminal-goal-completion-2026-10-17"></a>
+## Finalización terminal del objetivo (2026-10-17)
+
+Son resultados locales del candidato R17; la revisión final independiente del código y las condiciones alojadas del candidato exacto son independientes. La corrección compartida R17 mantiene un turno de prueba completado en la ruta normal del SDK y después termina localmente el planificador antes de otra solicitud al proveedor. Normalmente, `prove_goal` vincula un hecho/hallazgo confirmado con su objetivo y lo marca como cumplido; solo la prueba de todos los objetivos establece `GoalMet`. Antes, `Plan` esperaba a que terminara `captureRun` antes de devolver ese indicador al motor, por lo que el motor no podía completar mientras la sesión esperaba otra respuesta del modelo.
+
+Flujo de control abreviado (`...` es el callback de actividad sin cambios):
+```go
+// Before
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+// After
+installTerminalProofGateOn(&opts, tsx)
+_, _, err = captureRun(ctx, opts, input, ...)
+return tsx.GoalMet, tsx.Reason, err
+```
+La primera línea anterior espera toda la sesión; la segunda expone el resultado del objetivo solo después. La línea añadida instala el límite de la siguiente solicitud antes de iniciar la captura. Deja terminar la respuesta actual, el resultado real de herramienta, el uso tardío y la transcripción; después proporciona un `end_turn` local sin contenido y con uso cero del proveedor, y omite el `Compactor.Pre` innecesario posterior a la prueba. Conserva el compresor seleccionado, `ContextView` opcional, comportamiento normal previo a la prueba/de recuperación y envoltorios existentes de proveedores/herramientas. El `ToolUseID` original y la validación de respuestas satisfactorias/fallidas impiden que un manejador retrasado atribuya una prueba antigua fallida a una respuesta posterior satisfactoria. Se conserva el origen de prueba más reciente mediante compare-and-swap; un origen anterior o desconocido no puede borrar una prueba válida más reciente. El registro de fallos se ejecuta antes de entregar un error, incluso si su consumidor se detiene inmediatamente.
+
+Caso concreto de laboratorio: en el **candidato R11 de la CLI independiente**, no en un incidente original de producción, el nodo de hallazgo `5` probó el objetivo `2` a las **2026-10-17 18:36:24+09:00**. La salida del modelo seguía activa cuando el arnés inalterado de 420 segundos pausó a las **18:37:48+09:00**, 84 segundos después. Esa ejecución tuvo exactamente un GET, un intent y un hallazgo. El comprobante es `scopeweaver-cli/dist/pi-glm-flash-fix-20261017/r11-flash-high-digest.txt`; demuestra la espera de finalización, no la causa subyacente de latencia del proveedor. Contraejemplo: una prueba parcial/rechazada debe continuar normalmente; una respuesta de prueba fallida conserva su ruta real de error/recuperación y no puede habilitar la finalización local.
+
+La verificación del código original usa proveedores controlados y PostgreSQL desechable, sin inferencia de pago:
+
+| Comprobación del candidato local | Resultado observado |
+| --- | --- |
+| Paquete `agent` completo, R17 con caso de hecho propio corregido | 567 pruebas/subpruebas pasadas, 0 fallos, 0 omisiones; incluye streaming/sin streaming, prueba parcial/rechazada, cancelación del padre, error/recuperación, compresión/vista y casos de origen retrasado |
+| `TestWireTools`, runtime estándar S7 y motor real S18 | 28 pasadas, 0 fallos, 0 omisiones; S18 persiste done tras una llamada real al proveedor, con comprobantes auténticos de prueba/terminación y uso exacto de entrada/salida/lectura de caché/escritura de caché **11/7/3/2**, también en la transcripción sin procesar |
+| Protecciones reales de pausa/error del proveedor en S18 | Los comprobantes fieles de error/causa conservan el uso emitido **11/0/3/0** para pausa del usuario y **11/7/3/2** para fallo del proveedor; se observa la prioridad del estado entre pausa posterior a la prueba y finalización de tarea sin añadir una nueva aserción de política |
+| `locale` completo, compilación y vet | 19 pruebas pasadas, 0 fallos, 0 omisiones; `go build ./...` y `go vet ./...` con salida 0 |
+
+La base original S18 guardada falló porque intentó la llamada 2 al proveedor y no tuvo resultado terminal/finalización; sus protecciones de comprobantes de cancelación/error del proveedor pasaron. La regresión R14 independiente e inmutable también falló con calls=2 en lugar de 3 cuando un manejador antiguo fallido tomó la identidad de una respuesta posterior; el candidato conserva la regresión de tres llamadas. Después, el revisor reprodujo el orden inverso en el candidato R16 original: un manejador antiguo de response-1 fallida terminó después de una prueba válida de response-2 y borró su origen, causando una tercera solicitud innecesaria. La superposición inalterada de sesión real fallaba con calls=3 antes de R17 y ahora pasa con calls=2/origin=2 y un nuevo resultado de prueba auténtico. Ambos órdenes de manejadores retrasados pasan en las [regresiones de límites](../../agent/terminal_boundary_test.go); la [regresión del motor real](../../server/engine_terminal_proof_test.go) conserva por separado las comprobaciones de finalización/comprobantes/uso. La primera ejecución integrada de agent falló solo porque un caso nuevo esperaba que `CreateExploration` creara un hecho de origen. R16 prepara su propio hecho confirmado; ni las aserciones ni el código de producción cambian por esa corrección del caso. Se conservan los comprobantes anteriores de fallo.
+
+S18 ahora reutiliza el auxiliar de esquema propio de S7 dentro de la base desechable indicada, cerrando los almacenes antes de eliminar su propio esquema; basta un rol de prueba propietario de la base con NOCREATEDB y los privilegios de producción no cambian. `TestChatBranchCopyRejectsDestinationSymlink`, sin cambios, sigue fallando localmente en `server/chat_history_test.go:270` porque Windows deniega crear enlaces simbólicos. No se afirma éxito completo del servidor nativo ni de las siete comprobaciones alojadas del candidato exacto; la entrega CI/frontend/navegador sigue pendiente. Root se encarga por separado de la aceptación de carreras y en vivo; esta sección solo informa de estas comprobaciones locales originales.
+
+<a id="plannertool-contract-and-stored-stock-compatibility-2026-10-17"></a>
+## Contrato del planificador/herramientas y compatibilidad de valores estándar almacenados (2026-10-17)
+
+Resultados locales en Windows de `fix/glm-agent-contracts`, basado en el commit `dev` `d7365ec`. La explicación de `parent_ids` del planificador ahora coincide con el manejador existente que solo admite hechos/hallazgos, y los metadatos de `add_intent` por lotes describen sus campos y el `summary` obligatorio. Las indicaciones del planificador/trabajador conservan la validación nueva y las repeticiones de pruebas, exigen evidencia para cada condición del objetivo y terminan las rondas solo tras un despacho satisfactorio o la prueba confirmada del objetivo final. Los recursos EN/KO/zh-Hans están emparejados.
+
+Los prompts estándar anteriores exactos del planificador/trabajador y los esquemas `add_intent` se resuelven a los valores predeterminados corregidos en ejecución. No cambian las ediciones del usuario, vinculaciones, indicadores de activación, filas almacenadas ni historial de prompts; no hay migración de BD de producción ni cambio semántico del manejador. Consulta las [regresiones de contrato](../../agent/planner_contract_test.go), [regresiones de compatibilidad estándar](../../agent/legacy_stock_compat_test.go) y [verificación HTTP/runtime con PostgreSQL](../../server/tools_stock_schema_test.go).
+
+La verificación con pruebas primero compiló y produjo **8 fallos de aserción de agent de nivel superior** y **9 fallos de subcasos S7 del esquema estándar** en la base. La extracción temporal de la cola sin cambios y el resolutor de paso directo usados solo para compilar las pruebas se retiraron antes de aplicar la corrección. Resultados del candidato:
+
+| Comprobación local | Resultado observado |
+| --- | --- |
+| Paquete `agent` completo con PostgreSQL desechable | 549 pruebas/subpruebas pasadas, 0 fallos, 0 omisiones |
+| Paquete `locale` completo | 19 pasadas, 0 fallos, 0 omisiones |
+| Comprobaciones específicas del servidor de idiomas/herramientas/procedencia | 11 pasadas, 0 fallos, 0 omisiones; 1,985 claves de producción conservan las comprobaciones de integridad de tres idiomas sin recurrir a alternativas |
+| `TestExplorationDirectSourceReadView` | Pasó con PostgreSQL desechable |
+| `TestStockMetadataRuntimePostgres` junto con `TestWireTools`, `-count=2` | 48 pruebas/subpruebas pasadas, 0 fallos, 0 omisiones; manejadores HTTP reales de loopback, resolución en ejecución y lectura posterior de filas/historial almacenados |
+| Escenarios guardados de herramientas públicas | S11: pasaron los 10 casos de callback del agente principal/planificador; S12: pasaron genealogía histórica, procedencia de fuentes y rechazo de padres no relacionados/indirectos; S3: pasaron rechazo de kind inválido/summary en blanco, errores parciales y vinculación de origen omitida/vacía/null |
+| `go build ./...`, `go vet ./...`, espacios del diff | Pasaron |
+
+`TestStockMetadataRuntimePostgres` y `TestEngineTerminalProofPersistsAuthenticReceipt` exigen un `ARTEX_TEST_DSN` desechable explícito que seleccione `scopeweaver_test_*`. El rol de prueba propietario de la base puede tener **NOCREATEDB**, igual que en `make test-db`. Cada caso crea su propio esquema `stock_*` y fija el `search_path` de cada conexión del pool exclusivamente a ese esquema, conservando la base seleccionada y las demás opciones de conexión. Las pruebas cierran los almacenes antes de eliminar solo su esquema propio con `CASCADE`; se notifican errores de limpieza, pero eliminar el esquema no detecta por sí mismo conexiones inactivas filtradas. `TestStockFixtureIsolationAndCleanup` comprueba varias conexiones del pool, invisibilidad/preservación de tablas padre y eliminación de esquema. Reproduce el aislamiento con `go test ./server -run '^Test(WireTools|StockMetadataRuntimePostgres|StockFixtureIsolationAndCleanup|EngineTerminalProofPersistsAuthenticReceipt)$' -count=2`. Los privilegios y el esquema de la BD de producción no cambian. Esta reparación de los casos sustituye el requisito anterior de base hija/CREATE DATABASE.
+
+El primer intento del arnés S3 falló al preparar una pista con estado inválido `open`; se corrigió el caso al estado existente `active`, sin cambiar producto ni aserciones, antes de la repetición satisfactoria. La preparación final de S7 también pasó dos veces después de que otras pruebas poblaran la base padre. Estas comprobaciones establecen el comportamiento del contrato y la compatibilidad, no la causa del duplicado/timeout anterior de Flash en vivo. Siguen pendientes en esta rama `go test ./...` completo, las comprobaciones de frontend/navegador y los siete trabajos CI obligatorios del candidato exacto; no se afirma integración ni lanzamiento.
+
 ## Correcciones de ejecución compartida desde verificación CLI independiente (2026-10-17)
 
 Rama candidata `fix/cli-discovered-runtime-bugs`, basada en el commit `dev` `3f0ef25`. Son resultados locales; las comprobaciones alojadas de la revisión exacta de la PR son independientes. Este cambio no añade la CLI independiente ni proveedores por suscripción a la aplicación original.

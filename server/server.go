@@ -285,7 +285,7 @@ func newServer(ctx context.Context, m *Manager, skillDir string, dataDir string,
 	s.startTaskArchiveWorker()
 	s.wireInterceptReviewer() // LLM fallback approval judges commands that match no interception rule.
 	if m.pg != nil {
-		s.backgroundWG.Go(func() { newScheduler(s).Run(s.ctx) }) // Start admissions only after recovery and task restoration.
+		m.startScheduler(s) // Register ownership before launch, after recovery and task restoration.
 	}
 	return s, nil
 }

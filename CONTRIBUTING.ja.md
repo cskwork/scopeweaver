@@ -40,6 +40,10 @@
 [.github/workflows/ci.yml](.github/workflows/ci.yml) の CI ジョブに対応します:
 
 ```bash
+# patched Norma SDK (a separate Go module)
+(cd third_party/norma && go test ./... -count=1)
+
+
 # backend database-backed suites (db, server, agent): against a throwaway database
 # that is created and dropped for you. They require ARTEX_TEST_DSN and skip (never
 # fall back to the live DSN) without it — see docs/VERIFICATION.md.
