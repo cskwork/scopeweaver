@@ -235,3 +235,66 @@ jobs:
             dropdb --force "$database"
           done < <(go list ./...)
           exit "$status"
+
+  posix-source-capacity:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.head_ref == 'fix/posix-capacity-probe-261028' &&
+      github.base_ref == 'dev' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        include:
+          - { runner: ubuntu-24.04, os: Linux, arch: x86_64 }
+          - { runner: ubuntu-24.04-arm, os: Linux, arch: aarch64 }
+          - { runner: macos-15-intel, os: Darwin, arch: x86_64 }
+    steps:
+      - name: Read source-build runner capacity without acquiring source
+        env:
+          CAPACITY_OS: ${{ matrix.os }}
+          CAPACITY_ARCH: ${{ matrix.arch }}
+        shell: bash
+        run: |
+          python3 -I -B - <<'PYTHON'
+          import datetime, json, os, re, sys
+          from pathlib import Path
+          root = Path(os.environ["RUNNER_TEMP"]).resolve(strict=True)
+          if not root.is_dir() or root.stat().st_uid != os.getuid():
+              raise RuntimeError("RUNNER_TEMP must be an owned canonical directory")
+          actual = {"os": os.uname().sysname, "arch": os.uname().machine}
+          expected = {"os": os.environ["CAPACITY_OS"], "arch": os.environ["CAPACITY_ARCH"]}
+          patterns = {"GITHUB_RUN_ID": r"[0-9]{1,20}", "GITHUB_RUN_ATTEMPT": r"[0-9]{1,6}", "GITHUB_SHA": r"[a-f0-9]{40}"}
+          patterns.update({key: r"[A-Za-z0-9_.-]{0,120}" for key in ("ImageOS", "ImageVersion", "RUNNER_OS", "RUNNER_ARCH")})
+          metadata = {key: value if re.fullmatch(pattern, value) else None for key, pattern in patterns.items() for value in [os.environ.get(key, "")]}
+          disk = os.statvfs(root)
+          free, floor, pool = disk.f_bavail * disk.f_frsize, 20 * 1024**3, 10 * 1024**3
+          checks = {"free_floor": free >= floor, "os_arch": actual == expected, "safe_metadata": all(value is not None for value in metadata.values())}
+          report = {"schema": "scopeweaver-posix-source-capacity-v1", "status": "PASS" if all(checks.values()) else "BLOCKED", "checks": checks,
+                    "execution": "github-pull-request" if os.environ.get("GITHUB_ACTIONS") == "true" else "local-real-host",
+                    "observed_at_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(), "runner_temp": str(root), "free_bytes": free,
+                    "source_floor_bytes": floor, "source_pool_cap_bytes": pool, "expected": expected, "actual": actual, "metadata": metadata,
+                    "source_compile_attempts": 0, "source_acquisition_attempts": 0}
+          payload = (json.dumps(report, sort_keys=True) + "\n").encode()
+          if len(payload) >= 65536:
+              raise RuntimeError("capacity report exceeds 64 KiB")
+          path = root / "scopeweaver-posix-capacity.json"
+          fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+          with os.fdopen(fd, "wb") as output:
+              output.write(payload)
+              output.flush()
+              os.fsync(output.fileno())
+          print(payload.decode(), end="")
+          sys.exit(0 if report["status"] == "PASS" else 2)
+          PYTHON
+      - name: Preserve capacity report even when blocked
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: posix-source-capacity-${{ matrix.runner }}
+          path: ${{ runner.temp }}/scopeweaver-posix-capacity.json
+          if-no-files-found: error
+          retention-days: 1
