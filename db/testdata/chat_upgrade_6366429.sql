@@ -735,7 +735,10 @@ WHERE t.active_llm_profile_id IS NULL
   AND t.llm_profile_id IS NOT NULL
   AND EXISTS (SELECT 1 FROM task_llm_profiles x WHERE x.task_id=t.id AND x.profile_id=t.llm_profile_id);
 
--- Task testing scope: asset-coverage denominator and authorization boundary.
+-- Task testing scope: declared test scope for prompt guidance, asset-query filtering and the
+--   asset-coverage denominator. Scope does not technically restrict tool network access.
+--   To block out-of-scope tool calls, configure matching Interception deny rules.
+--   Network isolation requires egress control outside ScopeWeaver.
 --   Automatic (source='auto'): top-level insertAssets adds conservative scope for explicitly inserted worker asset types.
 --     （root_domain→root_domain，subdomain/service/endpoint→subdomain(host)，ip→ip）；
 --     Side-effect-derived assets do not expand scope: the hook is in the handler, derivation stays inside the DB layer.
