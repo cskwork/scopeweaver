@@ -3268,6 +3268,9 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m2883: "主机",
   m2884: "仅此主机(写作 host:名称)",
   m2885: "此域名及其所有子域名",
+  m2886: "会把该意图置为「已删除」并记录删除原因，意图节点、执行记录、 已登记的事实和漏洞",
+  m2887: "。规划者会收到「该意图由用户删除 + 原因」并据此重新规划。",
+  m2888: "保留数据，可追溯"
 };
 
 export { interfaceMessages as interface };

@@ -3365,6 +3365,9 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   m2883: "ホスト",
   m2884: "このホストのみ（host:name と入力）",
   m2885: "このドメインと、そのすべてのサブドメイン",
+  m2886: "この探索方針を削除済みとしてマークし、理由を記録します。そのノード、実行記録、登録済みの事実、脆弱性は",
+  m2887: "。プランナーはユーザーによる削除とその理由を受け取り、それに基づいて再計画します。",
+  m2888: "データと追跡可能性を保持"
 };
 
 export { interfaceMessages as interface };

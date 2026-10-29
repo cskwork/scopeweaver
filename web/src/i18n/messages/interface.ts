@@ -2972,7 +2972,10 @@ export const en = {
   "m2882": "Details",
   "m2883": "Host",
   "m2884": "Exactly this host (write host:name)",
-  "m2885": "This domain and all its subdomains"
+  "m2885": "This domain and all its subdomains",
+  "m2886": "marks this intent as deleted and records the reason. Its node, execution records, registered facts, and vulnerabilities",
+  "m2887": ". The planner receives the user deletion and reason and replans accordingly.",
+  "m2888": "Keep data and traceability"
 };
 export const ko: Record<keyof typeof en, string> = {
   fuzzyDomainHelp: "도메인(부분 일치)은 레이블 단위로 일치합니다. 차단: .gov는 x.gov, x.gov.uk와 일치하지만 a.government.com과는 일치하지 않습니다. 허용: juice-shop.internal은 해당 도메인과 a.juice-shop.internal에 일치하지만 juice-shop.internal2, juice-shop.internal.attacker.com에는 일치하지 않습니다.",
@@ -5947,5 +5950,8 @@ export const ko: Record<keyof typeof en, string> = {
   "m2882": "세부 정보",
   "m2883": "호스트",
   "m2884": "정확히 이 호스트 (host:이름 형식)",
-  "m2885": "이 도메인과 모든 하위 도메인"
+  "m2885": "이 도메인과 모든 하위 도메인",
+  "m2886": "이 의도를 삭제됨으로 표시하고 사유를 기록합니다. 의도 노드, 실행 기록, 등록된 사실 및 취약점은",
+  "m2887": ". 플래너는 사용자 삭제 및 사유를 전달받아 이를 반영하여 다시 계획합니다.",
+  "m2888": "데이터 및 추적 가능성 유지"
 };

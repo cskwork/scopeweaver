@@ -348,6 +348,13 @@ function intentToSession(n: TaskNode): Session {
   };
 }
 
+// Only a finished worker's output is withdrawn from use: server/task_control.go sets
+// OutputDeletion for the terminal states alone, so for an unfinished worker the planner
+// is just told the intent will not execute. The soft-delete copy has to match that.
+function withdrawsOutput(status: string | undefined): boolean {
+  return status === "done" || status === "blocked" || status === "exhausted" || status === "stopped";
+}
+
 // Gap between the bold and plain fragments of the delete-confirmation sentence.
 // The zh/ja catalogs continue one phrase across those fragments, so a space would
 // land inside a word; en/ko/es need it between words.
@@ -567,6 +574,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   // Deletion modes: soft (default) records deleted status/reason and retains data; hard removes exclusive descendants.
   const [deleteMode, setDeleteMode] = React.useState<"soft" | "hard">("soft");
   const gap = fragmentGap(swLocale);
+  const cancelWithdrawsOutput = withdrawsOutput(cancelIntent?.status);
   const [workerMessage, setWorkerMessage] = React.useState("");
   const [workerMessageRequestId, setWorkerMessageRequestId] = React.useState("");
   const [workerMessageSending, setWorkerMessageSending] = React.useState(false);
@@ -2109,7 +2117,10 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                     {swt("interface.m0762")}{gap}<strong>{swt("interface.m0763")}</strong>{gap}{swt("interface.m0764")}</>
                 ) : (
                   <>
-                    <strong>{swt("interface.m0765")}</strong>{gap}{swt("interface.m0766")}{gap}<strong>{swt("interface.m0767")}</strong>{swt("interface.m0768")}</>
+                    <strong>{swt("interface.m0765")}</strong>{gap}
+                    {swt(cancelWithdrawsOutput ? "interface.m0766" : "interface.m2886")}{gap}
+                    <strong>{swt("interface.m0767")}</strong>
+                    {swt(cancelWithdrawsOutput ? "interface.m0768" : "interface.m2887")}</>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
@@ -2124,7 +2135,8 @@ export function SessionsTab({ taskId }: { taskId: string }) {
                   )}
                 >
                   <div className="font-medium">{swt("interface.m0765")}</div>
-                  <div className="text-xs text-muted-foreground">{swt("interface.m0769")}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {swt(cancelWithdrawsOutput ? "interface.m0769" : "interface.m2888")}</div>
                 </button>
                 <button
                   type="button"

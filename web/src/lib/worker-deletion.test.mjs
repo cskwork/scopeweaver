@@ -32,6 +32,30 @@ test("worker delete action accepts active and finished sessions, excluding inher
   assert.equal(cancellable({ role: "worker", status: "deleted" }), false);
 });
 
+// The soft-delete copy must follow the backend: server/task_control.go sets OutputDeletion
+// only for terminal states, so only a finished worker's output is described as withdrawn.
+let withdrawsOutputSource;
+for (const node of ast.statements) {
+  if (ts.isFunctionDeclaration(node) && node.name?.text === "withdrawsOutput") withdrawsOutputSource = node.getText(ast);
+}
+assert.ok(withdrawsOutputSource, "sessions-tab defines withdrawsOutput");
+const withdrawsOutput = vm.runInNewContext(
+  `${ts.transpileModule(withdrawsOutputSource, { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText}; withdrawsOutput`,
+);
+
+test("only a finished worker's soft deletion is described as withdrawing output", () => {
+  for (const status of ["done", "blocked", "exhausted", "stopped"]) {
+    assert.equal(withdrawsOutput(status), true, status);
+  }
+  for (const status of ["running", "paused", "pending", "deleted", undefined]) {
+    assert.equal(withdrawsOutput(status), false, String(status));
+  }
+  // The dialog has to offer both copies, keyed off that flag.
+  assert.match(source, /cancelWithdrawsOutput \? "interface\.m0766" : "interface\.m2886"/);
+  assert.match(source, /cancelWithdrawsOutput \? "interface\.m0768" : "interface\.m2887"/);
+  assert.match(source, /cancelWithdrawsOutput \? "interface\.m0769" : "interface\.m2888"/);
+});
+
 // Resolve the same aliases as Next.js while loading the real TypeScript mock client.
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
