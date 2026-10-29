@@ -412,7 +412,7 @@ type IntentCleanup struct {
 	Activities int64 `json:"activities"`
 }
 
-// SoftDeleteIntent soft-deletes a pending, running, or paused intent: set state='deleted' and store
+// SoftDeleteIntent soft-deletes an open, running, paused, or terminal intent: set state='deleted' and store
 // the user's reason in delete_reason, retaining the intent and all output/lineage instead of adding
 // a separate fact as the old implementation did. Return its previous summary for planner notification; remove side conversations atomically.
 // The caller must stop the running worker first to prevent later writes.
@@ -432,7 +432,9 @@ func (s *ExplorationStore) SoftDeleteIntent(id int64, reason string) (string, er
 		}
 		return "", err
 	}
-	if state != "running" && state != "paused" && state != "open" {
+	switch state {
+	case "open", "running", "paused", "done", "blocked", "exhausted", "stopped":
+	default:
 		return "", locale.Errorf("%w: intent state %s cannot be deleted", ErrIntentStateConflict, state)
 	}
 	if _, err := tx.Exec(`UPDATE exploration_nodes

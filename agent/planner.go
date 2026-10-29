@@ -159,18 +159,18 @@ func renderPlannerTodos(items []actool.Todo) string {
 // Goals contains this call's new goal texts; set_goals supports batching.
 // "goal_deleted": the human removed a goal in overview management; Detail is the removed text.
 // "goal_edited": the human edited a goal in overview management; OldGoal -> NewGoal.
-// "cancelled": the human deleted IntentID; Detail is the deletion reason. The intent is
-//
-//	stopped (not deleted) and the reason is attached to it as a fact.
+// "cancelled": the human deleted IntentID; Detail is the deletion reason.
+// OutputDeletion distinguishes terminal output withdrawal from cancelling unfinished work.
 type TriggerEvent struct {
-	Kind     string
-	IntentID int64
-	Detail   string
-	Summary  string   // For cancelled: summary captured before deletion, since a hard-deleted node cannot be queried.
-	Goals    []string // For goal: one or more new goal texts from this set_goals call.
-	OldGoal  string   // For goal_edited: previous goal text.
-	NewGoal  string   // For goal_edited: updated goal text.
-	Hints    []string // For hint: one or more new hint texts from this add_hint call.
+	Kind           string
+	OutputDeletion string // cancelled: "soft" or "hard" withdraws terminal output; empty before completion.
+	IntentID       int64
+	Detail         string
+	Summary        string   // For cancelled: summary captured before deletion, since a hard-deleted node cannot be queried.
+	Goals          []string // For goal: one or more new goal texts from this set_goals call.
+	OldGoal        string   // For goal_edited: previous goal text.
+	NewGoal        string   // For goal_edited: updated goal text.
+	Hints          []string // For hint: one or more new hint texts from this add_hint call.
 }
 
 // renderTriggers spells out the change(s) that fired this round: for a finished
@@ -209,7 +209,14 @@ func renderTriggers(ts *db.ExplorationStore, evs []TriggerEvent) string {
 			if sm == "" {
 				sm = intentSummary(ts, ev.IntentID)
 			}
-			b.WriteString(fmt.Sprintf(locale.Text(locale.ServerDefault(), "\n- The user deleted intent #%d: %s. Reason: %s. It will no longer execute; replan accordingly."), ev.IntentID, sm, ev.Detail))
+			if ev.OutputDeletion != "" {
+				b.WriteString(fmt.Sprintf(locale.Text(locale.ServerDefault(), "\n- The user deleted finished intent #%d: %s. Reason: %s. This worker's output is withdrawn by the user; do not use it in further planning."), ev.IntentID, sm, ev.Detail))
+				if ev.OutputDeletion == "hard" {
+					b.WriteString(locale.Text(locale.ServerDefault(), " Its exclusively supported output has been removed from the graph; shared output may remain, but must not be relied on as this worker's output."))
+				}
+			} else {
+				b.WriteString(fmt.Sprintf(locale.Text(locale.ServerDefault(), "\n- The user deleted intent #%d: %s. Reason: %s. It will no longer execute; replan accordingly."), ev.IntentID, sm, ev.Detail))
+			}
 		default: // "done"
 			b.WriteString(fmt.Sprintf(locale.Text(locale.ServerDefault(), "\n- The worker for intent #%d (%s) finished with conclusion: %s"), ev.IntentID, intentSummary(ts, ev.IntentID), workerOutput(ts, ev.IntentID)))
 			if fids := factIDsYielded(ts, ev.IntentID); fids != "" {
