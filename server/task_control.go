@@ -208,34 +208,45 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 		// hard: physically remove the intent and descendants supported exclusively by it, cascading to leaves,
 		// while preserving shared nodes, goals, and task root facts to avoid orphaned data.
 		// Both modes notify the planner with cancelled, intent content, and deletion reason for replanning.
-		if node.State != "running" && node.State != "paused" && node.State != "open" {
-			return out, locale.Errorf("Only open, running, or paused intents can be deleted")
+		outputDeletion := ""
+		switch node.State {
+		case "open", "running", "paused":
+		case "done", "blocked", "exhausted", "stopped":
+			outputDeletion = "soft"
+			if mode == "hard" {
+				outputDeletion = "hard"
+			}
+		default:
+			return out, locale.Errorf("This intent cannot be deleted in its current state")
 		}
 		reason = strings.TrimSpace(reason)
 		if reason == "" {
 			return out, locale.Errorf("A deletion reason is required")
 		}
+		expectedState := node.State
 		if node.State == "running" {
 			if err := s.engine.ControlWork(ctx, iid, "cancel"); err != nil {
 				return out, err
 			}
+			// ControlWork waits for the worker to persist its cancellation barrier.
+			expectedState = "paused"
 		}
 		summary := intentSummaryOf(node)
 		if mode == "hard" {
-			cleanup, err := t.Store.CancelIntent(iid)
+			cleanup, err := t.Store.CancelIntent(iid, expectedState)
 			if err != nil {
 				return out, err
 			}
 			s.cancelWorkerSide(t.ID, t.ExpID, iid)
-			t.NotifyCancelled(iid, summary, reason)
+			t.NotifyCancelled(iid, summary, reason, outputDeletion)
 			out.Deleted = &cleanup
 			out.State = "" // The node is deleted; the frontend uses Deleted to remove it from the list.
 		} else {
-			if _, err := t.Store.SoftDeleteIntent(iid, reason); err != nil {
+			if _, err := t.Store.SoftDeleteIntent(iid, expectedState, reason); err != nil {
 				return out, err
 			}
 			s.cancelWorkerSide(t.ID, t.ExpID, iid)
-			t.NotifyCancelled(iid, summary, reason)
+			t.NotifyCancelled(iid, summary, reason, outputDeletion)
 			out.State = db.StateIntentDeleted
 		}
 	default:

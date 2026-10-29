@@ -99,7 +99,7 @@ func init() {
 	Register("Inherited intents are read-only and cannot be controlled", "Inherited intents are read-only and cannot be controlled", "상속된 의도는 읽기 전용이며 제어할 수 없습니다")
 	Register("Only running intents can be paused", "Only running intents can be paused", "실행 중인 의도만 일시정지할 수 있습니다")
 	Register("Only paused intents can be resumed", "Only paused intents can be resumed", "일시정지된 의도만 재개할 수 있습니다")
-	Register("Only open, running, or paused intents can be deleted", "Only open, running, or paused intents can be deleted", "대기, 실행 중, 일시정지된 의도만 삭제할 수 있습니다")
+	Register("This intent cannot be deleted in its current state", "This intent cannot be deleted in its current state", "이 의도는 현재 상태에서 삭제할 수 없습니다")
 	Register("A deletion reason is required", "A deletion reason is required", "삭제 사유가 필요합니다")
 	Register("task_ids must contain 1-%d entries", "task_ids must contain 1-%d entries", "task_ids는 1~%d개여야 합니다")
 	Register("[task-llm] task %s non-streaming call failed; retrying same provider in %v (%d/%d): %v", "[task-llm] task %s non-streaming call failed; retrying same provider in %v (%d/%d): %v", "[task-llm] 작업 %s 비스트리밍 호출 실패. %v 후 같은 공급자 재시도(%d/%d): %v")
