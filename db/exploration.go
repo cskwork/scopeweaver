@@ -416,7 +416,8 @@ type IntentCleanup struct {
 // the user's reason in delete_reason, retaining the intent and all output/lineage instead of adding
 // a separate fact as the old implementation did. Return its previous summary for planner notification; remove side conversations atomically.
 // The caller must stop the running worker first to prevent later writes.
-func (s *ExplorationStore) SoftDeleteIntent(id int64, reason string) (string, error) {
+// expectedState must still match under the row lock, after any caller-owned drain.
+func (s *ExplorationStore) SoftDeleteIntent(id int64, expectedState, reason string) (string, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return "", err
@@ -431,6 +432,9 @@ func (s *ExplorationStore) SoftDeleteIntent(id int64, reason string) (string, er
 			return "", locale.Errorf("intent not found")
 		}
 		return "", err
+	}
+	if state != expectedState {
+		return "", ErrIntentStateConflict
 	}
 	switch state {
 	case "open", "running", "paused", "done", "blocked", "exhausted", "stopped":
@@ -463,7 +467,7 @@ func (s *ExplorationStore) SoftDeleteIntent(id int64, reason string) (string, er
 // the deletion set to avoid breaking other branches. Roll up each deleted intent's tokens (irreversible accounting)
 // and remove its activity/side conversations. Delete finding rows first to avoid orphans under ON DELETE SET NULL.
 // Edges cascade with nodes; all cleanup is transactional. The caller must stop running workers first.
-func (s *ExplorationStore) CancelIntent(id int64) (IntentCleanup, error) {
+func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentCleanup, error) {
 	var out IntentCleanup
 	tx, err := s.db.Begin()
 	if err != nil {
@@ -471,14 +475,17 @@ func (s *ExplorationStore) CancelIntent(id int64) (IntentCleanup, error) {
 	}
 	defer tx.Rollback()
 
-	// Lock the intent to check existence (idempotent: already deleted means not found). Any state can be deleted;
-	// the caller must stop a running worker beforehand.
-	if err := tx.QueryRow(`SELECT 1 FROM exploration_nodes
-		WHERE id=$1 AND exploration_id=$2 AND kind='intent' FOR UPDATE`, id, s.expID).Scan(new(int)); err != nil {
+	// Revalidate the caller's state after any drain, before cascading or rolling up tokens.
+	var state string
+	if err := tx.QueryRow(`SELECT state FROM exploration_nodes
+		WHERE id=$1 AND exploration_id=$2 AND kind='intent' FOR UPDATE`, id, s.expID).Scan(&state); err != nil {
 		if err == sql.ErrNoRows {
 			return out, locale.Errorf("intent not found")
 		}
 		return out, err
+	}
+	if state != expectedState || state == StateIntentDeleted {
+		return out, ErrIntentStateConflict
 	}
 
 	// Load graph nodes for protection and edges for reachability/parent sets. Real task graphs are small.

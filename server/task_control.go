@@ -223,14 +223,17 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 		if reason == "" {
 			return out, locale.Errorf("A deletion reason is required")
 		}
+		expectedState := node.State
 		if node.State == "running" {
 			if err := s.engine.ControlWork(ctx, iid, "cancel"); err != nil {
 				return out, err
 			}
+			// ControlWork waits for the worker to persist its cancellation barrier.
+			expectedState = "paused"
 		}
 		summary := intentSummaryOf(node)
 		if mode == "hard" {
-			cleanup, err := t.Store.CancelIntent(iid)
+			cleanup, err := t.Store.CancelIntent(iid, expectedState)
 			if err != nil {
 				return out, err
 			}
@@ -239,7 +242,7 @@ func (s *Server) applyIntentControl(ctx context.Context, t *Task, iid int64, act
 			out.Deleted = &cleanup
 			out.State = "" // The node is deleted; the frontend uses Deleted to remove it from the list.
 		} else {
-			if _, err := t.Store.SoftDeleteIntent(iid, reason); err != nil {
+			if _, err := t.Store.SoftDeleteIntent(iid, expectedState, reason); err != nil {
 				return out, err
 			}
 			s.cancelWorkerSide(t.ID, t.ExpID, iid)

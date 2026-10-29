@@ -58,7 +58,7 @@ func TestSoftDeleteIntent(t *testing.T) {
 	if err := es.SetIntentState(intent, "paused"); err != nil {
 		t.Fatal(err)
 	}
-	summary, err := es.SoftDeleteIntent(intent, "Wrong direction")
+	summary, err := es.SoftDeleteIntent(intent, "paused", "Wrong direction")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func TestSoftDeleteIntent(t *testing.T) {
 	}
 	// Pending (open) intents can also be soft-deleted.
 	openIntent := mustIntent(t, es, "Unclaimed intent")
-	if _, err := es.SoftDeleteIntent(openIntent, "Direction no longer needed"); err != nil {
+	if _, err := es.SoftDeleteIntent(openIntent, "open", "Direction no longer needed"); err != nil {
 		t.Fatalf("soft delete open intent: %v", err)
 	}
 	if n, err := es.GetNode(openIntent); err != nil || n == nil || n.State != StateIntentDeleted {
@@ -82,8 +82,47 @@ func TestSoftDeleteIntent(t *testing.T) {
 	}
 
 	// Already deleted intents cannot be soft-deleted again.
-	if _, err := es.SoftDeleteIntent(intent, "Delete again"); !errors.Is(err, ErrIntentStateConflict) {
+	if _, err := es.SoftDeleteIntent(intent, StateIntentDeleted, "Delete again"); !errors.Is(err, ErrIntentStateConflict) {
 		t.Fatal("soft-deleting an already-deleted intent unexpectedly succeeded")
+	}
+}
+
+func TestDeleteIntentStateConflict(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	expID, err := d.CreateExploration("stale deletion", "Reject changed or deleted intent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM explorations WHERE id=$1`, expID)
+	store := d.Exploration(expID)
+	for _, mode := range []string{"soft", "hard"} {
+		for _, state := range []string{"running", StateIntentDeleted} {
+			t.Run(mode+"/"+state, func(t *testing.T) {
+				iid := mustIntent(t, store, "Worker")
+				if err := store.SetIntentState(iid, state); err != nil {
+					t.Fatal(err)
+				}
+				for _, expected := range []string{"blocked", StateIntentDeleted} {
+					var err error
+					if mode == "soft" {
+						_, err = store.SoftDeleteIntent(iid, expected, "Withdraw")
+					} else {
+						_, err = store.CancelIntent(iid, expected)
+					}
+					if !errors.Is(err, ErrIntentStateConflict) {
+						t.Fatalf("expected=%q state=%q: got %v, want ErrIntentStateConflict", expected, state, err)
+					}
+				}
+				node, err := store.GetNode(iid)
+				if err != nil || node == nil || node.State != state || node.DeleteReason != "" {
+					t.Fatalf("conflict changed intent: %+v %v", node, err)
+				}
+			})
+		}
 	}
 }
 
@@ -110,7 +149,7 @@ func TestHardDeleteCascadesExclusiveDescendants(t *testing.T) {
 	fact2 := mustNode(t, es, KindFact, "Fact 2")
 	mustLink(t, es, intent2, RelYields, fact2)
 
-	cleanup, err := es.CancelIntent(intent1)
+	cleanup, err := es.CancelIntent(intent1, "open")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +193,7 @@ func TestHardDeletePreservesSharedAndGoal(t *testing.T) {
 	intent2 := mustIntent(t, es, "Derived from shared fact")
 	mustLink(t, es, shared, RelDerivedFrom, intent2)
 
-	cleanup, err := es.CancelIntent(intent1)
+	cleanup, err := es.CancelIntent(intent1, "open")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +264,7 @@ func TestDeleteTerminalIntent(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode == "soft" {
-					summary, err := es.SoftDeleteIntent(intent, "Output is incorrect")
+					summary, err := es.SoftDeleteIntent(intent, state, "Output is incorrect")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -239,7 +278,7 @@ func TestDeleteTerminalIntent(t *testing.T) {
 						}
 					}
 				} else {
-					cleanup, err := es.CancelIntent(intent)
+					cleanup, err := es.CancelIntent(intent, state)
 					if err != nil {
 						t.Fatal(err)
 					}
