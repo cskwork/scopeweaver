@@ -1247,10 +1247,7 @@ func restoreRerunIntent(t *Task, before *db.Node) error {
 	if t == nil || before == nil {
 		return locale.Errorf("missing intent rollback snapshot")
 	}
-	if before.State == "blocked" && before.BlockedReason != "" {
-		return t.Store.SetIntentBlockedReason(before.ID, before.BlockedReason)
-	}
-	return t.Store.SetIntentState(before.ID, before.State)
+	return t.Store.RestoreReopenedIntent(before.ID, before.State, before.BlockedReason)
 }
 
 func (s *Server) rerunIntent(w http.ResponseWriter, r *http.Request) {

@@ -50,6 +50,8 @@
   "\n- The operator changed the objective from \"%s\" to \"%s\". Adjust directions and stop dispatching obsolete ones.": "\n- El operador cambió el objetivo de \"%s\" a \"%s\". Ajusta las direcciones y deja de asignar las obsoletas.",
   "\n- The operator deleted objective: %s. Reassess remaining goals/directions; no longer dispatch intents for this goal.": "\n- El operador eliminó el objetivo: %s. Reevalúa los objetivos/direcciones restantes; ya no asignes intenciones para este objetivo.",
   "\n- The user deleted intent #%d: %s. Reason: %s. It will no longer execute; replan accordingly.": "\n- El usuario eliminó la intención #%d: %s. Motivo: %s. Ya no se ejecutará; adapta el plan.",
+  "\n- The user deleted finished intent #%d: %s. Reason: %s. This worker's output is withdrawn by the user; do not use it in further planning.": "\n- El usuario eliminó la intención finalizada #%d: %s. Motivo: %s. El usuario ha retirado la salida de este trabajador; no la uses en la planificación posterior.",
+  " Its exclusively supported output has been removed from the graph; shared output may remain, but must not be relied on as this worker's output.": " La salida respaldada exclusivamente por este trabajador se ha eliminado del grafo; la salida compartida puede permanecer, pero no debe usarse como salida de este trabajador.",
   "\n- The worker for intent #%d (%s) finished with conclusion: %s": "\n- El trabajador de la intención #%d (%s) terminó con la conclusión: %s",
   "\n- The worker for intent #%d (%s) reported a finding: %s": "\n- El trabajador de la intención #%d (%s) comunicó un hallazgo: %s",
   "\n... [terminated after timeout] ...": "\n... [terminado por tiempo agotado] ...",
@@ -772,7 +774,7 @@
   "Only custom tools can be edited": "Solo se pueden editar herramientas personalizadas",
   "Only custom tools can be modified: ": "Solo se pueden modificar herramientas personalizadas: ",
   "Only http/https are supported; received %q": "Solo se admite http/https; se recibió %q",
-  "Only open, running, or paused intents can be deleted": "Solo se pueden eliminar intenciones abiertas, en ejecución o pausadas",
+  "This intent cannot be deleted in its current state": "Esta intención no se puede eliminar en su estado actual",
   "Only paused intents can be resumed": "Solo se pueden reanudar intenciones pausadas",
   "Only paused tasks can be resumed": "Solo se pueden reanudar tareas pausadas",
   "Only paused workers can receive messages; pause the worker first": "Solo los trabajadores pausados pueden recibir mensajes; pausa primero el trabajador",
@@ -2021,5 +2023,6 @@
   "missing OpenCode SDK tool input": "Falta la entrada de la herramienta de OpenCode SDK",
   "unknown OpenCode SDK event type": "Tipo de evento de OpenCode SDK desconocido",
   "unsupported OpenCode SDK bridge protocol, runtime version or capture-only capabilities": "El protocolo del puente de OpenCode SDK, la versión del entorno de ejecución o las funciones de solo captura no son compatibles",
-  "unsupported OpenCode SDK content block": "El bloque de contenido de OpenCode SDK no es compatible"
+  "unsupported OpenCode SDK content block": "El bloque de contenido de OpenCode SDK no es compatible",
+  "Retained for audit: output from the listed intents is withdrawn by the user; do not rely on that output or summaries containing it in further planning.": "Salida conservada para auditoría: el usuario ha retirado la salida de las intenciones indicadas; no se base en esa salida ni en resúmenes que la contengan para planificar en adelante."
 }
