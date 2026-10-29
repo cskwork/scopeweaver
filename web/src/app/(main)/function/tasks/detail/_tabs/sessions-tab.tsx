@@ -348,6 +348,13 @@ function intentToSession(n: TaskNode): Session {
   };
 }
 
+// Gap between the bold and plain fragments of the delete-confirmation sentence.
+// The zh/ja catalogs continue one phrase across those fragments, so a space would
+// land inside a word; en/ko/es need it between words.
+function fragmentGap(locale: string): string {
+  return locale === "zh-Hans" || locale === "zh-Hant" || locale === "ja" ? "" : " ";
+}
+
 function SessionItem({
   s,
   active,
@@ -559,6 +566,7 @@ export function SessionsTab({ taskId }: { taskId: string }) {
   const [cancelReason, setCancelReason] = React.useState("");
   // Deletion modes: soft (default) records deleted status/reason and retains data; hard removes exclusive descendants.
   const [deleteMode, setDeleteMode] = React.useState<"soft" | "hard">("soft");
+  const gap = fragmentGap(swLocale);
   const [workerMessage, setWorkerMessage] = React.useState("");
   const [workerMessageRequestId, setWorkerMessageRequestId] = React.useState("");
   const [workerMessageSending, setWorkerMessageSending] = React.useState(false);
@@ -2097,11 +2105,11 @@ export function SessionsTab({ taskId }: { taskId: string }) {
               <AlertDialogDescription className="break-words whitespace-normal">
                 {deleteMode === "hard" ? (
                   <>
-                    <strong>{swt("interface.m0759")}</strong>{" "}{swt("interface.m0760")}{" "}<strong>{swt("interface.m0761")}</strong>{" "}
-                    {swt("interface.m0762")}{" "}<strong>{swt("interface.m0763")}</strong>{" "}{swt("interface.m0764")}</>
+                    <strong>{swt("interface.m0759")}</strong>{gap}{swt("interface.m0760")}{gap}<strong>{swt("interface.m0761")}</strong>{gap}
+                    {swt("interface.m0762")}{gap}<strong>{swt("interface.m0763")}</strong>{gap}{swt("interface.m0764")}</>
                 ) : (
                   <>
-                    <strong>{swt("interface.m0765")}</strong>{" "}{swt("interface.m0766")}{" "}<strong>{swt("interface.m0767")}</strong>{swt("interface.m0768")}</>
+                    <strong>{swt("interface.m0765")}</strong>{gap}{swt("interface.m0766")}{gap}<strong>{swt("interface.m0767")}</strong>{swt("interface.m0768")}</>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
