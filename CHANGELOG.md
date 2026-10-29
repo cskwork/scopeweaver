@@ -7,6 +7,7 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 ### Delete finished worker output (#62)
 
 #### Fixed
+- Failed rerun admission restores intent state and blocked reason only while the reopened row is still open, preserving concurrent deletion or worker claims and reporting an unapplied rollback.
 - Hard deletion refuses a cascade containing a running intent (HTTP 409 naming the worker). Graph row locks preserve support committed during deletion and fence later digest inserts; failed digest inserts roll back atomically.
 - Intent deletion now returns HTTP 409 if the worker state changes before deletion locks the row, and late side-conversation snapshots cannot recreate a soft-deleted worker's session.
 
