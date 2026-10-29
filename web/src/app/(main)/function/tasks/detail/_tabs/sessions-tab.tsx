@@ -384,8 +384,9 @@ function SessionItem({
     s.role === "worker" &&
     !s.inherited &&
     !deleted &&
-    // Pending means unclaimed/open intent; deletion is allowed for pending, running, and paused intents.
-    (s.status === "running" || s.status === "paused" || s.status === "pending");
+    // Pending means unclaimed/open intent; finished workers can also have their output withdrawn or removed.
+    (s.status === "running" || s.status === "paused" || s.status === "pending" ||
+      s.status === "done" || s.status === "blocked" || s.status === "exhausted" || s.status === "stopped");
   return (
     <div
       className={cn(
@@ -2096,11 +2097,11 @@ export function SessionsTab({ taskId }: { taskId: string }) {
               <AlertDialogDescription className="break-words whitespace-normal">
                 {deleteMode === "hard" ? (
                   <>
-                    <strong>{swt("interface.m0759")}</strong>{swt("interface.m0760")}<strong>{swt("interface.m0761")}</strong>
-                    {swt("interface.m0762")}<strong>{swt("interface.m0763")}</strong>{swt("interface.m0764")}</>
+                    <strong>{swt("interface.m0759")}</strong>{" "}{swt("interface.m0760")}{" "}<strong>{swt("interface.m0761")}</strong>{" "}
+                    {swt("interface.m0762")}{" "}<strong>{swt("interface.m0763")}</strong>{" "}{swt("interface.m0764")}</>
                 ) : (
                   <>
-                    <strong>{swt("interface.m0765")}</strong>{swt("interface.m0766")}<strong>{swt("interface.m0767")}</strong>{swt("interface.m0768")}</>
+                    <strong>{swt("interface.m0765")}</strong>{" "}{swt("interface.m0766")}{" "}<strong>{swt("interface.m0767")}</strong>{swt("interface.m0768")}</>
                 )}
               </AlertDialogDescription>
             </AlertDialogHeader>
