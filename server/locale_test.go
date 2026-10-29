@@ -89,8 +89,8 @@ func TestAllProductionPackagesHaveRawShippedTranslations(t *testing.T) {
 		}
 		production = append(production, key)
 	}
-	if len(production) != 2045 {
-		t.Fatalf("production key count %d, want 2045 (2043 previous + 2 terminal-output deletion messages)", len(production))
+	if len(production) != 2046 {
+		t.Fatalf("production key count %d, want 2046 (2045 previous + 1 running cascade conflict)", len(production))
 	}
 	if err := locale.ValidateTextTranslations(production); err != nil {
 		t.Fatal(err)
