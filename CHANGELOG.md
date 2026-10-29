@@ -7,6 +7,7 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 ### Delete finished worker output (#62)
 
 #### Fixed
+- Hard deletion refuses a cascade containing a running intent (HTTP 409 naming the worker). Graph row locks preserve support committed during deletion and fence later digest inserts; failed digest inserts roll back atomically.
 - Intent deletion now returns HTTP 409 if the worker state changes before deletion locks the row, and late side-conversation snapshots cannot recreate a soft-deleted worker's session.
 
 - Users can soft-delete or hard-delete intents in `done`, `blocked`, `exhausted`, or `stopped` state with a required reason. Soft deletion retains output and lineage; hard deletion removes exclusively supported output while preserving goals, origin facts, shared nodes, and digest-covered output. The planner is told that the worker output is withdrawn and must not be used in further planning.
