@@ -10,7 +10,7 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 - Failed rerun admission restores intent state and blocked reason only while the reopened row is still open, preserving concurrent deletion or worker claims and reporting an unapplied rollback.
 - Hard deletion refuses a cascade containing a running intent (HTTP 409 naming the worker). Graph row locks preserve support committed during deletion and fence later digest inserts; failed digest inserts roll back atomically.
 - Intent deletion now returns HTTP 409 if the worker state changes before deletion locks the row, and late side-conversation snapshots cannot recreate a soft-deleted worker's session.
-
+- A soft-deleted worker's retained output stays marked withdrawn, with the user's reason, across planner rounds, read tools and cold digests, instead of only in the round the deletion fired. Output a cold digest already folded in survives a hard deletion unmarked, because its producing intent and lineage are gone.
 - Users can soft-delete or hard-delete intents in `done`, `blocked`, `exhausted`, or `stopped` state with a required reason. Soft deletion retains output and lineage; hard deletion removes exclusively supported output while preserving goals, origin facts, shared nodes, and digest-covered output. The planner is told that the worker output is withdrawn and must not be used in further planning.
 
 ### Test scope and asset rules (#50)
