@@ -4,6 +4,12 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 
 ## [Unreleased]
 
+### Delete finished worker output (#62)
+
+#### Fixed
+
+- Users can soft-delete or hard-delete intents in `done`, `blocked`, `exhausted`, or `stopped` state with a required reason. Soft deletion retains output and lineage; hard deletion removes exclusively supported output while preserving goals, origin facts, shared nodes, and digest-covered output. The planner is told that the worker output is withdrawn and must not be used in further planning.
+
 ### Test scope and asset rules (#50)
 
 #### Fixed
