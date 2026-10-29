@@ -598,6 +598,11 @@ func (t *ToolSet) graphOverviewData() map[string]any {
 			}
 		}
 	}
+	ws, err := t.outputWithdrawals()
+	if err != nil {
+		return map[string]any{"error": err.Error()}
+	}
+	ws.annotate(out, t.language)
 	return out
 }
 
@@ -977,7 +982,7 @@ func (t *ToolSet) listFindings() actool.CoreTool {
 				}
 				out = append(out, m)
 			}
-			return jsonResult(out)
+			return t.withdrawnResult(out)
 		})
 }
 
@@ -1019,7 +1024,7 @@ func (t *ToolSet) listFacts() actool.CoreTool {
 			if hasMore && len(f) > 0 {
 				res["next_before"] = f[len(f)-1].ID // Pass this cursor to retrieve the next, older page.
 			}
-			return jsonResult(res)
+			return t.withdrawnResult(res)
 		})
 }
 
@@ -1061,7 +1066,7 @@ func (t *ToolSet) nodeDetail() actool.CoreTool {
 			if err := t.ts.PopulateFindingTrafficIDs([]*db.Node{n}); err != nil {
 				return actool.Errorf(locale.ErrorMessage(locale.FromContext(ctx), err)), nil
 			}
-			return jsonResult(n) // full payload incl. detail / evidence, plus explicit finding IDs
+			return t.withdrawnResult(n) // full payload incl. detail / evidence, plus explicit finding IDs
 		})
 }
 
@@ -1844,7 +1849,7 @@ func (t *ToolSet) getWorkerOutput() actool.CoreTool {
 			}
 			if pick == nil {
 				if intentNode.Inherited {
-					return jsonResult(inheritedMap(map[string]any{
+					return t.withdrawnResult(inheritedMap(map[string]any{
 						"intent_id": id, "final_text": locale.Text(locale.FromContext(ctx), "(This worker has no output yet)"),
 					}, intentNode.SourceTaskID))
 				}
@@ -1861,7 +1866,7 @@ func (t *ToolSet) getWorkerOutput() actool.CoreTool {
 			if intentNode.Inherited {
 				inheritedMap(result, intentNode.SourceTaskID)
 			}
-			return jsonResult(result)
+			return t.withdrawnResult(result)
 		})
 }
 
@@ -1971,7 +1976,7 @@ func (t *ToolSet) getWorkerTrace() actool.CoreTool {
 				if intentNode.Inherited {
 					inheritedMap(result, intentNode.SourceTaskID)
 				}
-				return jsonResult(result)
+				return t.withdrawnResult(result)
 			}
 			// ①/② summary stream, optionally keyword-filtered; 100-char summaries.
 			var acts []db.Activity
@@ -1988,7 +1993,7 @@ func (t *ToolSet) getWorkerTrace() actool.CoreTool {
 			if intentNode.Inherited {
 				inheritedMap(result, intentNode.SourceTaskID)
 			}
-			return jsonResult(result)
+			return t.withdrawnResult(result)
 		})
 }
 
@@ -2034,7 +2039,7 @@ func (t *ToolSet) searchAllWorkerTraces() actool.CoreTool {
 				}
 				hits = append(hits, hit)
 			}
-			return jsonResult(map[string]any{"query": a.Q, "hits": hits})
+			return t.withdrawnResult(map[string]any{"query": a.Q, "hits": hits})
 		})
 }
 
