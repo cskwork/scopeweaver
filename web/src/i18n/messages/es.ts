@@ -3208,7 +3208,10 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m2882": "Detalles",
   "m2883": "Host",
   "m2884": "Exactamente este host (escribe host:name)",
-  "m2885": "Este dominio y todos sus subdominios"
+  "m2885": "Este dominio y todos sus subdominios",
+  "m2886": "marca esta intención como eliminada y registra el motivo. Su nodo, registros de ejecución, hechos registrados y vulnerabilidades",
+  "m2887": ". El planificador recibe la eliminación del usuario y su motivo y adapta el plan.",
+  "m2888": "Conservar datos y trazabilidad"
 };
 export { interfaceMessages as interface };
 import type { en as appSource } from './app.ts';
