@@ -1,6 +1,9 @@
 package db
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 // mustIntent / mustNode / mustLink are terse builders for the delete-cascade tests.
 func mustIntent(t *testing.T, es *ExplorationStore, summary string) int64 {
@@ -78,8 +81,8 @@ func TestSoftDeleteIntent(t *testing.T) {
 		t.Fatalf("open intent not soft-deleted: n=%+v err=%v", n, err)
 	}
 
-	// Already deleted and other unsupported states cannot be soft-deleted again.
-	if _, err := es.SoftDeleteIntent(intent, "Delete again"); err == nil {
+	// Already deleted intents cannot be soft-deleted again.
+	if _, err := es.SoftDeleteIntent(intent, "Delete again"); !errors.Is(err, ErrIntentStateConflict) {
 		t.Fatal("soft-deleting an already-deleted intent unexpectedly succeeded")
 	}
 }
@@ -165,6 +168,107 @@ func TestHardDeletePreservesSharedAndGoal(t *testing.T) {
 	for _, id := range []int64{goal, intentX, shared, intent2} {
 		if gone(t, es, id) {
 			t.Fatalf("node %d was wrongly cascaded", id)
+		}
+	}
+}
+
+// Terminal worker output is retained by soft deletion and exclusively cascaded by hard deletion.
+func TestDeleteTerminalIntent(t *testing.T) {
+	for _, state := range []string{"done", "blocked", "exhausted", "stopped"} {
+		for _, mode := range []string{"soft", "hard"} {
+			t.Run(state+"/"+mode, func(t *testing.T) {
+				d, err := Open(testDSN(t))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer d.Close()
+				expID, err := d.CreateExploration("terminal deletion", "worker output")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer d.Exec(`DELETE FROM explorations WHERE id=$1`, expID)
+				es := d.Exploration(expID)
+				intent := mustIntent(t, es, "Finished worker")
+				if err := es.SetIntentState(intent, state); err != nil {
+					t.Fatal(err)
+				}
+				fact := mustNode(t, es, KindFact, "Exclusive fact")
+				finding := mustNode(t, es, KindFinding, "Exclusive finding")
+				findingID, err := d.AddFinding(0, finding, "fixture", "Finding", SeverityLow, "Summary", "Evidence", "worker", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				// Clean up retained standalone rows before the exploration's FK nulls node_id.
+				defer d.Exec(`DELETE FROM findings WHERE id=$1`, findingID)
+				goal, err := es.AddGoal(map[string]any{"text": "Keep goal"}, "human")
+				if err != nil {
+					t.Fatal(err)
+				}
+				origin, err := es.AddNode(KindFact, map[string]any{"summary": "Origin"}, 1, StateOrigin, "human", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				other := mustIntent(t, es, "Surviving worker")
+				shared := mustNode(t, es, KindFact, "Shared fact")
+				covered := mustNode(t, es, KindFact, "Cold digest member")
+				digest, err := es.AddNode(KindDigest, map[string]any{"summary": "Surviving cold digest"}, 1, StateDigestActive, "compactor", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, id := range []int64{fact, finding, goal, origin, shared, covered} {
+					mustLink(t, es, intent, RelYields, id)
+				}
+				mustLink(t, es, other, RelYields, shared)
+				mustLink(t, es, digest, RelCovers, covered)
+				activityID, err := es.AppendActivity(Activity{NodeID: &intent, Worker: "worker", Kind: "result", Detail: "Worker conclusion"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if mode == "soft" {
+					summary, err := es.SoftDeleteIntent(intent, "Output is incorrect")
+					if err != nil {
+						t.Fatal(err)
+					}
+					n, err := es.GetNode(intent)
+					if err != nil || n == nil || n.State != StateIntentDeleted || n.DeleteReason != "Output is incorrect" || summary != "Finished worker" {
+						t.Fatalf("soft deletion: node=%+v summary=%q err=%v", n, summary, err)
+					}
+					for _, id := range []int64{fact, finding} {
+						if gone(t, es, id) {
+							t.Fatalf("soft deletion removed output %d", id)
+						}
+					}
+				} else {
+					cleanup, err := es.CancelIntent(intent)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if cleanup != (IntentCleanup{Intents: 1, Facts: 1, Findings: 1, Activities: 1}) {
+						t.Fatalf("cleanup=%+v", cleanup)
+					}
+					for _, id := range []int64{intent, fact, finding} {
+						if !gone(t, es, id) {
+							t.Fatalf("exclusive node %d survived", id)
+						}
+					}
+				}
+				for _, id := range []int64{goal, origin, other, shared, covered, digest} {
+					if gone(t, es, id) {
+						t.Fatalf("protected/shared node %d removed", id)
+					}
+				}
+				f, err := d.GetFinding(findingID)
+				if err != nil || (f != nil) != (mode == "soft") {
+					t.Fatalf("finding=%+v err=%v mode=%s", f, err, mode)
+				}
+				var count int
+				if err := d.QueryRow(`SELECT count(*) FROM activity WHERE id=$1`, activityID).Scan(&count); err != nil {
+					t.Fatal(err)
+				}
+				if (count == 1) != (mode == "soft") {
+					t.Fatalf("activity count=%d mode=%s", count, mode)
+				}
+			})
 		}
 	}
 }

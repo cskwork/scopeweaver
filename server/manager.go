@@ -1920,11 +1920,12 @@ func (t *Task) NotifyGoalEdited(oldText, newText string) {
 // wakes the planner so the next round spells out which intent was removed and why.
 // summary is the intent's text captured before deletion — needed for hard delete,
 // where the node is gone by the time the planner reads the trigger. Applies to both
-// soft (state='deleted') and hard (physical cascade) delete.
-func (t *Task) NotifyCancelled(intentID int64, summary, reason string) {
+// soft (state='deleted') and hard (physical cascade) delete. outputDeletion is
+// "soft" or "hard" for terminal worker output withdrawal, and empty before completion.
+func (t *Task) NotifyCancelled(intentID int64, summary, reason, outputDeletion string) {
 	if intentID > 0 {
 		t.trigMu.Lock()
-		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "cancelled", IntentID: intentID, Summary: summary, Detail: reason})
+		t.pendingTriggers = append(t.pendingTriggers, agent.TriggerEvent{Kind: "cancelled", IntentID: intentID, Summary: summary, Detail: reason, OutputDeletion: outputDeletion})
 		t.trigMu.Unlock()
 	}
 	t.Notify()
