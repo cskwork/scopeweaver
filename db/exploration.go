@@ -466,7 +466,8 @@ func (s *ExplorationStore) SoftDeleteIntent(id int64, expectedState, reason stri
 // Never delete goals or origin facts. Preserve shared nodes referenced by intents/digests outside
 // the deletion set to avoid breaking other branches. Roll up each deleted intent's tokens (irreversible accounting)
 // and remove its activity/side conversations. Delete finding rows first to avoid orphans under ON DELETE SET NULL.
-// Edges cascade with nodes; all cleanup is transactional. The caller must stop running workers first.
+// Edges cascade with nodes; all cleanup is transactional. The caller must stop its named worker first;
+// a running descendant rejects the whole cascade, so its execution cannot outlive its records.
 func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentCleanup, error) {
 	var out IntentCleanup
 	tx, err := s.db.Begin()
@@ -488,10 +489,13 @@ func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentC
 		return out, ErrIntentStateConflict
 	}
 
-	// Load graph nodes for protection and edges for reachability/parent sets. Real task graphs are small.
+	// Lock nodes before reading edges: FK KEY SHARE locks make new support wait until commit.
+	// Read edges in the next statement so support committed while these locks waited is visible.
+	// Real task graphs are small; locking the local graph also fences descendant state transitions.
 	kind := map[int64]string{}
+	states := map[int64]string{}
 	protected := map[int64]bool{}
-	nrows, err := tx.Query(`SELECT id, kind, state FROM exploration_nodes WHERE exploration_id=$1`, s.expID)
+	nrows, err := tx.Query(`SELECT id, kind, state FROM exploration_nodes WHERE exploration_id=$1 ORDER BY id FOR UPDATE`, s.expID)
 	if err != nil {
 		return out, err
 	}
@@ -503,6 +507,7 @@ func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentC
 			return out, err
 		}
 		kind[nid] = k
+		states[nid] = st
 		if k == KindGoal || (k == KindFact && st == StateOrigin) {
 			protected[nid] = true // Never delete goals or task-origin facts along with an intent.
 		}
@@ -514,7 +519,9 @@ func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentC
 
 	parentsOf := map[int64][]int64{} // dst -> sources of all incoming edges, including covers; digest-covered members retain their digest parent.
 	downOf := map[int64][]int64{}    // src -> downstream neighbors through yields/derived_from.
-	erows, err := tx.Query(`SELECT src_id, rel, dst_id FROM exploration_edges WHERE exploration_id=$1`, s.expID)
+	// Inheriting explorations may also store support pointing at these local nodes.
+	erows, err := tx.Query(`SELECT src_id, rel, dst_id FROM exploration_edges
+		WHERE exploration_id=$1 OR dst_id IN (SELECT id FROM exploration_nodes WHERE exploration_id=$1)`, s.expID)
 	if err != nil {
 		return out, err
 	}
@@ -557,6 +564,12 @@ func (s *ExplorationStore) CancelIntent(id int64, expectedState string) (IntentC
 					changed = true
 				}
 			}
+		}
+	}
+
+	for nid := range del {
+		if kind[nid] == KindIntent && states[nid] == "running" {
+			return out, locale.Errorf("%w: running intent %d must be stopped before hard deletion", ErrIntentStateConflict, nid)
 		}
 	}
 
