@@ -160,6 +160,25 @@ jobs:
         working-directory: web
       - run: npm test
         working-directory: web
+      - name: Test native Windows configuration
+        run: go test ./config -count=1
+      - name: Build embedded frontend for native PostgreSQL proof
+        working-directory: web
+        env:
+          NEXT_EXPORT: "1"
+        run: npx next build
+      - name: Verify native Windows PostgreSQL startup
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path server/webui/dist -Force | Out-Null
+          Copy-Item web/out/* server/webui/dist -Recurse -Force
+          ./e2e/windows-postgres.ps1
+      - if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: windows-postgres-results
+          path: ${{ runner.temp }}/scopeweaver-windows-postgres/*.log
+          if-no-files-found: ignore
       - name: Test native evidence file commits
         run: go test ./evidence -run '^Test(WriteBody|CommitBodyFile)' -count=1 -v
       - name: Test native Python and skill paths

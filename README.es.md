@@ -201,6 +201,50 @@ cp config.example.json config.json   # fill in the database connection
 > la compilación. Ejecutar `./scopeweaver` directamente significa que una actualización no se relanzará.
 > Para ejecutar en segundo plano: `nohup ./start.sh >scopeweaver.log 2>&1 &`.
 
+**Windows (PowerShell): prepara PostgreSQL primero.** El ZIP no incluye PostgreSQL. Si `start.bat` se
+reinicia una y otra vez tras `connection refused`, el backend no alcanza la base de datos configurada y el
+supervisor reintenta (de 1 s hasta 60 s). Cambiar solo el puerto no instala ni inicia PostgreSQL.
+
+1. Detén el bucle con Ctrl+C (confirma si cmd.exe lo pregunta). Conserva tu `config.json` y tu base de
+   datos existentes; no los borres ni los sobrescribas.
+2. Si PostgreSQL no está instalado, instálalo e inícialo por separado con el
+   [instalador oficial para Windows](https://www.postgresql.org/download/windows/). `Get-Service postgresql*`
+   muestra el servicio de un instalador convencional; que no aparezca no prueba que PostgreSQL falte.
+3. Comprueba el puerto real del servidor en pgAdmin o en `postgresql.conf` (`port`). El estándar es `5432`;
+   un `5433` explícito es correcto si el servidor lo usa de verdad. Sustituye abajo el puerto verificado.
+4. Verifica el mismo host, puerto, rol y base de datos de la configuración (un TCP correcto no prueba el inicio de sesión):
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql` viene con las herramientas cliente de PostgreSQL y debe estar en el PATH. Si el rol o la base de
+   datos no existen, crea unos dedicados con tus herramientas habituales de administración de PostgreSQL;
+   nunca reinicies una base de datos existente.
+5. Crea `config.json` solo si no existe (los archivos existentes nunca se sobrescriben) y edita únicamente
+   los campos de la base de datos:
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   La línea de registro de arranque `[config] Configuration file:` indica el archivo en uso.
+   `SCOPEWEAVER_CONFIG` (y después `ARTEX_CONFIG`) puede seleccionar otro archivo, y `ARTEX_PG_DSN` o
+   `database.dsn` tienen prioridad sobre los campos. El `database.password` del ejemplo está vacío; si el
+   servidor exige autenticación por contraseña, pon la contraseña que acabas de probar (o conserva un
+   mecanismo que ya funcione, como `PGPASSWORD`/pgpass). Nunca compartas contraseñas, DSN completos ni el
+   archivo de configuración.
+6. Si `skill_dir` contiene una ruta Unix copiada como `/opt/scopeweaver/skills`, déjalo en `""` o elimínalo
+   para usar la carpeta `skills\` contigua; conserva una ruta personalizada intencionada. `ARTEX_SKILL_DIR`
+   tiene prioridad sobre la configuración: revísala si la línea `[config] Skill directory:` sigue mostrando
+   una ruta incorrecta.
+7. Ejecuta `.\start.bat`. El arranque puede crear la base de datos configurada si falta e inicializa su
+   esquema, así que el `dbname` exacto importa; nunca apuntes a una base de datos ajena o de producción. El
+   aviso inicial `Listening on` por sí solo no indica que esté listo: espera a que
+   `http://localhost:8787/api/health` responda o se abra la interfaz. Una base de datos nueva muestra
+   `/setup`; si una instalación existente muestra `/setup` inesperadamente, detente y revisa el origen de
+   la configuración y el `dbname` en lugar de reiniciar nada.
+
+La actualización en la aplicación solo sustituye el binario; no renueva `config.example.json`, la
+documentación ni tu `config.json` existente.
+
 ### Opción 4: compilar un binario único desde código fuente
 
 ```bash

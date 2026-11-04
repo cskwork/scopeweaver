@@ -4,6 +4,12 @@ This is the translated upstream ARTEX history from baseline `160fe13`, preservin
 
 ## [Unreleased]
 
+### Windows PostgreSQL setup (#79)
+
+#### Fixed
+- `config.example.json` now uses the standard PostgreSQL port `5432` instead of `5433`. This affects only newly copied examples; existing `config.json` files, explicit custom ports and DSN overrides are unchanged, and nothing falls back to another port automatically.
+- The prebuilt-binary install guide now states that the ZIP does not include PostgreSQL and adds Windows PowerShell steps to install or start it separately, verify the actual port and login, configure the password and a copied Unix `skill_dir`, and recognise the `start.bat` retry loop. Changing the port alone does not start a database.
+
 ### Delete finished worker output (#62)
 
 #### Fixed

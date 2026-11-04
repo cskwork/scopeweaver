@@ -171,6 +171,45 @@ cp config.example.json config.json   # fill in the database connection
 > 新しいビルドへの置換にこれを利用します。`./scopeweaver` を直接実行すると、更新後に再起動しません。
 > バックグラウンド実行: `nohup ./start.sh >scopeweaver.log 2>&1 &`。
 
+**Windows（PowerShell）: 先に PostgreSQL を準備してください。** ZIP には PostgreSQL は含まれません。
+`connection refused` の後に `start.bat` が再起動を繰り返す場合、バックエンドが設定済みのデータベースに
+接続できず、監視スクリプトが再試行（1 秒から最大 60 秒）しています。ポートを変えるだけでは PostgreSQL は
+インストールも起動もされません。
+
+1. Ctrl+C で再起動ループを止めます（cmd.exe が確認を求めたら承認）。既存の `config.json` とデータベースは
+   残し、削除や上書きはしないでください。
+2. PostgreSQL がない場合は、[公式 Windows インストーラー](https://www.postgresql.org/download/windows/)で
+   別途インストールして起動します。`Get-Service postgresql*` は一般的なインストーラーのサービスを表示しますが、
+   一致がなくても PostgreSQL がない証拠にはなりません。
+3. pgAdmin または `postgresql.conf`（`port`）でサーバーの実際のポートを確認します。標準は `5432` で、
+   サーバーが実際に `5433` を使うなら明示した `5433` が正しい設定です。以下には確認したポートを入れてください。
+4. 設定と同じホスト・ポート・ロール・データベースで確認します（TCP の成功だけではログインを保証しません）:
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql` は PostgreSQL のクライアントツールに含まれ、PATH 上に必要です。ロールやデータベースがなければ、
+   普段使う PostgreSQL 管理ツールで専用のものを作成します。既存のデータベースは決して初期化しないでください。
+5. `config.json` がない場合のみ作成し（既存ファイルは上書きしません）、データベースの項目だけを編集します:
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   起動ログの `[config] Configuration file:` 行が使用中のファイルを示します。`SCOPEWEAVER_CONFIG`（次に
+   `ARTEX_CONFIG`）で別のファイルが選ばれることがあり、`ARTEX_PG_DSN` または `database.dsn` は各項目より
+   優先されます。サンプルの `database.password` は空です。サーバーがパスワード認証を求める場合は、確認した
+   パスワードを設定してください（または `PGPASSWORD`/pgpass など動作中の方式を維持）。パスワード、完全な DSN、
+   設定ファイルは共有しないでください。
+6. `skill_dir` に `/opt/scopeweaver/skills` などの Unix パスをコピーしていた場合は、`""` にするか項目を削除して
+   隣の `skills\` フォルダーを使わせます。意図したカスタムパスは残してください。`ARTEX_SKILL_DIR` は設定より
+   優先されるため、`[config] Skill directory:` のログ行がまだ誤ったパスならこの環境変数を確認します。
+7. `.\start.bat` を実行します。起動時に設定先のデータベースがなければ作成されることがあり、スキーマも
+   初期化されるため、`dbname` は正確である必要があります。無関係なデータベースや本番データベースを指さないで
+   ください。最初の `Listening on` バナーだけでは準備完了ではありません。`http://localhost:8787/api/health`
+   が応答するか UI が開くまで待ちます。新しいデータベースでは `/setup` が表示されます。既存のインストールで
+   予期せず `/setup` が出た場合は、何も初期化せずに停止し、設定の出所と `dbname` を確認し直してください。
+
+アプリ内の更新はバイナリだけを置き換え、`config.example.json`、ドキュメント、既存の `config.json` は更新しません。
+
 <a id="option-4-build-a-single-binary-from-source"></a>
 ### 方法 4: ソースから単一バイナリをビルド
 

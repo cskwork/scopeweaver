@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### Windows PostgreSQL 설정 (#79)
+
+#### 수정
+- `config.example.json`이 `5433` 대신 PostgreSQL 표준 포트 `5432`를 사용합니다. 새로 복사하는 예제에만 적용되며, 기존 `config.json`, 명시한 사용자 지정 포트, DSN 재정의는 바뀌지 않고 다른 포트로 자동 대체하지도 않습니다.
+- 사전 빌드 바이너리 설치 안내에 ZIP에는 PostgreSQL이 포함되지 않는다는 점을 명시하고, PostgreSQL을 별도로 설치·시작하고 실제 포트와 로그인을 확인하며 비밀번호와 복사된 Unix `skill_dir`를 설정하고 `start.bat` 재시도 루프를 알아보는 Windows PowerShell 절차를 추가했습니다. 포트만 바꿔서는 데이터베이스가 시작되지 않습니다.
+
 ### 종료된 작업자 출력 삭제 (#62)
 
 #### 수정

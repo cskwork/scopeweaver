@@ -201,6 +201,44 @@ cp config.example.json config.json   # 데이터베이스 연결 정보 입력
 > `./scopeweaver`를 직접 실행하면 업데이트 후 다시 띄워지지 않습니다.
 > 백그라운드 상주 실행: `nohup ./start.sh >scopeweaver.log 2>&1 &`.
 
+**Windows(PowerShell): PostgreSQL을 먼저 준비하세요.** ZIP에는 PostgreSQL이 포함되어 있지 않습니다.
+`connection refused` 뒤에 `start.bat`가 계속 재시작한다면 백엔드가 설정된 데이터베이스에 연결하지 못해
+감시 스크립트가 재시도(1초부터 최대 60초)하는 것입니다. 포트만 바꾼다고 PostgreSQL이 설치되거나 시작되지 않습니다.
+
+1. Ctrl+C로 재시작 루프를 멈추세요(cmd.exe가 확인을 물으면 승인). 기존 `config.json`과 데이터베이스는
+   유지하고 삭제하거나 덮어쓰지 마세요.
+2. PostgreSQL이 없다면 [공식 Windows 설치 프로그램](https://www.postgresql.org/download/windows/)으로
+   별도로 설치하고 시작하세요. `Get-Service postgresql*`는 일반적인 설치 프로그램 서비스를 보여 주지만,
+   결과가 없다고 PostgreSQL이 없다는 증거는 아닙니다.
+3. pgAdmin 또는 `postgresql.conf`(`port`)에서 서버의 실제 포트를 확인하세요. 표준은 `5432`이며, 서버가
+   실제로 `5433`을 쓴다면 명시된 `5433`이 맞습니다. 아래 명령에는 확인한 포트를 넣으세요.
+4. 설정과 같은 호스트·포트·역할·데이터베이스로 확인하세요(TCP 성공만으로 로그인이 보장되지 않습니다):
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql`은 PostgreSQL 클라이언트 도구에 포함되며 PATH에 있어야 합니다. 역할이나 데이터베이스가 없으면
+   평소 쓰는 PostgreSQL 관리자 도구로 전용 역할·데이터베이스를 만드세요. 기존 데이터베이스는 절대 초기화하지 마세요.
+5. `config.json`이 없을 때만 새로 만들고(기존 파일은 덮어쓰지 않음) 데이터베이스 필드만 수정하세요:
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   시작 로그의 `[config] Configuration file:` 줄이 실제 사용 중인 파일을 보여 줍니다. `SCOPEWEAVER_CONFIG`
+   (다음으로 `ARTEX_CONFIG`)가 다른 파일을 선택할 수 있고, `ARTEX_PG_DSN` 또는 `database.dsn`이 필드보다
+   우선합니다. 예제의 `database.password`는 비어 있습니다. 서버가 비밀번호 인증을 요구하면 방금 확인한
+   비밀번호를 넣으세요(또는 `PGPASSWORD`/pgpass처럼 이미 동작하는 방식을 유지). 비밀번호, 전체 DSN, 설정
+   파일은 공유하지 마세요.
+6. `skill_dir`에 `/opt/scopeweaver/skills` 같은 Unix 경로를 복사했다면 `""`로 비우거나 필드를 제거해
+   옆의 `skills\` 폴더를 쓰게 하세요. 의도한 사용자 지정 경로는 유지하세요. `ARTEX_SKILL_DIR`이 설정보다
+   우선하므로, `[config] Skill directory:` 로그 줄이 여전히 잘못된 경로라면 이 환경 변수를 확인하세요.
+7. `.\start.bat`를 실행하세요. 시작 과정에서 설정된 데이터베이스가 없으면 만들 수 있고 스키마를
+   초기화하므로 `dbname`이 정확해야 합니다. 관련 없는 데이터베이스나 운영 데이터베이스를 가리키지 마세요.
+   초기 `Listening on` 배너만으로는 준비 완료가 아닙니다. `http://localhost:8787/api/health`가 응답하거나
+   UI가 열릴 때까지 기다리세요. 새 데이터베이스는 `/setup`을 보여 줍니다. 기존 설치에서 예상치 않게
+   `/setup`이 보이면 아무것도 초기화하지 말고 멈춘 뒤 설정 출처와 `dbname`을 다시 확인하세요.
+
+앱 내 업데이트는 바이너리만 교체하며 `config.example.json`, 문서, 기존 `config.json`은 갱신하지 않습니다.
+
 ### 방법 4: 소스에서 단일 바이너리 빌드
 
 ```bash

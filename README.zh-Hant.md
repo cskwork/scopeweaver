@@ -166,6 +166,27 @@ cp config.example.json config.json   # fill in the database connection
 
 > 請以 `start.sh`／`start.bat` 啟動，勿直接執行 `./scopeweaver`。啟動指令碼會在程式結束後，根據結束碼判斷是否重新啟動；[應用程式內一鍵更新](#option-1-in-app-one-click-update-recommended) 依靠它置換新版本。直接執行 `./scopeweaver` 時，更新後不會自動重啟。背景執行方式：`nohup ./start.sh >scopeweaver.log 2>&1 &`。
 
+**Windows（PowerShell）：請先準備 PostgreSQL。** ZIP 不包含 PostgreSQL。若 `start.bat` 在 `connection refused` 之後不斷重新啟動，表示後端無法連線到設定的資料庫，啟動指令碼正在重試（1 秒起，最長 60 秒）。只改連接埠並不會安裝或啟動 PostgreSQL。
+
+1. 按 Ctrl+C 停止重新啟動迴圈（cmd.exe 詢問時請確認）。保留現有的 `config.json` 與資料庫，切勿刪除或覆寫。
+2. 若尚未安裝 PostgreSQL，請使用[官方 Windows 安裝程式](https://www.postgresql.org/download/windows/)另行安裝並啟動。`Get-Service postgresql*` 可列出常見安裝程式建立的服務；沒有結果並不代表 PostgreSQL 不存在。
+3. 在 pgAdmin 或 `postgresql.conf`（`port`）中確認伺服器的實際連接埠。標準連接埠為 `5432`；若伺服器確實使用 `5433`，明確設定的 `5433` 就是正確的。下列命令請代入已確認的連接埠。
+4. 以與設定相同的主機、連接埠、角色與資料庫進行驗證（僅 TCP 成功不代表能登入）：
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql` 隨 PostgreSQL 用戶端工具提供，必須位於 PATH 中。若角色或資料庫不存在，請使用慣用的 PostgreSQL 管理工具建立專用的角色與資料庫；切勿重設現有資料庫。
+5. 僅在沒有 `config.json` 時才新建（現有檔案不會被覆寫），之後只修改資料庫欄位：
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   啟動日誌中的 `[config] Configuration file:` 行會顯示實際使用的檔案。`SCOPEWEAVER_CONFIG`（其次為 `ARTEX_CONFIG`）可指定其他檔案，`ARTEX_PG_DSN` 或 `database.dsn` 優先於各欄位。範例中的 `database.password` 為空；若伺服器要求密碼驗證，請填入剛才驗證過的密碼（或保留 `PGPASSWORD`/pgpass 等已可用的方式）。切勿分享密碼、完整 DSN 或設定檔。
+6. 若 `skill_dir` 複製了 `/opt/scopeweaver/skills` 等 Unix 路徑，請設為 `""` 或刪除該欄位，以使用相鄰的 `skills\` 資料夾；刻意設定的自訂路徑請保留。`ARTEX_SKILL_DIR` 優先於設定，若 `[config] Skill directory:` 日誌行仍顯示錯誤路徑，請檢查該環境變數。
+7. 執行 `.\start.bat`。啟動時若設定的資料庫不存在可能會建立它，並初始化其結構描述，因此 `dbname` 必須正確；切勿指向無關或正式環境的資料庫。早期的 `Listening on` 橫幅本身不代表已就緒：請等到 `http://localhost:8787/api/health` 有回應或介面開啟。新資料庫會顯示 `/setup`；若現有安裝意外顯示 `/setup`，請先停止並重新確認設定來源與 `dbname`，不要重設任何資料。
+
+應用程式內更新只替換執行檔，不會更新 `config.example.json`、文件或現有的 `config.json`。
+
 <a id="option-4-build-a-single-binary-from-source"></a>
 
 ### 方式 4：從原始碼建置單一執行檔
