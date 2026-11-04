@@ -1,4 +1,4 @@
-# Native Windows proof against a run-owned PostgreSQL 16 cluster, without services or Docker.
+# Native Windows proof against a run-owned cluster using the runner's PostgreSQL 17 tools.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'Native Windows is required.' }
@@ -102,9 +102,10 @@ try {
     foreach ($candidate in $candidates) {
         if (-not $candidate -or -not (Test-Path (Join-Path $candidate 'postgres.exe'))) { continue }
         $version = Invoke-Checked (Join-Path $candidate 'postgres.exe') @('--version')
-        if ($version -match 'PostgreSQL\) 16\.') { $pgBin = $candidate; break }
+        if ($version -match 'PostgreSQL\) 17\.') { $pgBin = $candidate; break }
     }
-    if (-not $pgBin) { throw 'Runner-installed PostgreSQL 16 tools are required; no install or service fallback is permitted.' }
+    if (-not $pgBin) { throw 'Runner-installed PostgreSQL 17 tools are required; no install or service fallback is permitted.' }
+    Write-Host "Using native $version"
     $pgCtl = Join-Path $pgBin 'pg_ctl.exe'
     $binary = Join-Path $package 'scopeweaver.exe'
     [void](Invoke-Checked 'go' @('build', '-tags', 'embedui', '-o', $binary, './cmd/artex') @{} 180000)
