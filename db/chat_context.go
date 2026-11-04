@@ -57,7 +57,8 @@ func saveChatContextTx(ctx context.Context, tx *sql.Tx, ref chatstate.SessionRef
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE chat_control_sessions SET context_snapshot=$2 WHERE session_key=$1`, ref.Key(), body)
+	// Captured tool output and nested RawMessage fields may contain NUL escapes.
+	_, err = tx.ExecContext(ctx, `UPDATE chat_control_sessions SET context_snapshot=$2 WHERE session_key=$1`, ref.Key(), jsonbClean(body))
 	return err
 }
 
