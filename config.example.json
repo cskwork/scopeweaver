@@ -3,7 +3,7 @@
   "_comment_database": "PostgreSQL connection. ARTEX_PG_DSN overrides database. Use either individual fields below or database.dsn with a complete connection string.",
   "database": {
     "host": "127.0.0.1",
-    "port": 5433,
+    "port": 5432,
     "user": "artex",
     "password": "",
     "dbname": "artex",

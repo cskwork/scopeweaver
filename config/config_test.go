@@ -1,10 +1,34 @@
 package config
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// The distributed example should work with PostgreSQL's standard port after the
+// user supplies a real database and credentials. Explicit custom ports remain valid.
+func TestExamplePostgresDSN(t *testing.T) {
+	path, err := filepath.Abs("../config.example.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SCOPEWEAVER_CONFIG", "")
+	t.Setenv("ARTEX_CONFIG", path)
+	t.Setenv("ARTEX_PG_DSN", "")
+	dsn, _, err := PostgresDSN()
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.Port(); got != "5432" {
+		t.Fatalf("example PostgreSQL port = %q, want standard port 5432", got)
+	}
+}
 
 func TestPostgresDSNPrecedence(t *testing.T) {
 	dir := t.TempDir()
