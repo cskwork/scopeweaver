@@ -166,6 +166,27 @@ cp config.example.json config.json   # fill in the database connection
 
 > 请以 `start.sh`／`start.bat` 启动，勿直接运行 `./scopeweaver`。启动脚本会在程序结束后，根据结束码判断是否重启；[应用程序内一键更新](#option-1-in-app-one-click-update-recommended) 依靠它置换新版本。直接运行 `./scopeweaver` 时，更新后不会自动重启。背景运行方式：`nohup ./start.sh >scopeweaver.log 2>&1 &`。
 
+**Windows（PowerShell）：请先准备 PostgreSQL。** ZIP 不包含 PostgreSQL。若 `start.bat` 在 `connection refused` 之后不断重启，表示后端无法连接所配置的数据库，启动脚本正在重试（1 秒起，最长 60 秒）。只改端口并不会安装或启动 PostgreSQL。
+
+1. 按 Ctrl+C 停止重启循环（cmd.exe 询问时请确认）。保留现有的 `config.json` 与数据库，切勿删除或覆盖。
+2. 若尚未安装 PostgreSQL，请使用[官方 Windows 安装程序](https://www.postgresql.org/download/windows/)另行安装并启动。`Get-Service postgresql*` 可列出常见安装程序建立的服务；没有结果并不代表 PostgreSQL 不存在。
+3. 在 pgAdmin 或 `postgresql.conf`（`port`）中确认服务器的实际端口。标准端口为 `5432`；若服务器确实使用 `5433`，明确设置的 `5433` 就是正确的。下列命令请代入已确认的端口。
+4. 以与配置相同的主机、端口、角色与数据库进行验证（仅 TCP 成功不代表能登录）：
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql` 随 PostgreSQL 客户端工具提供，必须位于 PATH 中。若角色或数据库不存在，请使用惯用的 PostgreSQL 管理工具建立专用的角色与数据库；切勿重置现有数据库。
+5. 仅在没有 `config.json` 时才新建（现有文件不会被覆盖），之后只修改数据库字段：
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   启动日志中的 `[config] Configuration file:` 行会显示实际使用的文件。`SCOPEWEAVER_CONFIG`（其次为 `ARTEX_CONFIG`）可指定其他文件，`ARTEX_PG_DSN` 或 `database.dsn` 优先于各字段。示例中的 `database.password` 为空；若服务器要求密码认证，请填入刚才验证过的密码（或保留 `PGPASSWORD`/pgpass 等已可用的方式）。切勿分享密码、完整 DSN 或配置文件。
+6. 若 `skill_dir` 复制了 `/opt/scopeweaver/skills` 等 Unix 路径，请设为 `""` 或删除该字段，以使用相邻的 `skills\` 文件夹；刻意设置的自定义路径请保留。`ARTEX_SKILL_DIR` 优先于配置，若 `[config] Skill directory:` 日志行仍显示错误路径，请检查该环境变量。
+7. 运行 `.\start.bat`。启动时若所配置的数据库不存在可能会建立它，并初始化其结构，因此 `dbname` 必须准确；切勿指向无关或生产数据库。早期的 `Listening on` 横幅本身不代表已就绪：请等到 `http://localhost:8787/api/health` 有响应或界面打开。新数据库会显示 `/setup`；若现有安装意外显示 `/setup`，请先停止并重新确认配置来源与 `dbname`，不要重置任何数据。
+
+应用程序内更新只替换可执行文件，不会更新 `config.example.json`、文档或现有的 `config.json`。
+
 <a id="option-4-build-a-single-binary-from-source"></a>
 
 ### 方式 4：从源代码构建单一可执行文件

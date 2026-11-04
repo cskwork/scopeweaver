@@ -206,6 +206,46 @@ cp config.example.json config.json   # fill in the database connection
 > the new build. Running `./scopeweaver` directly means an update will not be relaunched.
 > To run in the background: `nohup ./start.sh >scopeweaver.log 2>&1 &`.
 
+**Windows (PowerShell): prepare PostgreSQL first.** The ZIP does not include PostgreSQL. If `start.bat`
+keeps restarting after `connection refused`, the backend cannot reach the configured database and the
+supervisor retries (1 s up to 60 s). Changing the port alone does not install or start PostgreSQL.
+
+1. Stop the loop with Ctrl+C (confirm if cmd.exe asks). Keep your existing `config.json` and database;
+   do not delete or overwrite them.
+2. If PostgreSQL is absent, install and start it separately with the
+   [official Windows installer](https://www.postgresql.org/download/windows/). `Get-Service postgresql*`
+   lists a conventional installer service; no match does not prove PostgreSQL is absent.
+3. Check the server's actual port in pgAdmin or `postgresql.conf` (`port`). The standard is `5432`; an
+   explicit `5433` is correct when the server really uses it. Substitute the verified port below.
+4. Verify the same host, port, role and database as the config (TCP success alone does not prove login):
+   ```powershell
+   Test-NetConnection 127.0.0.1 -Port 5432
+   psql -h 127.0.0.1 -p 5432 -U artex -d artex -W -c "SELECT current_database(), current_user, inet_server_port();"
+   ```
+   `psql` comes with the PostgreSQL client tools and must be on PATH. If the role or database does not
+   exist, create a dedicated one with your usual PostgreSQL administrator tools; never reset an existing database.
+5. Create `config.json` only when none exists (existing files are never overwritten), then edit only the
+   database fields:
+   ```powershell
+   if (!(Test-Path .\config.json)) { Copy-Item .\config.example.json .\config.json }
+   ```
+   The startup log line `[config] Configuration file:` shows the file in use. `SCOPEWEAVER_CONFIG` (then
+   `ARTEX_CONFIG`) can select another file, and `ARTEX_PG_DSN` or `database.dsn` override the fields.
+   The sample `database.password` is empty; if the server requires password authentication, set the
+   password you just tested (or keep a working mechanism such as `PGPASSWORD`/pgpass). Never share
+   passwords, full DSNs or the config file.
+6. If `skill_dir` holds a copied Unix path such as `/opt/scopeweaver/skills`, set it to `""` or remove it
+   so the adjacent `skills\` folder is used; keep an intentional custom path. `ARTEX_SKILL_DIR` overrides
+   the config, so check it if the `[config] Skill directory:` log line still shows the wrong path.
+7. Run `.\start.bat`. Startup may create the configured database if it is missing and initializes its
+   schema, so the exact `dbname` matters; never point it at an unrelated or production database. The
+   early `Listening on` banner alone is not readiness: wait until `http://localhost:8787/api/health`
+   responds or the UI opens. A new database shows `/setup`; if an existing installation unexpectedly
+   shows `/setup`, stop and recheck the config source and `dbname` instead of resetting anything.
+
+The in-app update replaces only the binary; it does not refresh `config.example.json`, the docs or your
+existing `config.json`.
+
 ### Option 4: build a single binary from source
 
 ```bash
