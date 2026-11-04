@@ -117,7 +117,10 @@ try {
     $httpPort = Free-Port
     while ($httpPort -eq $pgPort) { $httpPort = Free-Port }
     $clusterStarted = $true # Cleanup must run even if pg_ctl only partially starts the cluster.
-    [void](Invoke-Checked $pgCtl @('-D', $cluster, '-l', (Join-Path $scratch 'postgres.log'), '-w', '-t', '30', 'start', '-o', "-h 127.0.0.1 -p $pgPort") @{} 45000)
+    # Do not capture pg_ctl start with redirected pipes: the long-lived server
+    # can inherit their handles and prevent ReadToEndAsync from reaching EOF.
+    & $pgCtl -D $cluster -l (Join-Path $scratch 'postgres.log') -w -t 30 start -o "-h 127.0.0.1 -p $pgPort"
+    if ($LASTEXITCODE -ne 0) { throw 'Could not start the run-owned PostgreSQL cluster.' }
     $pgEnvironment = @{ PGHOST = '127.0.0.1'; PGPORT = "$pgPort"; PGUSER = $dbUser; PGPASSWORD = $password }
     [void](Invoke-Checked (Join-Path $pgBin 'createdb.exe') @('--no-password', $database) $pgEnvironment)
     $identity = Invoke-Checked (Join-Path $pgBin 'psql.exe') @('-X', '-A', '-t', '--no-password', '-d', $database, '-v', 'ON_ERROR_STOP=1', '-c', 'SELECT current_database(), inet_server_port(), current_user') $pgEnvironment

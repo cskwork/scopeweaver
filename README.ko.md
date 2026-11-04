@@ -205,7 +205,7 @@ cp config.example.json config.json   # 데이터베이스 연결 정보 입력
 `connection refused` 뒤에 `start.bat`가 계속 재시작한다면 백엔드가 설정된 데이터베이스에 연결하지 못해
 감시 스크립트가 재시도(1초부터 최대 60초)하는 것입니다. 포트만 바꾼다고 PostgreSQL이 설치되거나 시작되지 않습니다.
 
-1. Ctrl+C로 재시작 루프를 멈추세요(cmd.exe가 확인을 묻으면 승인). 기존 `config.json`과 데이터베이스는
+1. Ctrl+C로 재시작 루프를 멈추세요(cmd.exe가 확인을 물으면 승인). 기존 `config.json`과 데이터베이스는
    유지하고 삭제하거나 덮어쓰지 마세요.
 2. PostgreSQL이 없다면 [공식 Windows 설치 프로그램](https://www.postgresql.org/download/windows/)으로
    별도로 설치하고 시작하세요. `Get-Service postgresql*`는 일반적인 설치 프로그램 서비스를 보여 주지만,
