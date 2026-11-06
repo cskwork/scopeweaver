@@ -114,6 +114,24 @@ SCOPEWEAVER_LLM_MODEL=glm-5.3-flash
 
 `SCOPEWEAVER_LLM_PROVIDER=opencode-go` se resuelve al formato de protocolo OpenAI Chat Completions; la URL base y el modelo no definidos usan los valores de la tabla anterior.
 
+## Cheaper Inference (pasarela compatible con OpenAI)
+
+Abre **LLM → Nuevo → Plantilla de configuración** y elige **Cheaper Inference · gpt-5.4-mini**.
+
+| Campo | Valor |
+| --- | --- |
+| Formato | OpenAI Chat Completions |
+| URL base | `https://api.cheaperinference.com/v1` |
+| Modelo | `gpt-5.4-mini` |
+| Pensamiento | omitido (predeterminado del modelo) |
+| Esfuerzo de razonamiento | omitido (predeterminado del modelo) |
+| Ventana de contexto (K) | `0` (200K por defecto) |
+| Límite de salida | `16384`, enviado como `max_completion_tokens` |
+
+Cheaper Inference es una pasarela LLM compatible con OpenAI; una sola clave de API da acceso a modelos de varios laboratorios. El ID del modelo y sus límites (contexto de 400K, salida de 128K) se comprobaron en la lista pública de modelos `https://api.cheaperinference.com/public/models` el 2026-11-05. Los modelos GPT-5.4 reciben el límite de salida como `max_completion_tokens`; la plantilla omite el esfuerzo para usar el predeterminado del modelo. **Cargar modelos** lee la lista `/v1/models` de la pasarela, que requiere la clave; el campo sigue editable para otros ID como `deepseek-v4-flash` o `claude-sonnet-5`.
+
+**Credencial:** crea una clave en https://cheaperinference.com (documentación: https://cheaperinference.com/docs) y pégala en el perfil. Como las demás plantillas de nube, conserva la clave introducida y no guarda ni activa nada. La plantilla usa la ruta existente de OpenAI Chat Completions; está cubierta por pruebas unitarias de la plantilla, no por llamadas reales.
+
 ## Controlar el uso de tokens
 
 Cada turno de agente reenvía las instrucciones de sistema, esquemas de herramientas y conversación acumulada. La entrada crece turno a turno hasta que la compresión acorta el historial, y la caché del proveedor determina cuánto se factura a la tarifa menor de caché. Esta sección responde a la [incidencia #24](https://github.com/cskwork/scopeweaver/issues/24) para perfiles de nube. Ollama nativo tiene protecciones propias descritas [abajo](#protecciones-durante-la-ejecución).

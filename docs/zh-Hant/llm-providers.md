@@ -126,6 +126,26 @@ SCOPEWEAVER_LLM_MODEL=glm-5.3-flash
 
 `SCOPEWEAVER_LLM_PROVIDER=opencode-go` 解析為 OpenAI Chat Completions 傳輸格式；未設基底 URL 與模型時採上表預設值。
 
+<a id="cheaper-inference-openai-compatible-gateway"></a>
+
+## Cheaper Inference（OpenAI 相容閘道）
+
+開啟「LLM → 新增 → 設定範本」，選擇「Cheaper Inference · gpt-5.4-mini」。
+
+| 欄位 | 值 |
+| --- | --- |
+| 格式 | OpenAI Chat Completions |
+| 基底 URL | `https://api.cheaperinference.com/v1` |
+| 模型 | `gpt-5.4-mini` |
+| 思考 | 省略（模型預設） |
+| 推理強度 | 省略（模型預設） |
+| 上下文視窗（K） | `0`（預設 200K） |
+| 輸出上限 | `16384`，以 `max_completion_tokens` 傳送 |
+
+Cheaper Inference 是相容 OpenAI 的 LLM 閘道；一組 API 金鑰即可使用多家實驗室的模型。模型 ID 及其上限（上下文 400K、輸出 128K）於 2026-11-05 在公開模型清單 `https://api.cheaperinference.com/public/models` 中檢查。GPT-5.4 模型以 `max_completion_tokens` 接收輸出上限；範本省略推理強度，沿用模型預設值。「載入模型」讀取閘道的 `/v1/models` 清單，需要金鑰；模型欄仍可輸入 `deepseek-v4-flash`、`claude-sonnet-5` 等其他 ID。
+
+**憑證：** 在 https://cheaperinference.com 建立金鑰（文件：https://cheaperinference.com/docs），並貼入設定檔。與其他雲端範本一樣，範本保留已輸入的金鑰，不儲存也不啟用任何設定。範本使用現有的 OpenAI Chat Completions 路徑，僅由範本單元測試涵蓋，未經實際呼叫驗證。
+
 <a id="controlling-token-use"></a>
 
 ## 控制 token 用量

@@ -74,6 +74,7 @@ const CLOUD_PRESETS = [
   { id: "kimi", key: "providers.kimi", help: "providers.kimiHelp" },
   { id: "openrouter", key: "providers.openrouter", help: "providers.openrouterHelp" },
   { id: "opencode-go", key: "providers.opencodeGo", help: "providers.opencodeGoHelp" },
+  { id: "cheaper-inference", key: "providers.cheaperInference", help: "providers.cheaperInferenceHelp" },
 ] as const;
 const OLLAMA_PRESETS = [
   { id: "ollama-host", key: "providers.ollamaHost", help: "providers.ollamaHostHelp" },

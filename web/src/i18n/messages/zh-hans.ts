@@ -3295,6 +3295,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   kimi: "月之暗面 Kimi · kimi-k3（经济型）",
   openrouter: "OpenRouter · DeepSeek Flash（经济型）",
   opencodeGo: "OpenCode Go · glm-5.3-flash（订阅网关）",
+  cheaperInference: "Cheaper Inference · gpt-5.4-mini",
   deepseekHelp:
     "可选的经济型默认值：推理强度 low，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。是否思考沿用 DeepSeek 默认。节省效果未经测量；结果被截断或过浅时请提高强度或上限。",
   claudeHelp:
@@ -3309,6 +3310,8 @@ export const providers: Record<keyof typeof providersSource, string> = {
     "通过 OpenRouter 使用 DeepSeek V4.1 Flash。强度 low，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。OpenRouter 会自动缓存重复的前缀。节省效果未经测量。",
   opencodeGoHelp:
     "OpenCode Go 订阅网关（https://opencode.ai/zen/go/v1，OpenAI 兼容）。推理强度 max，输出上限 16,384 token（以 max_tokens 发送），上下文窗口 0（默认 200K）。网关会拒绝缺少 x-opencode-session 标头的请求，因此该模板会自动填写“会话标头”字段。使用你的 OpenCode 订阅密钥（opencode 中的 OPENCODE_API_KEY）。该密钥受 opencode 订阅条款约束，保存前请确认允许在 ScopeWeaver 中使用。",
+  cheaperInferenceHelp:
+    "Cheaper Inference OpenAI 兼容网关（https://api.cheaperinference.com/v1）。省略推理强度（模型默认），输出上限 16,384 token（以 max_completion_tokens 发送），上下文窗口 0（默认 200K）。“加载模型”会列出该密钥可用的其他模型 ID。需要 Cheaper Inference API 密钥。",
   opencodeSdk: "OpenCode SDK · 桥接服务",
   sdkGroup: "SDK 桥接服务",
   sdkHelp: "桥接运行时：native CLI/客户端 2.1.4（默认，保留原始工具参数）或 legacy SDK 1.19.4（安全的结构化 JSON，不保留原始字节）。两者均不支持 Windows。主机工具执行和审批仍由 ScopeWeaver 管理。",

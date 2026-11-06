@@ -3392,6 +3392,7 @@ export const providers: Record<keyof typeof providersSource, string> = {
   kimi: "Moonshot Kimi · kimi-k3（節約）",
   openrouter: "OpenRouter · DeepSeek Flash（節約）",
   opencodeGo: "OpenCode Go · glm-5.3-flash",
+  cheaperInference: "Cheaper Inference · gpt-5.4-mini",
   deepseekHelp:
     "選択した場合の節約用既定値: 推論強度 low、max_tokens として送信する出力上限 16,384 トークン、コンテキストウィンドウ 0（既定 200K）。思考機能は DeepSeek の既定値のままです。削減効果は未測定です。結果が途中で切れる場合や内容が浅い場合は、推論強度や上限を上げてください。",
   claudeHelp:
@@ -3406,6 +3407,8 @@ export const providers: Record<keyof typeof providersSource, string> = {
     "OpenRouter 経由の DeepSeek V4.1 Flash です。推論強度 low、max_tokens として送信する出力上限 16,384 トークン、コンテキストウィンドウ 0（既定 200K）を使用します。OpenRouter は繰り返されるプレフィックスを自動でキャッシュします。削減効果は未測定です。",
   opencodeGoHelp:
     "OpenCode Go のサブスクリプションゲートウェイ（https://opencode.ai/zen/go/v1、OpenAI 互換）です。推論強度 max、max_tokens として送信する出力上限 16,384 トークン、コンテキストウィンドウ 0（既定 200K）を使用します。ゲートウェイは x-opencode-session ヘッダーのないリクエストを拒否するため、このテンプレートが「セッションヘッダー」欄を設定します。OpenCode のサブスクリプションキー（opencode の OPENCODE_API_KEY）を使用します。このキーは opencode 独自のサブスクリプション規約に従うため、保存前に ScopeWeaver からの利用が認められることを確認してください。",
+  cheaperInferenceHelp:
+    "Cheaper Inference の OpenAI 互換ゲートウェイ（https://api.cheaperinference.com/v1）。推論強度は省略（モデルの既定値）、出力上限 16,384 トークン（max_completion_tokens として送信）、コンテキストウィンドウ 0（既定 200K）。「モデルを読み込む」で、このキーで使える他のモデル ID を表示します。Cheaper Inference の API キーが必要です。",
   opencodeSdk: "OpenCode SDK · ブリッジ",
   sdkGroup: "SDK ブリッジ",
   sdkHelp: "ブリッジの実行環境は native CLI／クライアント 2.1.4（既定、ツール引数の原文を保持）または legacy SDK 1.19.4（安全な構造の JSON。元のバイト列は保持しません）です。どちらも Windows には対応していません。ホスト側のツール実行と承認は引き続き ScopeWeaver が管理します。",

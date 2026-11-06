@@ -119,6 +119,25 @@ SCOPEWEAVER_LLM_MODEL=glm-5.3-flash
 
 `SCOPEWEAVER_LLM_PROVIDER=opencode-go` は OpenAI Chat Completions の通信形式に対応し、ベース URL とモデルが未設定なら上記表の既定値を使います。
 
+<a id="cheaper-inference-openai-compatible-gateway"></a>
+## Cheaper Inference（OpenAI 互換ゲートウェイ）
+
+**LLM → 新規 → 設定テンプレート**で **Cheaper Inference · gpt-5.4-mini** を選択します。
+
+| フィールド | 値 |
+| --- | --- |
+| 形式 | OpenAI Chat Completions |
+| ベース URL | `https://api.cheaperinference.com/v1` |
+| モデル | `gpt-5.4-mini` |
+| 思考機能 | 省略（モデルの既定値）|
+| 推論強度 | 省略（モデルの既定値）|
+| コンテキストウィンドウ（K）| `0`（既定 200K）|
+| 出力上限 | `16384`、`max_completion_tokens` として送信 |
+
+Cheaper Inference は OpenAI 互換の LLM ゲートウェイで、1 つの API キーで複数のラボのモデルを使えます。モデル ID と上限（コンテキスト 400K、出力 128K）は 2026-11-05 に公開モデル一覧 `https://api.cheaperinference.com/public/models` で確認しました。GPT-5.4 モデルは出力上限を `max_completion_tokens` で受け取ります。テンプレートは推論強度を省略し、モデルの既定値を使います。**モデルを読み込む**はゲートウェイの `/v1/models` 一覧を取得し、キーが必要です。モデル欄は `deepseek-v4-flash` や `claude-sonnet-5` など他の ID に編集できます。
+
+**認証情報:** https://cheaperinference.com でキーを作成し（ドキュメント: https://cheaperinference.com/docs）、プロファイルに貼り付けてください。他のクラウドテンプレートと同様に、入力済みのキーを保持し、何も保存・有効化しません。テンプレートは既存の OpenAI Chat Completions の経路を使い、確認はテンプレートの単体テストのみで、実際の呼び出しでは確認していません。
+
 <a id="controlling-token-use"></a>
 ## トークン使用量の管理
 

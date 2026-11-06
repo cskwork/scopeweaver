@@ -66,6 +66,8 @@ test("cloud economy templates fill the documented endpoint, model and opt-in out
     // The opencode-go gateway template deliberately fills effort max at the user's request
     // and the required x-opencode-session header (HTTP 400 MissingSessionID without it).
     "opencode-go": ["openai", "https://opencode.ai/zen/go/v1", "glm-5.3-flash", "", "max", "", "x-opencode-session"],
+    // The cheaper-inference gateway template omits effort (model default) and sends max_completion_tokens.
+    "cheaper-inference": ["openai", "https://api.cheaperinference.com/v1", "gpt-5.4-mini", "", "", "max_completion_tokens"],
   };
   for (const [id, [format, baseURL, model, thinking, effort, field, sessionHeader]] of Object.entries(expected)) {
     assert.ok(LLM_PROFILE_PRESET_IDS.includes(id), id);
@@ -87,7 +89,7 @@ test("cloud economy templates fill the documented endpoint, model and opt-in out
 test("cloud economy templates keep the entered key and preferences, and switching between them changes only template fields", () => {
   const draft = Object.freeze({ name: "Economy", api_key: "user-entered-key", proxy: "http://proxy:8080", session_header_key: "x-session", streaming: false, rate_per_minute: 7 });
   let previous = draft;
-  for (const id of ["deepseek", "claude", "openai", "qwen", "kimi", "openrouter", "zai-general", "deepseek"]) {
+  for (const id of ["deepseek", "claude", "openai", "qwen", "kimi", "openrouter", "cheaper-inference", "zai-general", "deepseek"]) {
     const next = applyLLMProfilePreset(previous, id);
     for (const key of Object.keys(draft)) assert.equal(next[key], draft[key], `${id} keeps ${key}`);
     assert.deepEqual({ ...next }, { ...draft, ...getLLMProfilePreset(id) }, `${id} leaves no fields from the previous template`);
@@ -100,7 +102,7 @@ test("cloud economy templates keep the entered key and preferences, and switchin
   for (const key of ["name", "api_key", "proxy", "streaming", "rate_per_minute"]) assert.equal(oc[key], draft[key], `opencode-go keeps ${key}`);
   assert.equal(oc.session_header_key, "x-opencode-session", "opencode-go fills its required session header");
   assert.deepEqual({ ...oc }, { ...draft, ...getLLMProfilePreset("opencode-go") }, "opencode-go leaves no fields from the previous template");
-  for (const id of ["deepseek", "claude", "openai", "qwen", "kimi", "openrouter", "opencode-go"]) {
+  for (const id of ["deepseek", "claude", "openai", "qwen", "kimi", "openrouter", "opencode-go", "cheaper-inference"]) {
     const preset = getLLMProfilePreset(id);
     for (const key of ["api_key", "keep_alive", "llm_max_concurrent"]) assert.equal(key in preset, false, `${id} never sets ${key}`);
   }

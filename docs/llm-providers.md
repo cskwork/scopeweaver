@@ -116,6 +116,24 @@ SCOPEWEAVER_LLM_MODEL=glm-5.3-flash
 
 `SCOPEWEAVER_LLM_PROVIDER=opencode-go` resolves to the OpenAI Chat Completions wire format; an unset base URL and model default to the values in the table above.
 
+## Cheaper Inference (OpenAI-compatible gateway)
+
+Open **LLM → New → Configuration template** and choose **Cheaper Inference · gpt-5.4-mini**.
+
+| Field | Value |
+| --- | --- |
+| Format | OpenAI Chat Completions |
+| Base URL | `https://api.cheaperinference.com/v1` |
+| Model | `gpt-5.4-mini` |
+| Thinking | omitted (model default) |
+| Reasoning effort | omitted (model default) |
+| Context window (K) | `0` (200K default) |
+| Output limit | `16384`, sent as `max_completion_tokens` |
+
+Cheaper Inference is an OpenAI-compatible LLM gateway; one API key gives access to models from several labs. The model id and its limits (400K context, 128K output) were checked in the public model list at `https://api.cheaperinference.com/public/models` on 2026-11-05. GPT-5.4 models take the output limit as `max_completion_tokens`; the template omits effort so the model default applies. **Load models** reads the gateway's `/v1/models` list, which requires the key; the model field stays editable for other ids such as `deepseek-v4-flash` or `claude-sonnet-5`.
+
+**Credential:** create a key at https://cheaperinference.com (documentation: https://cheaperinference.com/docs) and paste it into the profile. Like the other cloud templates, it keeps an entered key and does not save or activate anything. The template uses the existing OpenAI Chat Completions path; it is covered by template unit tests, not by live calls.
+
 ## Controlling token use
 
 Every agent turn resends the system prompt, the tool schemas and the conversation so far. Input therefore grows turn by turn until compaction shortens the history, and provider prompt caching decides how much of the repeated input is billed at the cheaper cached rate. This section answers [issue #24](https://github.com/cskwork/scopeweaver/issues/24) for cloud profiles. Native Ollama has its own safeguards, described [below](#runtime-safeguards).

@@ -116,6 +116,24 @@ SCOPEWEAVER_LLM_MODEL=glm-5.3-flash
 
 `SCOPEWEAVER_LLM_PROVIDER=opencode-go`는 OpenAI Chat Completions 와이어 형식으로 해석되며, 기본 URL과 모델이 비어 있으면 위 표의 기본값을 사용합니다.
 
+## Cheaper Inference(OpenAI 호환 게이트웨이)
+
+**LLM → 새로 만들기 → 설정 템플릿**에서 **Cheaper Inference · gpt-5.4-mini**를 고르세요.
+
+| 필드 | 값 |
+| --- | --- |
+| 형식 | OpenAI Chat Completions |
+| 기본 URL | `https://api.cheaperinference.com/v1` |
+| 모델 | `gpt-5.4-mini` |
+| 추론 | 생략(모델 기본값) |
+| 강도 | 생략(모델 기본값) |
+| 문맥 창(K) | `0`(기본 200K) |
+| 출력 한도 | `16384`, `max_completion_tokens`로 전송 |
+
+Cheaper Inference는 OpenAI 호환 LLM 게이트웨이이며, API 키 하나로 여러 연구소의 모델을 사용할 수 있습니다. 모델 ID와 한도(문맥 400K, 출력 128K)는 2026-11-05에 공개 모델 목록 `https://api.cheaperinference.com/public/models`에서 확인했습니다. GPT-5.4 모델은 출력 한도를 `max_completion_tokens`로 받으며, 템플릿은 강도를 생략해 모델 기본값을 따릅니다. **모델 불러오기**는 게이트웨이의 `/v1/models` 목록을 읽으며 키가 필요합니다. 모델 필드는 `deepseek-v4-flash`, `claude-sonnet-5` 같은 다른 ID로 수정할 수 있습니다.
+
+**자격 증명:** https://cheaperinference.com 에서 키를 만들고(문서: https://cheaperinference.com/docs) 프로필에 붙여넣으세요. 다른 클라우드 템플릿과 마찬가지로 입력한 키를 유지하며 아무것도 저장하거나 활성화하지 않습니다. 템플릿은 기존 OpenAI Chat Completions 경로를 사용하며, 실제 호출이 아니라 템플릿 단위 테스트로만 확인했습니다.
+
 ## 토큰 사용량 줄이기
 
 에이전트는 턴마다 시스템 프롬프트, 도구 스키마, 지금까지의 대화를 다시 보냅니다. 그래서 입력은 압축으로 기록이 줄어들 때까지 턴마다 늘어나고, 반복되는 입력 중 얼마가 더 싼 캐시 요금으로 과금되는지는 제공자의 프롬프트 캐시가 정합니다. 이 절은 클라우드 프로필 기준으로 [이슈 #24](https://github.com/cskwork/scopeweaver/issues/24)에 답합니다. 기본 Ollama의 보호 장치는 [아래](#실행-중-보호-장치)에 따로 설명합니다.
