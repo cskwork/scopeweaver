@@ -50,6 +50,7 @@ import type {
   FindingsPage,
   FindingTraffic,
   FindingTrafficDetail,
+  FindingTrend,
   IntentAsset,
   InterceptApprovalFilter,
   InterceptApprovalRow,
@@ -579,6 +580,16 @@ export const api = {
   findingAssetTree: (q: Omit<FindingQuery, "page" | "pageSize">) =>
     get<FindingAssetTree>(`/exploration/findings/asset-tree?${findingFilterParams(q).toString()}`),
   findingStats: () => get<FindingStats>("/exploration/findings/stats"),
+  // findingTrend returns findings counts bucketed over time, optionally narrowed to
+  // one task. Aggregated server-side so the payload stays O(buckets), not O(findings).
+  findingTrend: (opts?: { task?: string | number; bucket?: "hour" | "day" | "week"; days?: number }) => {
+    const p = new URLSearchParams();
+    if (opts?.task && String(opts.task) !== "all") p.set("task", String(opts.task));
+    if (opts?.bucket) p.set("bucket", opts.bucket);
+    if (opts?.days) p.set("days", String(opts.days));
+    const qs = p.toString();
+    return get<FindingTrend>(`/exploration/findings/trend${qs ? `?${qs}` : ""}`);
+  },
   // exportFindings downloads findings. Selected scope passes finding IDs;
   // filtered scope passes FindingQuery filters; all scope ignores filters.
   exportFindings: async (opts: {

@@ -815,6 +815,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/exploration/findings/groups", s.findingGroups)
 	mux.HandleFunc("GET /api/exploration/findings/asset-tree", s.findingAssetTree)
 	mux.HandleFunc("GET /api/exploration/findings/stats", s.findingStats)
+	mux.HandleFunc("GET /api/exploration/findings/trend", s.findingTrend)
 	mux.HandleFunc("GET /api/exploration/findings/export", s.findingsExport)
 	s.registerFindingTraffic(mux)
 	mux.HandleFunc("GET /api/exploration/findings/{id}", s.getFinding)
@@ -2172,6 +2173,33 @@ func (s *Server) findingStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, st)
+}
+
+// findingTrend serves findings-over-time counts for the dashboard chart.
+// Query params: task (task id; 0/empty = all), bucket (hour|day|week), days
+// (lookback window; 0 = all time, capped by the bucket count).
+func (s *Server) findingTrend(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	taskID := int64(atoiDefault(q.Get("task"), 0))
+	bucket := q.Get("bucket")
+	switch bucket {
+	case "hour", "day", "week":
+	default:
+		bucket = "day"
+	}
+	var since int64
+	if days := atoiDefault(q.Get("days"), 0); days > 0 {
+		if days > 3650 {
+			days = 3650
+		}
+		since = time.Now().AddDate(0, 0, -days).Unix()
+	}
+	pts, err := s.m.pg.FindingTrend(taskID, bucket, since)
+	if err != nil {
+		writeError(w, 500, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"bucket": bucket, "points": pts})
 }
 
 // getFinding returns one finding by its standalone-table id (DTO finding_id),

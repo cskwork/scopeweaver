@@ -793,3 +793,64 @@ func (d *DB) FindingMetaByNodeID(taskID int64) (map[int64]FindingMeta, error) {
 	}
 	return out, rows.Err()
 }
+
+// FindingTrendPoint is one bucket of the findings-over-time series.
+type FindingTrendPoint struct {
+	Bucket   string `json:"bucket"` // RFC3339 start of the bucket (UTC).
+	Total    int    `json:"total"`
+	Critical int    `json:"critical"`
+	High     int    `json:"high"`
+	Medium   int    `json:"medium"`
+	Low      int    `json:"low"`
+}
+
+// FindingTrend returns findings counts bucketed over time, optionally narrowed to
+// a single task. Buckets are fixed-width (hour|day|week) and anchored to the Unix
+// epoch so consecutive calls line up. Empty buckets are omitted; the client is
+// expected to fill gaps so a sparse series still renders as a continuous line.
+//
+// Aggregating in SQL keeps the payload O(buckets) instead of O(findings), which
+// matters because the dashboard polls this.
+func (d *DB) FindingTrend(taskID int64, bucket string, sinceUnix int64) ([]FindingTrendPoint, error) {
+	// Whitelist the interval: it is interpolated into the query, so it must never
+	// come straight from the request.
+	var width string
+	switch bucket {
+	case "hour":
+		width = "1 hour"
+	case "week":
+		width = "1 week"
+	default:
+		width = "1 day"
+	}
+	// date_bin anchors buckets to an explicit origin, avoiding the DST/offset drift
+	// of date_trunc for fixed-width buckets.
+	rows, err := d.Query(`
+		SELECT to_char(b, 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+			COUNT(*),
+			COUNT(*) FILTER (WHERE severity = 'critical'),
+			COUNT(*) FILTER (WHERE severity = 'high'),
+			COUNT(*) FILTER (WHERE severity = 'medium'),
+			COUNT(*) FILTER (WHERE severity = 'low')
+		FROM (
+			SELECT date_bin($1::interval, created_at, TIMESTAMPTZ '1970-01-01') AS b, severity
+			FROM findings
+			WHERE ($2 = 0 OR task_id = $2)
+			  AND ($3 = 0 OR created_at >= to_timestamp($3))
+		) t
+		GROUP BY b
+		ORDER BY b`, width, taskID, sinceUnix)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []FindingTrendPoint{}
+	for rows.Next() {
+		var p FindingTrendPoint
+		if err := rows.Scan(&p.Bucket, &p.Total, &p.Critical, &p.High, &p.Medium, &p.Low); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
