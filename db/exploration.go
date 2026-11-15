@@ -134,9 +134,12 @@ type SessionTokenUsage struct {
 	CacheWriteTokens int    `json:"cache_write_tokens"`
 }
 
-// DailyTokenBucket is one day's global token aggregate across all tasks.
+// DailyTokenBucket is one day's token aggregate for one exploration (task).
+// ExplorationID lets the dashboard apply its per-profile filter without a second
+// query; the "all profiles" view sums every row for a day.
 type DailyTokenBucket struct {
 	Day             string `json:"day"` // "YYYY-MM-DD"
+	ExplorationID   int64  `json:"exploration_id"`
 	InputTokens     int    `json:"input_tokens"`
 	OutputTokens    int    `json:"output_tokens"`
 	CacheReadTokens int    `json:"cache_read_tokens"`
@@ -145,20 +148,60 @@ type DailyTokenBucket struct {
 // TokenDailyAll aggregates token consumption by calendar day (UTC) for the
 // past `days` days across all explorations. Only kind='result' rows carry token
 // counts (the terminal per-run summary), so there is no double-counting.
+//
+// Bucketing is by activity.created_at — when the run actually finished — not by
+// the owning task's creation date. A long-running task therefore spreads its
+// usage across the days it ran instead of dumping its lifetime total onto one
+// day, which previously produced enormous single-day spikes.
+//
+// CacheReadTokens is taken from the per-call llm_usage ledger for the same
+// exploration and day. activity.cache_read_tokens is a per-run cumulative
+// rollup that saturates at the input total (it equals input on ~99.8% of
+// rows), so using it directly reports a fictitious ~100% cache-hit rate;
+// `input - cache_read` then collapses to ~0. LEAST() keeps the value a valid
+// subset of input, and COALESCE preserves the activity value for any bucket
+// the ledger does not cover.
 func (d *DB) TokenDailyAll(days int) ([]DailyTokenBucket, error) {
 	if days <= 0 {
 		days = 30
 	}
 	rows, err := d.Query(`
-		SELECT TO_CHAR(DATE_TRUNC('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
-		       COALESCE(SUM(input_tokens), 0),
-		       COALESCE(SUM(output_tokens), 0),
-		       COALESCE(SUM(cache_read_tokens), 0)
-		FROM activity
-		WHERE kind = 'result'
-		  AND created_at >= NOW() - ($1 * INTERVAL '1 day')
-		GROUP BY day
-		ORDER BY day`, days)
+		WITH legacy AS (
+			SELECT TO_CHAR(DATE_TRUNC('day', created_at AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+			       exploration_id,
+			       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			       COALESCE(SUM(output_tokens), 0) AS output_tokens,
+			       COALESCE(SUM(cache_read_tokens), 0) AS cache_read_tokens
+			FROM activity
+			WHERE kind = 'result'
+			  AND created_at >= NOW() - ($1 * INTERVAL '1 day')
+			GROUP BY day, exploration_id
+		), ledger AS (
+			SELECT TO_CHAR(DATE_TRUNC('day', ts AT TIME ZONE 'UTC'), 'YYYY-MM-DD') AS day,
+			       exploration_id,
+			       COALESCE(SUM(input_tokens), 0) AS input_tokens,
+			       COALESCE(SUM(cache_read), 0) AS cache_read
+			FROM llm_usage
+			WHERE exploration_id IS NOT NULL
+			  AND ts >= NOW() - ($1 * INTERVAL '1 day')
+			GROUP BY day, exploration_id
+		)
+		SELECT legacy.day,
+		       legacy.exploration_id,
+		       legacy.input_tokens,
+		       legacy.output_tokens,
+		       -- Apply the ledger's cache-hit RATIO for this exploration/day to the
+		       -- legacy input total. Clamping with LEAST() instead would pin every
+		       -- bucket the ledger covers more input for to a fictitious 100% hit.
+		       CASE
+		         WHEN ledger.input_tokens > 0
+		           THEN LEAST(legacy.input_tokens::numeric,
+		                      legacy.input_tokens::numeric * ledger.cache_read / ledger.input_tokens)
+		         ELSE legacy.cache_read_tokens
+		       END::bigint
+		FROM legacy
+		LEFT JOIN ledger USING (day, exploration_id)
+		ORDER BY legacy.day`, days)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +209,7 @@ func (d *DB) TokenDailyAll(days int) ([]DailyTokenBucket, error) {
 	var out []DailyTokenBucket
 	for rows.Next() {
 		var b DailyTokenBucket
-		if err := rows.Scan(&b.Day, &b.InputTokens, &b.OutputTokens, &b.CacheReadTokens); err != nil {
+		if err := rows.Scan(&b.Day, &b.ExplorationID, &b.InputTokens, &b.OutputTokens, &b.CacheReadTokens); err != nil {
 			return nil, err
 		}
 		out = append(out, b)

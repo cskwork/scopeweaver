@@ -193,10 +193,17 @@ func TestCancelIntentPreservesTokenMeteringWithoutDoubleCount(t *testing.T) {
 	assertDailyTokenBucketsEqual(t, dailyTokenBuckets(afterRetryDaily), afterCancel)
 }
 
+// dailyTokenBuckets folds per-exploration daily rows into one bucket per day so
+// assertions stay independent of how many explorations contributed to a day.
 func dailyTokenBuckets(items []DailyTokenBucket) map[string]DailyTokenBucket {
 	out := make(map[string]DailyTokenBucket, len(items))
 	for _, item := range items {
-		out[item.Day] = item
+		agg := out[item.Day]
+		agg.Day = item.Day
+		agg.InputTokens += item.InputTokens
+		agg.OutputTokens += item.OutputTokens
+		agg.CacheReadTokens += item.CacheReadTokens
+		out[item.Day] = agg
 	}
 	return out
 }
@@ -280,6 +287,76 @@ func TestCancelIntentPreservesOutputsYieldedByAnotherIntent(t *testing.T) {
 		node, getErr := store.GetNode(nodeID)
 		if getErr != nil || node == nil {
 			t.Fatalf("shared node %d was removed: node=%+v err=%v", nodeID, node, getErr)
+		}
+	}
+}
+
+// TestTokenDailyAllBucketsByActivityTimeNotTaskCreation guards the dashboard
+// chart fix: a long-running task's usage must land on the days its runs
+// actually happened, not be collapsed onto the task's creation date. Without
+// this, a task created weeks earlier dumps its whole lifetime total onto one
+// day and the chart shows a single enormous spike.
+func TestTokenDailyAllBucketsByActivityTimeNotTaskCreation(t *testing.T) {
+	d, err := Open(testDSN(t))
+	if err != nil {
+		t.Skipf("postgres unavailable (%v) - skipping", err)
+	}
+	defer d.Close()
+	expID, err := d.CreateExploration("daily bucketing", "usage follows run time")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Exec(`DELETE FROM explorations WHERE id=$1`, expID)
+	store := d.Exploration(expID)
+	intentID, err := store.AddIntent(map[string]any{"summary": "long run"}, 1, nil, "planner")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	dayOf := func(daysAgo int) time.Time {
+		at := now.AddDate(0, 0, -daysAgo)
+		return time.Date(at.Year(), at.Month(), at.Day(), 12, 0, 0, 0, time.UTC)
+	}
+	appendResult := func(at time.Time, input int) {
+		t.Helper()
+		in, out, read, write := input, 1, 0, 0
+		id, appendErr := store.AppendActivity(Activity{
+			NodeID: &intentID, Worker: "work#1", Kind: "result",
+			InputTokens: &in, OutputTokens: &out,
+			CacheReadTokens: &read, CacheWriteTokens: &write,
+		})
+		if appendErr != nil {
+			t.Fatal(appendErr)
+		}
+		if _, updateErr := d.Exec(`UPDATE activity SET created_at=$1 WHERE id=$2`, at, id); updateErr != nil {
+			t.Fatal(updateErr)
+		}
+	}
+
+	// Two runs of the same exploration, three days apart, with distinct volumes.
+	appendResult(dayOf(3), 100)
+	appendResult(dayOf(1), 250)
+
+	buckets, err := d.TokenDailyAll(30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byDay := dailyTokenBuckets(buckets)
+
+	older := byDay[dayOf(3).Format(time.DateOnly)]
+	if older.InputTokens != 100 {
+		t.Fatalf("day-3 input=%d, want 100 (usage must not be collapsed onto one day)", older.InputTokens)
+	}
+	newer := byDay[dayOf(1).Format(time.DateOnly)]
+	if newer.InputTokens != 250 {
+		t.Fatalf("day-1 input=%d, want 250", newer.InputTokens)
+	}
+
+	// Each row must carry its exploration so the dashboard can filter by profile.
+	for _, b := range buckets {
+		if b.ExplorationID != expID {
+			t.Fatalf("bucket %s exploration_id=%d, want %d", b.Day, b.ExplorationID, expID)
 		}
 	}
 }

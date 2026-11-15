@@ -24,11 +24,14 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { type ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import { Progress } from "@/components/ui/progress";
 import { api } from "@/lib/api";
+import { FindingTrendChart } from "./finding-trend-chart";
 import type {
   Activity,
   Agent,
   ConvTokenSummary,
+  DailyTokenBucket,
   Finding,
+  FindingStats,
   InterceptPending,
   LLMProfile,
   MCPServer,
@@ -144,12 +147,16 @@ export default function DashboardPage() {
   // data state
   const [tasks, setTasks] = React.useState<Task[]>([]);
   const [findings, setFindings] = React.useState<Finding[]>([]);
+  const [findingStats, setFindingStats] = React.useState<FindingStats | null>(null);
   const [stats, setStats] = React.useState<Stats | null>(null);
   const [settings, setSettings] = React.useState<Settings | null>(null);
   const [pending, setPending] = React.useState<InterceptPending[]>([]);
   const [activity, setActivity] = React.useState<Activity[]>([]);
   const [tokens, setTokens] = React.useState<TokenTotal | null>(null);
   const [convTokens, setConvTokens] = React.useState<ConvTokenSummary[]>([]);
+  // Server-side legacy daily buckets (bucketed by activity.created_at, not task
+  // creation), so long-running tasks spread usage across the days they ran.
+  const [tokenDailyOld, setTokenDailyOld] = React.useState<DailyTokenBucket[]>([]);
   const [usageStats, setUsageStats] = React.useState<UsageStats | null>(null);
   const [assetCounts, setAssetCounts] = React.useState<Record<string, number>>({});
   const [traffic, setTraffic] = React.useState<TrafficExchange[]>([]);
@@ -198,16 +205,22 @@ export default function DashboardPage() {
       if (loading) return;
       loading = true;
       try {
-        const [findings, stats, settings, pending, activity, tokens, conversationTokens] = await Promise.all([
-          api.findings(),
-          api.stats(),
-          api.settings(),
-          api.interceptPending(),
-          api.activity(undefined, { limit: 30 }),
-          api.tokenStats(),
-          api.conversationTokens(),
-        ]);
+        const [findings, stats, settings, pending, activity, tokens, conversationTokens, findingStats] =
+          await Promise.all([
+            api.findings(),
+            api.stats(),
+            api.settings(),
+            api.interceptPending(),
+            api.activity(undefined, { limit: 30 }),
+            api.tokenStats(),
+            api.conversationTokens(),
+            // True aggregate. api.findings() returns the legacy raw array, which the
+            // server caps at 500 rows (server/server.go -> db.ListFindings(500)), so
+            // counting it under-reports once a deployment passes 500 findings.
+            api.findingStats().catch(() => null),
+          ]);
         if (!alive) return;
+        setFindingStats(findingStats);
         setFindings(findings);
         setStats(stats);
         setSettings(settings);
@@ -234,7 +247,7 @@ export default function DashboardPage() {
     let alive = true;
     const load = async () => {
       try {
-        const [traf, counts, agentList, mcpList, skillList, toolList, profileList, usage] = await Promise.all([
+        const [traf, counts, agentList, mcpList, skillList, toolList, profileList, usage, dailyOld] = await Promise.all([
           api.traffic(0, 50),
           api.assetCounts(),
           api.agents(),
@@ -243,6 +256,8 @@ export default function DashboardPage() {
           api.tools(),
           api.llmProfiles(),
           api.usageStats(365),
+          // Legacy daily buckets, already grouped by activity.created_at server-side.
+          api.tokenDaily(365).catch(() => [] as DailyTokenBucket[]),
         ]);
         if (!alive) return;
         setTraffic(traf.exchanges ?? []);
@@ -253,6 +268,7 @@ export default function DashboardPage() {
         setTools(toolList);
         setLLMProfiles(profileList);
         setUsageStats(usage);
+        setTokenDailyOld(dailyOld);
       } catch {
         /* transient errors */
       }
@@ -274,12 +290,24 @@ export default function DashboardPage() {
   }, [swLocale, tasks]);
 
   const findingsBySev = React.useMemo(() => {
+    // Prefer the server aggregate: the raw array is capped at 500 rows, so counting
+    // it silently under-reports severity once a deployment passes that threshold.
+    if (findingStats) {
+      return {
+        critical: findingStats.critical,
+        high: findingStats.high,
+        medium: findingStats.medium,
+        low: findingStats.low,
+      };
+    }
     const m = { critical: 0, high: 0, medium: 0, low: 0 };
     for (const f of findings) {
       if (f.severity in m) m[f.severity as keyof typeof m]++;
     }
     return m;
-  }, [swLocale, findings]);
+  }, [swLocale, findings, findingStats]);
+
+  const findingTotal = findingStats?.total ?? findings.length;
 
   const sortedTasks = React.useMemo(
     () =>
@@ -357,6 +385,13 @@ export default function DashboardPage() {
   type Bucket = { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number; taskCount: number };
 
   // Legacy profile buckets use task.tokens and conversation usage from activity.
+  //
+  // activity.result.cache_read_tokens is a per-run cumulative rollup that
+  // saturates at the input total (it equals input on ~99.8% of rows), so using
+  // it directly reports a fictitious ~100% cache-hit rate. The server joins the
+  // per-call llm_usage ledger per exploration/day and returns the true cached
+  // share, so cacheRead here is already exact and `input - cacheRead` is a real
+  // cache-miss figure.
   const tokenByProfileOld = React.useMemo<Map<number | null, Bucket>>(() => {
     const m = new Map<number | null, Bucket>();
     const fold = (key: number | null, inp: number, out: number, cr: number, cw: number, addTask: boolean) => {
@@ -370,12 +405,22 @@ export default function DashboardPage() {
         taskCount: prev.taskCount + (addTask ? 1 : 0),
       });
     };
+    // Per-exploration cached share, joined server-side against the call ledger.
+    const cacheReadByExp = new Map<number, number>();
+    for (const b of tokenDailyOld) {
+      cacheReadByExp.set(b.exploration_id, (cacheReadByExp.get(b.exploration_id) ?? 0) + b.cache_read_tokens);
+    }
     for (const t of tasks) {
+      const exp = Number(t.exploration_id);
+      const gross = t.tokens?.input_tokens ?? 0;
+      const cached = cacheReadByExp.get(exp);
       fold(
         t.llm_profile_id ?? defaultProfileId,
-        t.tokens?.input_tokens ?? 0,
+        gross,
         t.tokens?.output_tokens ?? 0,
-        t.tokens?.cache_read_tokens ?? 0,
+        // Prefer the ledger-derived cached share; fall back to the activity
+        // value only when the ledger has no row for this exploration.
+        cached === undefined ? (t.tokens?.cache_read_tokens ?? 0) : Math.min(gross, cached),
         t.tokens?.cache_write_tokens ?? 0,
         true,
       );
@@ -391,7 +436,7 @@ export default function DashboardPage() {
       );
     }
     return m;
-  }, [swLocale, tasks, convTokens, defaultProfileId]);
+  }, [swLocale, tasks, convTokens, tokenDailyOld, defaultProfileId]);
 
   // New profile buckets use precise per-call global llm_usage aggregates.
   const tokenByProfileNew = React.useMemo<Map<number | null, Bucket>>(() => {
@@ -438,32 +483,32 @@ export default function DashboardPage() {
       : { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, taskCount: 0 };
   }, [swLocale, tokenTab, tokenByProfile]);
 
-  // Legacy daily buckets assign total task/conversation usage to creation dates, an approximation.
+  // Legacy daily buckets. Server-side rows are already grouped by
+  // activity.created_at (when the run happened) and by exploration, so a
+  // long-running task spreads across the days it ran instead of dumping its
+  // lifetime total onto its creation date. cache_read_tokens is likewise joined
+  // against the per-call ledger server-side, so `input - cacheRead` is a real
+  // cache-miss figure rather than a saturated ~0.
   const dailyTokenDataOld = React.useMemo(() => {
     const now = new Date();
     now.setDate(now.getDate() - tokenDays);
     const cutoff = now.toISOString().slice(0, 10);
+    // Exploration → profile, so the profile tab filter still applies.
+    const profileByExp = new Map<number, number | null>();
+    for (const t of tasks) profileByExp.set(Number(t.exploration_id), t.llm_profile_id ?? defaultProfileId);
     const m = new Map<string, { inputCacheMiss: number; output: number; cacheRead: number }>();
-    const fold = (date: string, inp: number, out: number, cr: number) => {
-      if (date < cutoff) return;
-      const prev = m.get(date) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
-      m.set(date, { inputCacheMiss: prev.inputCacheMiss + Math.max(0, inp - cr), output: prev.output + out, cacheRead: prev.cacheRead + cr });
-    };
-    for (const t of tasks) {
-      if (tokenTab !== "all" && (t.llm_profile_id ?? defaultProfileId) !== tokenTab) continue;
-      fold(
-        t.created_at.slice(0, 10),
-        t.tokens?.input_tokens ?? 0,
-        t.tokens?.output_tokens ?? 0,
-        t.tokens?.cache_read_tokens ?? 0,
-      );
-    }
-    for (const c of convTokens) {
-      if (tokenTab !== "all" && (c.llm_profile_id ?? defaultProfileId) !== tokenTab) continue;
-      fold(c.created_at.slice(0, 10), c.input_tokens, c.output_tokens, c.cache_read_tokens);
+    for (const b of tokenDailyOld) {
+      if (b.day < cutoff) continue;
+      if (tokenTab !== "all" && (profileByExp.get(b.exploration_id) ?? defaultProfileId) !== tokenTab) continue;
+      const prev = m.get(b.day) ?? { inputCacheMiss: 0, output: 0, cacheRead: 0 };
+      m.set(b.day, {
+        inputCacheMiss: prev.inputCacheMiss + Math.max(0, b.input_tokens - b.cache_read_tokens),
+        output: prev.output + b.output_tokens,
+        cacheRead: prev.cacheRead + b.cache_read_tokens,
+      });
     }
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([date, v]) => ({ date: date.slice(5), ...v }));
-  }, [swLocale, tasks, convTokens, tokenDays, tokenTab, defaultProfileId]);
+  }, [swLocale, tasks, tokenDailyOld, tokenDays, tokenTab, defaultProfileId]);
 
   // New daily buckets use actual llm_usage call timestamps.
   const dailyTokenDataNew = React.useMemo(() => {
@@ -544,7 +589,7 @@ export default function DashboardPage() {
           <CardHeader className="pb-0">
             <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
               <BugIcon className="size-3" /> {swt("interface.m0153")}</div>
-            <div className="text-2xl font-semibold tabular-nums">{findings.length}</div>
+            <div className="text-2xl font-semibold tabular-nums">{findingTotal}</div>
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2.5 text-[10px]">
             <span className="text-rose-500">{swt("app.metricValue", { label: swt("interface.m0154"), value: findingsBySev.critical })}</span>
@@ -597,6 +642,9 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Findings over time — task + severity selectable. */}
+      <FindingTrendChart tasks={findingStats?.tasks ?? []} />
 
       {/* Row 2: LLM token usage. */}
       <Card className="p-4">

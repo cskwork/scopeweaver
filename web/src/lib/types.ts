@@ -6,6 +6,7 @@ export type EngineMode = "exploring" | "paused" | "stalled" | "idle";
 
 export interface Task {
   id: string;
+  exploration_id?: number; // exploration row backing this task (activity/usage join key)
   name?: string; // Optional task name; blank/omitted falls back to description for display.
   category_id?: number;
   category_name?: string;
@@ -570,6 +571,23 @@ export interface FindingTaskOption {
   count: number;
 }
 
+// FindingTrendPoint is one time bucket of the findings-over-time series.
+// Buckets with no findings are omitted by the server; the chart fills gaps.
+export interface FindingTrendPoint {
+  bucket: string; // RFC3339 UTC start of the bucket.
+  total: number;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+// FindingTrend is the findings-over-time series for the dashboard chart.
+export interface FindingTrend {
+  bucket: "hour" | "day" | "week";
+  points: FindingTrendPoint[];
+}
+
 // FindingQuery contains pagination, filters, and sort parameters.
 export interface FindingQuery {
   page: number;
@@ -764,7 +782,8 @@ export type SessionStatus = "running" | "paused" | "done" | "blocked" | "exhaust
 
 // Daily token aggregate bucket (GET /api/tokens/daily).
 export interface DailyTokenBucket {
-  date: string; // "YYYY-MM-DD"
+  day: string; // "YYYY-MM-DD"
+  exploration_id: number;
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;

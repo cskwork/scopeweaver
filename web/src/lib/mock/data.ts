@@ -3053,7 +3053,8 @@ export const dailyTokens: DailyTokenBucket[] = Array.from({ length: 30 }, (_, i)
   d.setUTCDate(d.getUTCDate() - (29 - i));
   const wave = 40000 + Math.round(30000 * Math.abs(Math.sin(i / 3)));
   return {
-    date: d.toISOString().slice(0, 10),
+    day: d.toISOString().slice(0, 10),
+    exploration_id: 1,
     input_tokens: wave,
     output_tokens: Math.round(wave * 0.08),
     cache_read_tokens: Math.round(wave * 0.7),
