@@ -3211,7 +3211,12 @@ const interfaceMessages: Record<keyof typeof interfaceSource, string> = {
   "m2885": "Este dominio y todos sus subdominios",
   "m2886": "marca esta intención como eliminada y registra el motivo. Su nodo, registros de ejecución, hechos registrados y vulnerabilidades",
   "m2887": ". El planificador recibe la eliminación del usuario y su motivo y adapta el plan.",
-  "m2888": "Conservar datos y trazabilidad"
+  "m2888": "Conservar datos y trazabilidad",
+  "m2889": "Combinado",
+  "m2890": "Diario",
+  "m2891": "Acumulado",
+  "m2892": "Filtrar por tarea",
+  "m2893": "No hay hallazgos en este rango."
 };
 export { interfaceMessages as interface };
 import type { en as appSource } from './app.ts';
