@@ -135,6 +135,13 @@ type Engine struct {
 	steerMu  sync.Mutex
 	steerBox map[int64][]string
 
+	// attempted records intents this engine has already run to a terminal outcome.
+	// claimNext refuses an id present here, so a failed terminal state write (the
+	// intent was moved by another actor) cannot make the pool loop re-claim the same
+	// id in a tight cycle. The map is per-Engine and lives as long as the process.
+	attemptMu sync.Mutex
+	attempted map[int64]struct{}
+
 	plannerRound sync.Map // taskID -> int, planner round counter (for UI round separators)
 
 	// Task-level timeout coordination:
@@ -1147,15 +1154,61 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 	}
 	if state == "blocked" && isTaskLLMChainExhausted(err) {
 		_ = t.Store.SetIntentBlockedReason(intent.ID, db.IntentBlockedLLMQuota)
+		// A blocked-with-quota intent is terminal for this worker; its own
+		// blocked reason is the durable record, so no CAS is attempted.
 	} else {
 		if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
+			// A failed terminal CAS means the intent is no longer 'running': another
+			// actor moved it (pause returned it to the frontier, the planner stopped
+			// it, or a concurrent worker already settled it). The work this run
+			// produced is already persisted, so the intent IS done from our side —
+			// but reporting success here makes workerLoop immediately re-claim the
+			// same id when the winner flipped it back to 'open', which is the
+			// re-claim loop (#23538 was claimed five times in one run).
 			log.Printf(locale.Text(locale.FromContext(ctx), "[worker %s] task %s intent #%d could not persist terminal state %s: %v"), name, t.ID, intent.ID, state, stateErr)
+			e.touch(t.ID)
+			t.NotifyDone(intent.ID)
+			e.markIntentAttempted(intent.ID)
+			return false // do not let the pool loop re-claim this id without backoff
 		}
 	}
 	log.Printf(locale.Text(locale.FromContext(ctx), "[worker %s] task %s intent #%d finished: %s (saved %s)"), name, t.ID, intent.ID, state, wrote)
 	e.touch(t.ID)
+	e.markIntentAttempted(intent.ID)
 	t.NotifyDone(intent.ID) // results changed the graph -> wake the planner (with the just-finished intent id)
 	return true
+}
+
+// HasLiveRuntime reports whether a task already has a live runtime in this engine
+// instance. restoreTaskRuntimes consults it before reopening a task's 'running'
+// intents: without the guard, a second restore pass resets intents that workers
+// from the first pass are actively executing, and the pool re-claims them.
+func (e *Engine) HasLiveRuntime(taskID string) bool {
+	e.runtimeMu.Lock()
+	_, ok := e.runtimes[taskID]
+	e.runtimeMu.Unlock()
+	return ok
+}
+
+// markIntentAttempted records that this engine instance has already run the intent
+// to completion in this task. claimNext consults it so a task cannot re-claim an id
+// whose terminal state write failed because another actor moved it — the invariant
+// is "at most one terminal settlement per intent per engine lifetime".
+func (e *Engine) markIntentAttempted(intentID int64) {
+	e.attemptMu.Lock()
+	if e.attempted == nil {
+		e.attempted = map[int64]struct{}{}
+	}
+	e.attempted[intentID] = struct{}{}
+	e.attemptMu.Unlock()
+}
+
+// intentAttempted reports whether this engine already completed a run for intentID.
+func (e *Engine) intentAttempted(intentID int64) bool {
+	e.attemptMu.Lock()
+	defer e.attemptMu.Unlock()
+	_, ok := e.attempted[intentID]
+	return ok
 }
 
 // runDetachedIntent runs one paused intent OUTSIDE the worker pool in its own
@@ -1239,6 +1292,13 @@ func sleepCtx(ctx context.Context, d time.Duration) (done bool) {
 func (e *Engine) claimNext(t *Task, name string) *db.Node {
 	fr, _ := t.Store.Frontier(20)
 	for _, in := range fr {
+		// Skip an intent this engine already settled. A terminal CAS that lost the
+		// race leaves the row in whatever state the winner chose; when that winner
+		// flipped it back to 'open' the frontier still offers it, and re-running it
+		// burns budget on work that already happened.
+		if e.intentAttempted(in.ID) {
+			continue
+		}
 		if ok, _ := t.Store.ClaimIntent(in.ID, name); ok {
 			return in
 		}

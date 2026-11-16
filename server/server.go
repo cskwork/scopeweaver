@@ -270,10 +270,19 @@ func (s *Server) restoreTaskRuntimes() {
 	// restore persisted paused state (so a task paused before restart stays paused).
 	for _, t := range m.LoadExisting() {
 		lifecycle := t.lifecycleSnapshot()
-		// clear stale 'running' intents from a prior crash/restart (no live worker
-		// owns them) so they re-claim instead of spinning forever in the UI.
-		if n, _ := t.Store.ResetRunningIntents(); n > 0 {
-			log.Printf(locale.Text(locale.ServerDefault(), "[engine] task %s reset %d leftover running intents to open"), t.ID, n)
+		// Clear stale 'running' intents left by a crash or restart so they re-claim
+		// instead of spinning forever in the UI.
+		//
+		// Guard: only when this task has no live runtime yet. restoreTaskRuntimes can
+		// run more than once in a single startup, and ResetRunningIntents reopens
+		// EVERY 'running' row without knowing which worker owns it. Unguarded, the
+		// second pass yanked intents out from under workers started by the first
+		// pass, and the same intent was then claimed again by another worker
+		// (#24022 was claimed three times, #24108 three times, in one startup).
+		if !s.engine.HasLiveRuntime(t.ID) {
+			if n, _ := t.Store.ResetRunningIntents(); n > 0 {
+				log.Printf(locale.Text(locale.ServerDefault(), "[engine] task %s reset %d leftover running intents to open"), t.ID, n)
+			}
 		}
 		if lifecycle.Paused {
 			s.engine.Pause(t.ID, agent.AbortPausedOnReload)
