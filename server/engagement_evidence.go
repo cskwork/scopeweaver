@@ -297,6 +297,7 @@ func (e *EvidenceEngine) launch(ctx context.Context) (string, func(), error) {
 	}
 	return pageWS, cleanup, nil
 }
+
 // firstPageWS asks the Chrome HTTP endpoint for the page target's websocket URL.
 func firstPageWS(ctx context.Context, listURL string, timeout time.Duration) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
