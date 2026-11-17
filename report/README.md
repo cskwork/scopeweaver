@@ -10,15 +10,49 @@ Every ScopeWeaver run produces, automatically:
 The layout is a static template (`EngagementTemplateRev`), so two reports from
 different builds are comparable and a report never silently changes shape.
 
+## Rule: no report until the analysis is complete
+
+**A report is a claim of completeness. If the analysis is not 100%, do not issue
+one.** An incomplete report is worse than no report: the reader cannot see the
+gap, so a missing vector reads as "we checked and it was clean" rather than "we
+never got there". This rule is enforced in code, not left to judgement.
+
+`server/report_gate.go` (`assessReportGate`) runs before any report format is
+rendered. It blocks the HTML/PDF/DOCX and the deck until every finding clears the
+bar below. The five raw logs are **always** written — those are data, and data is
+never withheld — but the polished report is withheld.
+
+The bar, per finding:
+
+1. **A CVSS v3.1 base score.** A finding without a score is an un-prioritised
+   finding; priority ordering that skips one misleads triage.
+2. **Remediation.** A finding without a named control is half-delivered.
+3. **Screenshot evidence for browser-demonstrable classes** (XSS, CSRF, open
+   redirect, clickjacking). A confirmed response code is detection, not a
+   PoC-of-impact; a reader expects to see the vector executed.
+
+A run with zero findings passes trivially — there is nothing to under-deliver on,
+and "no findings" is a legitimate result. A failed/blocked run still reports, but
+its coverage warning is carried into the report so it never reads as clean.
+
+When the gate refuses, `POST /api/engagement/report` returns **HTTP 409** with a
+`missing` array naming each unmet requirement and the specific finding, so the
+operator closes the gap instead of shipping a half-report. A complete run returns
+200 with every format. Both paths are pinned by
+`TestReportGateAgainstRealRun` and the gate contract tests.
+
 ## Where things live
 
 | Piece | File |
 |---|---|
 | Schema (7 tables) | `db/schema.sql` §N |
 | Collectors (1–5 + mapping) | `server/engagement_logs.go` |
+| **Completeness gate** | `server/report_gate.go` |
 | Screenshot proof engine (CDP) | `server/engagement_evidence.go` |
 | Tech report renderer | `server/engagement_report.go`, `..._template.go` |
 | Five-log file export | `server/engagement_export.go` |
+| CVSS v3.1 scoring | `server/cvss.go` |
+| Remediation mapping | `server/remediation.go` |
 | Deck (python-pptx) | `server/deckgen/make_deck.py` (embedded) |
 | Terminal-task hook | `server/engagement_automation.go` |
 | HTTP surface | `server/engagement_api.go` |
