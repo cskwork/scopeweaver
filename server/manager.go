@@ -246,6 +246,12 @@ type Manager struct {
 	// capture is on it becomes the MITM's upstream; when capture is off it is
 	// injected into agent bash env / WebFetch directly. See ProxyAddr.
 	globalProxy string
+
+	// engagementHook runs once when a task reaches a terminal status. It is how
+	// the five engagement logs and the report artefacts are produced for every
+	// run without the caller having to remember: set at assembly, invoked from
+	// SetTaskStatus in the background so a slow render never blocks the engine.
+	engagementHook func(taskID int64, status string)
 }
 
 // Settings keys the UI toggles at runtime.
@@ -1467,6 +1473,14 @@ func (m *Manager) SetTaskStatus(id, status string) error {
 		})
 	}
 	m.mu.Unlock()
+
+	// Every terminal transition fires the engagement hook. It runs in the
+	// background: collection walks thousands of activity rows and the report may
+	// render a PDF, neither of which may block the engine's lifecycle path.
+	if m.engagementHook != nil && pgdb.IsTerminal(status) {
+		hook := m.engagementHook
+		go hook(n, status)
+	}
 	return nil
 }
 

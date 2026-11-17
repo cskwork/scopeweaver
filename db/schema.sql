@@ -1390,3 +1390,187 @@ CREATE INDEX IF NOT EXISTS idx_notification_deliveries_batch
     ON notification_deliveries(batch_id) WHERE batch_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_notification_deliveries_channel
     ON notification_deliveries(channel_id, id DESC);
+
+-- ============================================================================
+-- N. Engagement logging & reporting (the five required logs + attack mapping).
+-- ============================================================================
+-- Every run of the engine writes five append-only logs and an attack mapping,
+-- then can render a static-template report (HTML/DOCX/PDF/PPTX) that carries
+-- screenshot evidence per exploited flow. Raw execution rows already live in
+-- `activity` / `conversation_activities` / `tool_usage` / `findings` / `tasks`;
+-- this section stores the per-run *aggregated* view plus the evidence manifest
+-- so a report can be reproduced byte-identically later.
+--
+-- Hash chain: each row carries `prev_hash` (the `row_hash` of the previous row
+-- in the same task's chain) and `row_hash` = sha256(canonical_json(row)||prev).
+-- A verifier recomputes the chain to prove the log was not edited after the run.
+
+-- Run header: one row per task, ties the five logs together and records the
+-- static template revision so a report never silently changes format.
+CREATE TABLE IF NOT EXISTS eng_run (
+    id                BIGSERIAL PRIMARY KEY,
+    task_id           BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    exploration_id    BIGINT REFERENCES explorations(id) ON DELETE SET NULL,
+    company_id        BIGINT REFERENCES companies(id) ON DELETE SET NULL,
+    -- final task status at collection time: done / failed / timeout (every run is logged).
+    run_status        TEXT NOT NULL DEFAULT 'running',
+    started_at        TIMESTAMPTZ,
+    finished_at       TIMESTAMPTZ,
+    -- static template revision baked into this binary; a report states which it used.
+    template_rev      TEXT NOT NULL DEFAULT '',
+    summary           TEXT NOT NULL DEFAULT '',
+    stats             JSONB NOT NULL DEFAULT '{}',
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (task_id)
+);
+
+-- 1. Activity Analysis — per-run behavioural rollup (dominant patterns, coverage).
+CREATE TABLE IF NOT EXISTS eng_activity_analysis (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    category      TEXT NOT NULL DEFAULT '',
+    metric        TEXT NOT NULL DEFAULT '',
+    value_num     NUMERIC,
+    value_text    TEXT NOT NULL DEFAULT '',
+    note          TEXT NOT NULL DEFAULT '',
+    prev_hash     TEXT NOT NULL DEFAULT '',
+    row_hash      TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+-- 2. Agent Activities — normalised agent turn log (who did what, which tool, outcome).
+CREATE TABLE IF NOT EXISTS eng_agent_activities (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    source        TEXT NOT NULL DEFAULT 'conversation_activities', -- activity | conversation_activities
+    source_id     BIGINT,
+    agent_key     TEXT NOT NULL DEFAULT '',
+    worker        TEXT NOT NULL DEFAULT '',
+    kind          TEXT NOT NULL DEFAULT '',
+    tool          TEXT NOT NULL DEFAULT '',
+    is_error      BOOLEAN NOT NULL DEFAULT false,
+    summary       TEXT NOT NULL DEFAULT '',
+    detail        TEXT NOT NULL DEFAULT '',
+    tokens_in     INTEGER,
+    tokens_out    INTEGER,
+    occurred_at   TIMESTAMPTZ,
+    prev_hash     TEXT NOT NULL DEFAULT '',
+    row_hash      TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eng_agent_activities_run ON eng_agent_activities(run_id, id);
+
+-- 3. Command log — the actual command/script executed, its exit state and raw output.
+CREATE TABLE IF NOT EXISTS eng_command_log (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    source_id     BIGINT,                          -- activity.id when derived from execution rows
+    worker        TEXT NOT NULL DEFAULT '',
+    command       TEXT NOT NULL DEFAULT '',
+    script_path   TEXT NOT NULL DEFAULT '',
+    exit_ok       BOOLEAN,
+    output_head   TEXT NOT NULL DEFAULT '',
+    output_bytes  INTEGER,
+    occurred_at   TIMESTAMPTZ,
+    prev_hash     TEXT NOT NULL DEFAULT '',
+    row_hash      TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eng_command_log_run ON eng_command_log(run_id, id);
+
+-- 4. Engagement activities — the human-readable timeline (phase → action → result).
+CREATE TABLE IF NOT EXISTS eng_engagement_activities (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    seq           INTEGER NOT NULL DEFAULT 0,
+    phase         TEXT NOT NULL DEFAULT '',      -- recon / analysis / exploitation / reporting
+    at_time       TIMESTAMPTZ,
+    action        TEXT NOT NULL DEFAULT '',
+    target        TEXT NOT NULL DEFAULT '',
+    result        TEXT NOT NULL DEFAULT '',
+    prev_hash     TEXT NOT NULL DEFAULT '',
+    row_hash      TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eng_engagement_activities_run ON eng_engagement_activities(run_id, seq);
+
+-- 6. Attack mapping — pattern (MITRE ATT&CK + OWASP WSTG) → script → vuln → finding → evidence.
+-- One row per concrete exploitation attempt, whether it proved out or not. A
+-- failed or blocked attempt is still a row, with `status` and a screenshot if
+-- one could be captured: "not proven" must be evidenced, never silently dropped.
+CREATE TABLE IF NOT EXISTS eng_attack_mapping (
+    id              BIGSERIAL PRIMARY KEY,
+    run_id          BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    finding_id      BIGINT REFERENCES findings(id) ON DELETE SET NULL,
+    -- MITRE ATT&CK technique id + name, e.g. T1190 "Exploit Public-Facing Application".
+    mitre_id        TEXT NOT NULL DEFAULT '',
+    mitre_name      TEXT NOT NULL DEFAULT '',
+    -- OWASP WSTG test id, e.g. WSTG-ATHZ-01 "Testing Directory Traversal".
+    wstg_id         TEXT NOT NULL DEFAULT '',
+    wstg_name       TEXT NOT NULL DEFAULT '',
+    vuln_class      TEXT NOT NULL DEFAULT '',
+    target          TEXT NOT NULL DEFAULT '',
+    endpoint        TEXT NOT NULL DEFAULT '',
+    method          TEXT NOT NULL DEFAULT '',
+    -- Script used to exercise the vector (path or inline one-liner), and the
+    -- exact command line that was run so the step can be replayed.
+    script          TEXT NOT NULL DEFAULT '',
+    command         TEXT NOT NULL DEFAULT '',
+    -- confirmed / open / blocked / failed / false_positive.
+    status          TEXT NOT NULL DEFAULT 'open',
+    -- Evidence: screenshot PNG path (static, under the run evidence dir) plus
+    -- its sha256 so a re-rendered report proves it is the same image. before/after
+    -- are both kept when the vector is an in-page injection (XSS).
+    evidence_shot   TEXT NOT NULL DEFAULT '',
+    evidence_hash   TEXT NOT NULL DEFAULT '',
+    evidence_before TEXT NOT NULL DEFAULT '',
+    evidence_after  TEXT NOT NULL DEFAULT '',
+    evidence_note   TEXT NOT NULL DEFAULT '',
+    prev_hash       TEXT NOT NULL DEFAULT '',
+    row_hash        TEXT NOT NULL DEFAULT '',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (run_id, finding_id, vuln_class, endpoint)
+);
+CREATE INDEX IF NOT EXISTS idx_eng_attack_mapping_run ON eng_attack_mapping(run_id, id);
+
+-- 5. Log manifest — one row per generated artefact (log export or report file),
+-- carrying its sha256 and the hash-chain head so integrity is checkable.
+CREATE TABLE IF NOT EXISTS eng_log_manifest (
+    id            BIGSERIAL PRIMARY KEY,
+    run_id        BIGINT NOT NULL REFERENCES eng_run(id) ON DELETE CASCADE,
+    artefact      TEXT NOT NULL DEFAULT '',   -- activity_analysis|agent_activities|command_log|
+                                              -- engagement_activities|attack_mapping|report_html|...
+    format        TEXT NOT NULL DEFAULT '',   -- json | html | docx | pdf | pptx | png
+    path          TEXT NOT NULL DEFAULT '',
+    bytes         INTEGER,
+    sha256        TEXT NOT NULL DEFAULT '',
+    chain_head    TEXT NOT NULL DEFAULT '',   -- row_hash of the last row in that log chain
+    row_count     INTEGER,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_eng_log_manifest_run ON eng_log_manifest(run_id, artefact);
+
+-- Durable screenshot evidence, keyed by finding (not by run).
+-- eng_attack_mapping is a per-run snapshot and is rebuilt on every re-collect, so
+-- evidence stored there would be destroyed the moment a still-running task is
+-- collected again. Evidence is a fact about the finding, so it lives here and is
+-- copied into each new run's mapping row at collect time.
+CREATE TABLE IF NOT EXISTS eng_evidence (
+    id            BIGSERIAL PRIMARY KEY,
+    task_id       BIGINT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    finding_id    BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+    slug          TEXT NOT NULL DEFAULT '',
+    payload       TEXT NOT NULL DEFAULT '',
+    assertion     TEXT NOT NULL DEFAULT '',
+    before_path   TEXT NOT NULL DEFAULT '',
+    after_path    TEXT NOT NULL DEFAULT '',
+    before_hash   TEXT NOT NULL DEFAULT '',
+    after_hash    TEXT NOT NULL DEFAULT '',
+    before_value  TEXT NOT NULL DEFAULT '',
+    after_value   TEXT NOT NULL DEFAULT '',
+    executed      BOOLEAN NOT NULL DEFAULT false,
+    note          TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (finding_id)
+);
+CREATE INDEX IF NOT EXISTS idx_eng_evidence_task ON eng_evidence(task_id, id DESC);

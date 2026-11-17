@@ -100,6 +100,12 @@ func run() int {
 	}
 	defer mgr.Close()
 
+	// Engagement logging is always on: every terminal task produces the five
+	// logs, the tech report (html/pdf/docx) and the Sibermate deck. Set
+	// ARTEX_ENGAGEMENT_REPORTS to relocate the output tree; empty uses
+	// <dataDir>/engagement-reports.
+	mgr.EnableEngagementAutomation(os.Getenv("ARTEX_ENGAGEMENT_REPORTS"))
+
 	// Surviving this long means a freshly swapped-in build actually works, so drop
 	// the upgrade marker and stop counting attempts. Until it fires, every boot
 	// increments the count and a build that keeps dying gets rolled back.
