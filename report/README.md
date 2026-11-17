@@ -79,6 +79,31 @@ variable is for the agent's own traffic; inheriting it makes Chromium render a
 blank frame, which would silently read as "payload did not execute"). Set
 `EvidenceEngine.Proxy` to route it deliberately.
 
+### When an empty `eng_evidence` is correct, not a blank-capture bug
+
+`eng_evidence` is empty for the cucies (task 1144) and mail (task 1145) runs, and
+that is the intended outcome — not the proxy-blank-frame defect described above.
+The two are distinguished mechanically:
+
+| Signal | Blank-capture bug (proxy) | Correctly empty (no visual vector) |
+|---|---|---|
+| Where it appears | `eng_evidence` has a row but `after_path` PNG is 0 bytes / missing | `eng_evidence` has **no row** for the finding |
+| Report wording | claims executed, screenshot blank | states screenshot only "when the vector is demonstrable in a browser" |
+| Finding class | XSS, DOM injection, visual payload | header / TLS / rate-limit / config disclosure |
+
+Rule: a screenshot requires a browser-renderable payload whose JS assertion can
+flip. A finding proved by a response **header** (CSP, `Set-Cookie` flags),
+a **TLS handshake** (protocol version accepted), or a **rate limit**
+(401/429 across N requests) has no such payload, so `eng_evidence` legitimately
+carries no row for it. The report covers this by naming what was tested and how
+rather than dropping the block silently.
+
+Reviewer checklist when `eng_evidence` looks suspiciously empty: confirm the
+empty rows belong to non-browser finding classes (header/TLS/rate-limit/config)
+and that stray PNGs under other `task-*/` dirs belong to those tasks, not this
+run — an empty `eng_evidence` here is not evidence that another run's screenshots
+were lost.
+
 ## HTTP surface
 
 ```
@@ -113,6 +138,31 @@ Run `go test ./server/ -run 'TestAttackMappingTaxonomy|Engagement|Evidence|Repor
 * An empty section is rendered as explicitly empty. A log with zero rows is a
   coverage statement, not a clean result.
 * Blocks that could not be tested are named, never silently dropped.
+
+## Markdown report integrity gate
+
+Before any Markdown findings report is rendered to PDF, it passes a mechanical
+gate: `scripts/report_integrity_check.py`. It catches the defects a read-through
+misses:
+
+1. claimed total ≠ distinct finding ids (merged/placeholder ids excluded)
+2. a finding listed with no detail section, or a section with no id reference
+3. a stale figure left behind after a scope change (`--stale "enam tenant" ...`)
+4. duplicate coverage: two ids naming the same asset and class (warn, human call)
+5. appendix drift: an id with no CWE/CVSS row, or a vector that does not compute
+   to its stated score
+
+```bash
+python3 scripts/report_integrity_check.py REPORT.md --prefix KDT \
+  --stale "enam tenant" "6 tenant"
+python3 scripts/report_integrity_check.py REPORT.md --appendix findings_cwe.json
+```
+
+Exit code 1 blocks the build. The stdlib-only script is vendored from the
+pentest-assessment-playbook skill; CI self-tests it in the `backend` job
+("Self-test the report integrity gate") so a broken gate cannot silently stop
+blocking. See also `references/report-integrity.md` in that skill for the
+background of each check.
 
 ## Verifying a delivered report
 

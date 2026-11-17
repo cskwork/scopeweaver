@@ -103,6 +103,33 @@ jobs:
         run: |
           for script in *.sh; do bash -n "$script"; done
           sh -n start.sh
+      - name: Self-test the report integrity gate
+        run: |
+          set -euo pipefail
+          # The gate must fail on a report that claims a total with no detail
+          # sections, and pass on a well-formed one. This proves the vendored
+          # gate is functional before it is relied on to block a build.
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          cat > "$tmp/bad.md" <<'MD'
+          **2 temuan**
+
+          ## KDT-1 Missing CSP header
+
+          Detail without the second finding.
+          MD
+          cat > "$tmp/good.md" <<'MD'
+          **1 temuan**
+
+          ## KDT-1 Missing CSP header
+
+          detail
+          MD
+          if python3 scripts/report_integrity_check.py "$tmp/bad.md" --prefix KDT >/dev/null 2>&1; then
+            echo "integrity gate FAILED to catch a bad report (claimed 2, 1 section)" >&2
+            exit 1
+          fi
+          python3 scripts/report_integrity_check.py "$tmp/good.md" --prefix KDT | grep -q '^PASS$'
       - name: Test local installer with isolated fixtures
         run: bash e2e/install-local.sh
       - name: Test Compose credential bootstrap
