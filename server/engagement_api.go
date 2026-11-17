@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -73,6 +74,22 @@ func (s *Server) engagementReport(w http.ResponseWriter, r *http.Request) {
 	}
 	produced, warnings, err := c.GenerateAll(ctx, runID, out)
 	if err != nil {
+		// A withheld report is not a server error: the run simply has not earned a
+		// report yet. Return 409 with the specific gaps so the operator sees what
+		// to close, and still hand back the raw logs that were written.
+		var gateErr *ReportGateError
+		if errors.As(err, &gateErr) {
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"ok":           false,
+				"run_id":       runID,
+				"error":        "report withheld: analysis not complete",
+				"missing":      gateErr.Verdict.Missing,
+				"warnings":     gateErr.Verdict.Warnings,
+				"files":        produced,
+				"logs_written": true,
+			})
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, err.Error())
 		return
 	}

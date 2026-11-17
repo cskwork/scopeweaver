@@ -509,20 +509,35 @@ func HTMLToDOCX(ctx context.Context, htmlPath, docxPath string) error {
 func (c *EngagementCollector) GenerateAll(ctx context.Context, runID int64, outDir string) (map[string]string, []string, error) {
 	// The five logs are always written as files alongside the report: the
 	// operator's requirement is that every run leaves logs on disk, not only
-	// rows in a table.
+	// rows in a table. Logs are data and are never withheld.
 	logFiles, err := c.ExportLogs(ctx, runID, outDir)
 	if err != nil {
 		return nil, nil, err
 	}
-	htmlPath, err := c.BuildReportHTML(ctx, runID, outDir)
-	if err != nil {
-		return nil, nil, err
-	}
-	produced := map[string]string{"html": htmlPath}
+	produced := map[string]string{}
 	for name, path := range logFiles {
 		produced["log_"+name] = path
 	}
 	var warnings []string
+
+	// Report gate: a finished report is a completeness claim, so it is not
+	// rendered until the analysis is complete. Withhold HTML/PDF/DOCX (and let
+	// the caller decide on the deck) rather than ship something a client would
+	// read as the whole picture while vectors are silently missing.
+	gate, err := c.assessReportGate(ctx, runID)
+	if err != nil {
+		return produced, warnings, fmt.Errorf("report gate: %w", err)
+	}
+	warnings = append(warnings, gate.Warnings...)
+	if !gate.Complete {
+		return produced, warnings, &ReportGateError{Verdict: gate}
+	}
+
+	htmlPath, err := c.BuildReportHTML(ctx, runID, outDir)
+	if err != nil {
+		return produced, warnings, err
+	}
+	produced["html"] = htmlPath
 
 	eng := &EvidenceEngine{OutputDir: filepath.Dir(htmlPath), Timeout: 90 * time.Second}
 	pdfPath := strings.TrimSuffix(htmlPath, ".html") + ".pdf"
