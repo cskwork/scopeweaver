@@ -91,6 +91,39 @@ func (e *EvidenceEngine) timeout() time.Duration {
 	return 45 * time.Second
 }
 
+// proxyArgs returns the Chromium flags that decide the proof browser's egress.
+//
+// The service sets HTTP_PROXY/HTTPS_PROXY for the agent's own traffic. If the
+// capture browser inherits them it fails to load the page and stores a blank
+// frame — which the pipeline would read as "payload did not execute", i.e. a
+// silent false negative on every finding. With an explicit Proxy the route is
+// deliberate; without one we pin direct egress.
+func (e *EvidenceEngine) proxyArgs() []string {
+	if e.Proxy != "" {
+		return []string{"--proxy-server=" + e.Proxy}
+	}
+	return []string{"--no-proxy-server"}
+}
+
+// stripProxyEnv removes proxy variables from the environment handed to the
+// proof browser. Chrome honours these over --no-proxy-server in some builds,
+// so the flag alone is not enough. NO_PROXY is deliberately kept: it does not
+// set a proxy, it excludes hosts from one, and dropping it would push more of
+// the browser's traffic through a deliberate --proxy-server route.
+func stripProxyEnv(environ []string) []string {
+	out := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		u := strings.ToUpper(kv)
+		if strings.HasPrefix(u, "HTTP_PROXY=") || strings.HasPrefix(u, "HTTPS_PROXY=") ||
+			strings.HasPrefix(u, "ALL_PROXY=") || strings.HasPrefix(u, "http_proxy=") ||
+			strings.HasPrefix(u, "https_proxy=") || strings.HasPrefix(u, "all_proxy=") {
+			continue
+		}
+		out = append(out, kv)
+	}
+	return out
+}
+
 // cdpConn is a minimal DevTools Protocol client over one page target.
 type cdpConn struct {
 	ws      *websocket.Conn
@@ -204,28 +237,13 @@ func (e *EvidenceEngine) launch(ctx context.Context) (string, func(), error) {
 		"--disable-background-networking", "--disable-sync",
 		"--window-size=1280,900",
 	}
-	if e.Proxy != "" {
-		args = append(args, "--proxy-server="+e.Proxy)
-	} else {
-		// Deterministic direct egress regardless of the parent environment.
-		args = append(args, "--no-proxy-server")
-	}
+	args = append(args, e.proxyArgs()...)
 	args = append(args, "about:blank")
 	cmd := exec.Command(e.chrome(), args...)
 	// Drop inherited proxy variables: they are for the agent's traffic, not for
 	// the proof browser, and Chrome honours them over --no-proxy-server in some
 	// builds.
-	env := make([]string, 0, len(os.Environ()))
-	for _, kv := range os.Environ() {
-		u := strings.ToUpper(kv)
-		if strings.HasPrefix(u, "HTTP_PROXY=") || strings.HasPrefix(u, "HTTPS_PROXY=") ||
-			strings.HasPrefix(u, "ALL_PROXY=") || strings.HasPrefix(u, "http_proxy=") ||
-			strings.HasPrefix(u, "https_proxy=") || strings.HasPrefix(u, "all_proxy=") {
-			continue
-		}
-		env = append(env, kv)
-	}
-	cmd.Env = env
+	cmd.Env = stripProxyEnv(os.Environ())
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		os.RemoveAll(profile)

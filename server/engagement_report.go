@@ -54,6 +54,14 @@ type ReportFinding struct {
 	ShotBefore string
 	ShotAfter  string
 	Note       string
+
+	// CVSS is a deterministic v3.1 base score derived from the finding's own
+	// vulnerability class and severity — never a model's opinion. The vector is
+	// stated so a reviewer can audit or override it; the score follows the
+	// vector, it is not invented to match a severity label.
+	CVSS       string
+	CVSSVector string
+	Remediation string
 }
 
 // ReportTimeline is one engagement-activity bucket.
@@ -244,6 +252,12 @@ func (c *EngagementCollector) loadReportData(ctx context.Context, runID int64, o
 				f.ShotPath = rel
 			}
 		}
+		// CVSS and remediation are derived from the finding's own class and
+		// severity, deterministically — the same finding always scores the same.
+		// The severity passed to the remediator must be the finding's own band,
+		// not the mapping row's status ("confirmed" is not a severity).
+		f.CVSS, f.CVSSVector = cvssForClass(f.VulnClass, f.Severity)
+		f.Remediation = remediationFor(f.VulnClass, f.Severity)
 		d.Findings = append(d.Findings, f)
 		sevCount[strings.ToLower(strings.TrimSpace(f.Severity))]++
 	}

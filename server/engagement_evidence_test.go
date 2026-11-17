@@ -102,3 +102,74 @@ func TestEvidenceEngineNoFalsePositive(t *testing.T) {
 	}
 	t.Logf("correctly not executed: after=%q", res.AfterValue)
 }
+
+// TestEvidenceProxyArgs pins the Chromium egress contract that keeps a proof
+// screenshot from silently going blank.
+//
+// The service process inherits HTTP_PROXY/HTTPS_PROXY (runtime.env). If the
+// capture browser inherits those too, it cannot load the page and stores a
+// blank frame, which the pipeline reads as "payload did not execute" — a silent
+// false negative on every finding. The contract is two-sided:
+//
+//   - Proxy set  -> route deliberately via --proxy-server=<Proxy>
+//   - Proxy empty-> pin direct egress via --no-proxy-server
+func TestEvidenceProxyArgs(t *testing.T) {
+	deliberate := (&EvidenceEngine{Proxy: "http://127.0.0.1:18080"}).proxyArgs()
+	if len(deliberate) != 1 || !strings.HasPrefix(deliberate[0], "--proxy-server=") {
+		t.Fatalf("deliberate proxy must be passed through, got %v", deliberate)
+	}
+	if !strings.Contains(deliberate[0], "http://127.0.0.1:18080") {
+		t.Errorf("proxy URL dropped: %v", deliberate)
+	}
+
+	direct := (&EvidenceEngine{}).proxyArgs()
+	if len(direct) != 1 || direct[0] != "--no-proxy-server" {
+		t.Fatalf("empty Proxy must pin direct egress, got %v", direct)
+	}
+}
+
+// TestEvidenceStripProxyEnv proves the capture environment never carries an
+// inherited proxy. Chrome honours HTTP_PROXY/HTTPS_PROXY over --no-proxy-server
+// in some builds, so the flag alone would not save a screenshot. The parent
+// service sets these, so an unstripped env is the blank-frame bug.
+//
+// NO_PROXY is deliberately kept: it does not set a proxy, it excludes hosts
+// from one — dropping it would push more of the browser's traffic through a
+// deliberate --proxy-server route.
+func TestEvidenceStripProxyEnv(t *testing.T) {
+	in := []string{
+		"PATH=/usr/bin",
+		"HTTP_PROXY=http://agent-proxy:3128",
+		"HTTPS_PROXY=http://agent-proxy:3128",
+		"ALL_PROXY=socks5://agent-socks:1080",
+		"http_proxy=http://agent-proxy:3128", // lowercase form must match too
+		"https_proxy=http://agent-proxy:3128",
+		"NO_PROXY=localhost,127.0.0.1",
+		"HOME=/home/ubuntu",
+	}
+	out := stripProxyEnv(in)
+
+	for _, keep := range []string{"PATH=/usr/bin", "HOME=/home/ubuntu", "NO_PROXY=localhost,127.0.0.1"} {
+		if !containsEnv(out, keep) {
+			t.Errorf("stripper dropped %q (must be kept): %v", keep, out)
+		}
+	}
+	for _, drop := range []string{
+		"HTTP_PROXY=", "HTTPS_PROXY=", "ALL_PROXY=",
+		"http_proxy=", "https_proxy=",
+	} {
+		if containsEnv(out, drop) {
+			t.Errorf("stripper kept %q (must be dropped): %v", drop, out)
+		}
+	}
+}
+
+// containsEnv reports whether kv is present in the environment list exactly.
+func containsEnv(env []string, kv string) bool {
+	for _, e := range env {
+		if e == kv {
+			return true
+		}
+	}
+	return false
+}

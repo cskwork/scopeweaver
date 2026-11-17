@@ -70,7 +70,11 @@ td{padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:top}
 pre{background:#0f1115;color:#e8eaed;padding:10px 12px;border-radius:6px;overflow-x:auto;font-size:11.5px;line-height:1.45;white-space:pre-wrap;word-break:break-word;margin:8px 0}
 .shot{margin:10px 0 4px}
 .shot img{max-width:100%;border:1px solid var(--line);border-radius:6px}
+.shot a{display:block}
+.shot a img{cursor:zoom-in}
 .shot .cap{font-size:11px;color:var(--muted);margin-top:4px;font-family:ui-monospace,monospace}
+.cvss{font-size:11.5px;margin:6px 0 0}
+.cvss code{font-family:ui-monospace,monospace;font-size:11px;background:var(--card-2);padding:1px 5px;border-radius:4px;word-break:break-all}
 .two{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 @media (max-width:720px){.two{grid-template-columns:1fr}}
 .callout{border-left:3px solid var(--critical);background:#fdf5f5;padding:10px 14px;margin:12px 0;font-size:12.5px;color:var(--ink2)}
@@ -164,8 +168,9 @@ footer{padding:20px 32px 40px;border-top:1px solid var(--line);color:var(--muted
     <div class="frow">
       <span>Finding #{{.ID}}</span>
       <span>Status: <strong>{{.Status}}</strong></span>
-      <span>Mapping: <strong>{{.MapStatus}}</strong></span>
+      {{if .MapStatus}}<span>Mapping: <strong>{{.MapStatus}}</strong></span>{{end}}
       {{if .VulnClass}}<span>Class: {{.VulnClass}}</span>{{end}}
+      {{if .CVSS}}<span>CVSS v3.1: <strong>{{.CVSS}}</strong></span>{{end}}
     </div>
     <div class="frow">
       {{if .MITRE}}<span class="tag">ATT&amp;CK {{.MITRE}} · {{.MITREName}}</span>{{end}}
@@ -173,21 +178,30 @@ footer{padding:20px 32px 40px;border-top:1px solid var(--line);color:var(--muted
       {{if .Method}}<span class="tag">{{.Method}}</span>{{end}}
       {{if .Endpoint}}<span class="tag">{{.Endpoint}}</span>{{end}}
     </div>
+    {{if .CVSSVector}}<p class="muted cvss">Base vector: <code>{{.CVSSVector}}</code> — the score is
+    derived from this vector and the finding's class, deterministically. Override the vector in the
+    finding record if this deployment changes the impact.</p>{{end}}
     {{if .Summary}}<p>{{.Summary}}</p>{{end}}
     {{if .Command}}<h3>Reproduction command</h3><pre>{{.Command}}</pre>{{end}}
     {{if .ShotBefore}}
     <h3>Evidence — before / after</h3>
+    <p class="muted">Each image links to the full-size capture. "After" is marked executed only when the
+    DOM assertion flipped false→true in this origin, not because the pixels look different.</p>
     <div class="two">
       <div class="shot">
-        {{if .ShotBefore}}<img src="{{.ShotBefore}}" alt="before"><div class="cap">BEFORE · payload absent</div>{{end}}
+        {{if .ShotBefore}}<a href="{{.ShotBefore}}" target="_blank"><img src="{{.ShotBefore}}" alt="before"></a><div class="cap">BEFORE · payload absent</div>{{end}}
       </div>
       <div class="shot">
-        {{if .ShotAfter}}<img src="{{.ShotAfter}}" alt="after"><div class="cap">AFTER · payload executed</div>{{end}}
+        {{if .ShotAfter}}<a href="{{.ShotAfter}}" target="_blank"><img src="{{.ShotAfter}}" alt="after"></a><div class="cap">AFTER · {{if .MapStatus}}{{.MapStatus}}{{else}}capture{{end}}</div>{{end}}
       </div>
     </div>
     {{else if .ShotPath}}
     <h3>Evidence</h3>
-    <div class="shot"><img src="{{.ShotPath}}" alt="evidence"><div class="cap">{{.ShotHash}}</div></div>
+    <div class="shot"><a href="{{.ShotPath}}" target="_blank"><img src="{{.ShotPath}}" alt="evidence"></a><div class="cap">{{.ShotHash}}</div></div>
+    {{end}}
+    {{if .Remediation}}
+    <h3>Remediation</h3>
+    <p>{{.Remediation}}</p>
     {{end}}
     {{if .Note}}<p class="muted">{{.Note}}</p>{{end}}
   </div>
