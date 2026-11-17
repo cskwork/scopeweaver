@@ -1152,10 +1152,18 @@ func (e *Engine) runIntent(ctx context.Context, t *Task, name string, worker *ag
 		state = "exhausted"
 		log.Printf(locale.Text(locale.FromContext(ctx), "[worker %s] intent %d timed out (exhausted), saved %s after settlement"), name, intent.ID, wrote)
 	}
-	if state == "blocked" && isTaskLLMChainExhausted(err) {
-		_ = t.Store.SetIntentBlockedReason(intent.ID, db.IntentBlockedLLMQuota)
-		// A blocked-with-quota intent is terminal for this worker; its own
-		// blocked reason is the durable record, so no CAS is attempted.
+	// Every blocked intent must carry a reason: a NULL blocked_reason makes the
+	// block indistinguishable from "never attempted" when triaging the graph.
+	// Quota exhaustion keeps its own category so ReopenIntentsByBlockedReason can
+	// batch-reopen exactly those after a provider recovers.
+	if state == "blocked" {
+		blockReason := db.IntentBlockedWorkerError
+		if isTaskLLMChainExhausted(err) {
+			blockReason = db.IntentBlockedLLMQuota
+		}
+		if stateErr := t.Store.SetIntentBlockedReason(intent.ID, blockReason); stateErr != nil {
+			log.Printf(locale.Text(locale.FromContext(ctx), "[worker %s] task %s intent #%d could not persist blocked reason %s: %v"), name, t.ID, intent.ID, blockReason, stateErr)
+		}
 	} else {
 		if stateErr := transitionIntentState(t.Store, intent.ID, "running", state); stateErr != nil {
 			// A failed terminal CAS means the intent is no longer 'running': another

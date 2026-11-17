@@ -10,6 +10,12 @@ import (
 
 const IntentBlockedLLMQuota = "llm_quota_exhausted"
 
+// IntentBlockedWorkerError marks an intent that the worker failed on for a reason
+// other than quota exhaustion. It is stored as a stable category (not the raw
+// error text, which already lands in server_logs) so ReopenIntentsByBlockedReason
+// can still batch-reopen by exact match.
+const IntentBlockedWorkerError = "worker_error"
+
 // TaskLLMProfile is one ordered entry in a task's explicit failover chain.
 type TaskLLMProfile struct {
 	ProfileID   int64      `json:"profile_id"`

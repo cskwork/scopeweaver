@@ -125,8 +125,15 @@ func cvssScore(v string) float64 {
 		iss = 1 - (1-cia)*(1-iia)*(1-aia)
 		impact = 6.42 * iss
 	} else {
+		// v3.1 changed-scope impact: 7.52*(ISS-0.029) - 3.25*(ISS-0.02)^15.
+		// The exponent is 15, not 3 — using 3 under-scores every scope-changing
+		// finding (a reflected XSS scored 5.8 instead of 6.1).
 		iss = 1 - (1-cia)*(1-iia)*(1-aia)
-		impact = 7.52*(iss-0.029) - 3.25*(iss-0.02)*(iss-0.02)*(iss-0.02)
+		d := iss - 0.02
+		if d < 0 {
+			d = 0
+		}
+		impact = 7.52*(iss-0.029) - 3.25*pow15(d)
 	}
 	exploit := 8.22 * av * ac * prUnchanged * ui
 	if m["S"] == "C" {
@@ -136,9 +143,31 @@ func cvssScore(v string) float64 {
 		return 0
 	}
 	if m["S"] == "U" {
-		return round1(min3(impact+exploit, 10))
+		return roundup1(min3(impact+exploit, 10))
 	}
-	return round1(min3(1.08*(impact+exploit), 10))
+	return roundup1(min3(1.08*(impact+exploit), 10))
+}
+
+// pow15 is x^15 by squaring, avoiding a float-pow dependency for one exponent.
+func pow15(x float64) float64 {
+	x2 := x * x
+	x4 := x2 * x2
+	x8 := x4 * x4
+	return x8 * x4 * x2 * x // 8+4+2+1
+}
+
+// roundup1 is the CVSS-mandated roundup: the smallest number with one decimal
+// that is >= v. The calculator rounds to nearest, which reads one notch low on
+// some vectors and breaks comparability with nvd/cvss-calculator.
+func roundup1(v float64) float64 {
+	// guard against float representation (6.007 landing as 6.0069999)
+	const eps = 1e-9
+	scaled := v * 10
+	floored := float64(int(scaled))
+	if scaled-floored > eps {
+		floored++
+	}
+	return floored / 10
 }
 
 func round1(v float64) float64 { return float64(int(v*10+0.5)) / 10 }
