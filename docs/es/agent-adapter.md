@@ -17,7 +17,7 @@ export SCOPEWEAVER_PASSWORD='your-existing-admin-password'
 
 La contraseña inicia sesión como el administrador `ARTEX` existente. El JWT devuelto queda en memoria. También puedes establecer `SCOPEWEAVER_TOKEN` a un JWT existente, que prevalece. Los tokens caducados/no válidos dan error y no se sustituyen silenciosamente. Conserva credenciales en entorno o gestor de secretos; no las confirmes en configuración del cliente.
 
-Lecturas activadas por defecto. Para crear y pausar/reanudar tareas, establece explícitamente `SCOPEWEAVER_ALLOW_WRITES=true` antes de iniciar. Crear programa trabajo inmediatamente si hay LLM configurado. Mantén las [restricciones de uso aislado local](../../README.es.md#licencia-y-exención-de-responsabilidad) y confirma el alcance antes de crear.
+Lecturas activadas por defecto. Para crear y pausar/reanudar tareas, establece explícitamente `SCOPEWEAVER_ALLOW_WRITES=true` antes de iniciar. Crear programa trabajo inmediatamente si hay LLM configurado. Confirma el alcance antes de crear.
 
 ### Claude Code
 

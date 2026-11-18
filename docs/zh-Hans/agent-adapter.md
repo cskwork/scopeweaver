@@ -27,7 +27,7 @@ export SCOPEWEAVER_PASSWORD='your-existing-admin-password'
 
 密码用于登录后端既有的 `ARTEX` 管理员帐号，返回 JWT 仅保留在内存。亦可将 `SCOPEWEAVER_TOKEN` 设为既有登录 JWT；提供的令牌优先。过期／无效令牌会明确报错，不会默默替换。凭证请存于环境或秘密管理工具，勿提交至客户端配置。
 
-默认启用读取。若要创建任务与暂停／继续，启动适配器前须明确设 `SCOPEWEAVER_ALLOW_WRITES=true`。后端已配置 LLM 时，创建任务会立即排程工作。请遵守专案[本地隔离使用限制](../../README.zh-Hans.md#license-and-disclaimer)，创建任务前确认预期范围。
+默认启用读取。若要创建任务与暂停／继续，启动适配器前须明确设 `SCOPEWEAVER_ALLOW_WRITES=true`。后端已配置 LLM 时，创建任务会立即排程工作。创建任务前确认预期范围。
 
 <a id="claude-code"></a>
 

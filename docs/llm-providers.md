@@ -429,6 +429,4 @@ Only models whose [Ollama library](https://ollama.com/library) page lists the `t
 
 **Observed limitation (2026-10-15):** a declared `tools` capability does not guarantee wire tool calls. In branch testing, `qwen2.5-coder:7b` wrote tool-shaped JSON as plain text, so no tool ran, and `qwen3:4b` passed the tool-call diagnostic but did not complete long autonomous tasks. Treat small models as unvalidated for the main agent; see [Verification](VERIFICATION.md#autonomous-task-reliability-is-not-validated).
 
-The usage restrictions in the [README](../README.md) still apply: run ScopeWeaver only in a locally isolated environment, whichever provider you choose.
-
 [한국어 안내](ko/llm-providers.md)

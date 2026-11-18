@@ -7,8 +7,6 @@ and tests.
 
 ## Before you start
 
-- Read the [usage restrictions](README.md#license-and-disclaimer). Contributions must not add
-  features that target real online systems or weaken those restrictions.
 - For larger changes, open an issue first so we can agree on the approach.
 - Keep each pull request focused on one topic. Smaller PRs are reviewed faster.
 

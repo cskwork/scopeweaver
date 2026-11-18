@@ -427,6 +427,4 @@ Solo se listan modelos cuya página de [biblioteca Ollama](https://ollama.com/li
 
 **Limitación observada (2026-10-15):** declarar `tools` no garantiza llamadas en el protocolo. En pruebas de rama, `qwen2.5-coder:7b` escribió JSON de herramientas como texto plano y no ejecutó herramientas; `qwen3:4b` pasó el diagnóstico pero no completó tareas autónomas largas. Considera los modelos pequeños sin validar como agente principal; consulta [Verificación](VERIFICATION.md#la-fiabilidad-de-tareas-autónomas-no-está-validada).
 
-Las restricciones del [README](../../README.es.md) siguen vigentes: ejecuta ScopeWeaver solo en un entorno aislado local, elijas el proveedor que elijas.
-
 [Guía en coreano](../ko/llm-providers.md)
