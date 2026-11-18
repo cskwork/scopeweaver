@@ -19,7 +19,7 @@ export SCOPEWEAVER_PASSWORD='your-existing-admin-password'
 
 비밀번호로 백엔드의 기존 관리자 사용자 `ARTEX`에 로그인합니다. 응답으로 받은 JWT는 메모리에만 유지합니다. 기존 로그인 JWT를 `SCOPEWEAVER_TOKEN`으로 제공할 수도 있으며, 토큰을 제공하면 비밀번호보다 우선합니다. 만료되거나 유효하지 않은 토큰은 오류를 반환하며 다른 토큰으로 자동 교체하지 않습니다. 자격 증명은 환경 변수나 비밀 관리 도구에 보관하고 클라이언트 설정과 함께 커밋하지 마세요.
 
-조회는 기본으로 허용합니다. 작업 생성과 일시 중지·재개를 허용하려면 어댑터 실행 전에 `SCOPEWEAVER_ALLOW_WRITES=true`를 명시적으로 설정하세요. 백엔드에 LLM이 설정되어 있으면 작업 생성 즉시 실행을 예약합니다. 프로젝트의 [로컬 격리 사용 제한](../../README.md#license-and-disclaimer)을 지키고 작업 생성 전에 의도한 범위를 확인하세요.
+조회는 기본으로 허용합니다. 작업 생성과 일시 중지·재개를 허용하려면 어댑터 실행 전에 `SCOPEWEAVER_ALLOW_WRITES=true`를 명시적으로 설정하세요. 백엔드에 LLM이 설정되어 있으면 작업 생성 즉시 실행을 예약합니다. 작업 생성 전에 의도한 범위를 확인하세요.
 
 <a id="claude-code"></a>
 ### Claude Code

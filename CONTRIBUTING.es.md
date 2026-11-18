@@ -7,8 +7,6 @@ y pruebas.
 
 ## Antes de empezar
 
-- Lee las [restricciones de uso](README.es.md#licencia-y-exención-de-responsabilidad). Las contribuciones no deben añadir
-  funciones dirigidas a sistemas reales en línea ni debilitar esas restricciones.
 - Para cambios grandes, abre primero una incidencia para acordar el enfoque.
 - Mantén cada solicitud de cambio centrada en un tema. Las pequeñas se revisan más rápido.
 

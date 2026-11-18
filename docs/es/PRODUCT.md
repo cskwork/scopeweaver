@@ -23,7 +23,7 @@ Grafos compartidos de activos y de exploración por tarea vinculan objetivos con
 Aplicación autoalojada que requiere PostgreSQL y proveedor de modelos configurado aparte para ejecutar agentes. GitHub Pages aloja una introducción estática pública, no un servicio activo de pruebas ni backend.
 
 ## Capacidades y restricciones
-Funciones y configuración se basan en README.md, adapters/agent/README.md y código. La versión v0.1.0 ofrece cinco archivos de plataforma e imagen Docker multiarquitectura. El adaptador es una interfaz de control, no sustituye agentes ni convierte suscripciones en claves API. Las restricciones permiten investigación/validación aislada local y prohíben pruebas contra objetivos en línea. La discrepancia histórica de la prueba de resumen de alcance se corrigió en `75a706d`; consulta la verificación y limitaciones actuales. No afirmes éxito de toda la suite ni preparación para producción.
+Funciones y configuración se basan en README.md, adapters/agent/README.md y código. La versión v0.1.0 ofrece cinco archivos de plataforma e imagen Docker multiarquitectura. El adaptador es una interfaz de control, no sustituye agentes ni convierte suscripciones en claves API. La discrepancia histórica de la prueba de resumen de alcance se corrigió en `75a706d`; consulta la verificación y limitaciones actuales. No afirmes éxito de toda la suite ni preparación para producción.
 
 ## Compromisos de marca
 Conservar nombre ScopeWeaver y logo de cuadrícula. Las capturas establecen una identidad precisa y neutral con azul moderado. Inglés predeterminado y opciones coreana, china simplificada/tradicional, japonesa y española. Respetar autoría ARTEX y AGPL-3.0.

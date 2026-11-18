@@ -41,7 +41,7 @@
 <a id="capabilities-and-constraints"></a>
 
 ## 能力与限制
-功能与配置依据 README.md、adapters/agent/README.md 及代码。v0.1.0 提供五个平台封存档与多架构 Docker 镜像。适配器为控制界面，不取代内部智能体，也不会将编程订阅转为 API 密钥。仓库使用限制允许本地隔离研究／验证，禁止线上目标测试。历史遗留的后端范围概览不一致问题已在提交 `75a706d` 中修复。验证证据与限制请参阅[VERIFICATION.md](VERIFICATION.md)；这不代表目前全部测试皆已通过，也不代表已可供正式环境使用。
+功能与配置依据 README.md、adapters/agent/README.md 及代码。v0.1.0 提供五个平台封存档与多架构 Docker 镜像。适配器为控制界面，不取代内部智能体，也不会将编程订阅转为 API 密钥。历史遗留的后端范围概览不一致问题已在提交 `75a706d` 中修复。验证证据与限制请参阅[VERIFICATION.md](VERIFICATION.md)；这不代表目前全部测试皆已通过，也不代表已可供正式环境使用。
 
 <a id="brand-commitments"></a>
 

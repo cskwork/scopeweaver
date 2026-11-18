@@ -41,7 +41,7 @@
 <a id="capabilities-and-constraints"></a>
 
 ## 能力與限制
-功能與設定依據 README.md、adapters/agent/README.md 及程式碼。v0.1.0 提供五個平台封存檔與多架構 Docker 映像檔。配接器為控制介面，不取代內部代理程式，也不會將程式開發訂閱轉為 API 金鑰。儲存庫使用限制允許本機隔離研究／驗證，禁止線上目標測試。歷史遺留的後端範圍概覽不一致問題已在提交 `75a706d` 中修復。驗證證據與限制請參閱[VERIFICATION.md](VERIFICATION.md)；這不代表目前全部測試皆已通過，也不代表已可供正式環境使用。
+功能與設定依據 README.md、adapters/agent/README.md 及程式碼。v0.1.0 提供五個平台封存檔與多架構 Docker 映像檔。配接器為控制介面，不取代內部代理程式，也不會將程式開發訂閱轉為 API 金鑰。歷史遺留的後端範圍概覽不一致問題已在提交 `75a706d` 中修復。驗證證據與限制請參閱[VERIFICATION.md](VERIFICATION.md)；這不代表目前全部測試皆已通過，也不代表已可供正式環境使用。
 
 <a id="brand-commitments"></a>
 

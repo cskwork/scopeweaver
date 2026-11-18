@@ -501,6 +501,4 @@ Ollama 模型库没有 `qwen3:72b`、`llama3.2:8b`；`llama3.2` 提供 1B／3B�
 
 **已观察限制（2026-10-15）：** 声明 `tools` 不保证传输层工具呼叫。分支测试中，`qwen2.5-coder:7b` 将工具形状 JSON 当纯文字，因此无工具运行；`qwen3:4b` 通过工具诊断却无法完成长自主任务。小模型作主要代理仍未验证；见[验证](VERIFICATION.md#autonomous-task-reliability-is-not-validated)。
 
-无论供应商为何，[README](../../README.zh-Hans.md) 使用限制仍适用：仅在本地隔离环境运行 ScopeWeaver。
-
 [韩文指南](../ko/llm-providers.md)

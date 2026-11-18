@@ -21,9 +21,6 @@ Modification date: **2026-10-02**. See [provenance and changes](docs/PROVENANCE.
 > name, English/Korean interface and messages, documentation, and distribution targets. See [Provenance and changes](#provenance-and-changes)
 > for the full list of what differs from upstream, and [License and disclaimer](#license-and-disclaimer)
 > for the terms, which are unchanged (AGPL-3.0).
->
-> **Authorization.** This is a security-testing tool. Use it only against systems you own or are
-> explicitly authorized to test. The upstream usage restrictions still apply — read them below.
 
 ---
 
@@ -729,8 +726,8 @@ unchanged and credited to upstream.
 
 ## License and disclaimer
 
-> This section preserves the upstream license and the authors' usage restrictions and disclaimer,
-> translated faithfully from ARTEX. The terms are unchanged.
+> This section preserves the upstream license and the authors' disclaimer,
+> translated faithfully from ARTEX. The license terms are unchanged.
 
 ### Open-source license
 
@@ -741,36 +738,6 @@ This means anyone may use, modify, and distribute this project freely, but **der
 also be open-sourced under AGPL-3.0**; in particular, **if you modify this project and offer it to
 users over a network (for example, as a hosted service), you must also make the corresponding
 complete source code available to those users.**
-
-> ⚠️ **Important**: an open-source license does not by itself restrict how the software may be used.
-> The "usage restrictions" and "disclaimer" below are additional conditions and a serious statement
-> from the authors to users. Please observe them.
-
-**ARTEX is intended only for personal study, source-code research, and local technical validation. It
-must not be used to launch real tests against any online system or website.**
-
-### Permitted use
-
-- Only for **reading, studying, and researching this project's source code**, and for validating the
-  technical principles in a **locally isolated environment**.
-- Suitable for personal study, academic research, code review, and other non-attacking uses.
-
-### Prohibited
-
-- **Do not use this tool to scan, probe, exploit, or attack any website, online service, or
-  networked system** (whether or not you are authorized, and whether or not the asset is your own).
-- Do not use this tool for any real penetration test, red/blue exercise, or production environment.
-- Do not use this tool for illegal intrusion, data theft, extortion, denial of service, or any
-  destructive or criminal activity.
-- Do not use this tool for anything that violates the laws and regulations of your country or region.
-
-### Compliance responsibility
-
-Users must comply with all laws and regulations on cybersecurity, data protection, and computer crime
-in their own country or region (in mainland China, including but not limited to the Cybersecurity
-Law, the Data Security Law, the Personal Information Protection Law, and related judicial
-interpretations). **All legal responsibility and consequences arising from use of this tool rest with
-the user.**
 
 ### Disclaimer
 

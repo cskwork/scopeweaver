@@ -22,9 +22,6 @@ Fecha de modificación: **2026-10-02**. Consulta [procedencia y cambios](docs/es
 > para ver todas las diferencias con el original y [Licencia y exención de responsabilidad](#licencia-y-exención-de-responsabilidad)
 > para los términos, que no cambian (AGPL-3.0).
 >
-> **Autorización.** Esta es una herramienta de pruebas de seguridad. Úsala solo contra sistemas propios o
-> que tengas autorización explícita para probar. Las restricciones de uso originales siguen vigentes; léelas abajo.
-
 ---
 
 ## Idioma
@@ -728,8 +725,8 @@ sin cambios y con atribución al original.
 
 ## Licencia y exención de responsabilidad
 
-> Esta sección conserva la licencia original y las restricciones de uso y exención de responsabilidad de sus autores,
-> traducidas fielmente de ARTEX. Los términos no cambian.
+> Esta sección conserva la licencia original y la exención de responsabilidad de sus autores,
+> traducidas fielmente de ARTEX. Los términos de la licencia no cambian.
 
 ### Licencia de código abierto
 
@@ -740,36 +737,6 @@ Esto significa que cualquiera puede usar, modificar y distribuir libremente el p
 publicarse como código abierto bajo AGPL-3.0**; en particular, **si modificas este proyecto y lo ofreces a
 usuarios por una red (por ejemplo, como servicio alojado), debes proporcionar también a esos usuarios el
 código fuente correspondiente completo.**
-
-> ⚠️ **Importante**: una licencia de código abierto no restringe por sí misma cómo se puede usar el software.
-> Las «restricciones de uso» y la «exención de responsabilidad» siguientes son condiciones adicionales y una declaración seria
-> de los autores a los usuarios. Respétalas.
-
-**ARTEX está destinado solo al estudio personal, investigación del código fuente y validación técnica local. No
-debe usarse para lanzar pruebas reales contra ningún sistema o sitio web en línea.**
-
-### Uso permitido
-
-- Solo para **leer, estudiar e investigar el código fuente de este proyecto** y validar sus
-  principios técnicos en un **entorno aislado local**.
-- Adecuado para estudio personal, investigación académica, revisión de código y otros usos no ofensivos.
-
-### Prohibiciones
-
-- **No uses esta herramienta para escanear, sondear, explotar ni atacar ningún sitio web, servicio en línea ni
-  sistema en red** (tengas o no autorización y sea o no tuyo el activo).
-- No uses esta herramienta para pruebas de penetración reales, ejercicios rojo/azul ni entornos de producción.
-- No uses esta herramienta para intrusión ilegal, robo de datos, extorsión, denegación de servicio ni ninguna
-  actividad destructiva o delictiva.
-- No uses esta herramienta para nada que infrinja las leyes y normas de tu país o región.
-
-### Responsabilidad de cumplimiento
-
-Los usuarios deben cumplir todas las leyes y normas sobre ciberseguridad, protección de datos y delitos informáticos
-de su país o región (en China continental, incluidas entre otras la Ley de Ciberseguridad,
-la Ley de Seguridad de Datos, la Ley de Protección de Información Personal y las interpretaciones judiciales
-relacionadas). **Toda responsabilidad legal y consecuencias derivadas del uso de esta herramienta corresponden al
-usuario.**
 
 ### Exención de responsabilidad
 
